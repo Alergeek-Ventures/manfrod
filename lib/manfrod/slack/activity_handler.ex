@@ -35,8 +35,8 @@ defmodule Manfrod.Slack.ActivityHandler do
 
   @impl true
   def init(bot_token) do
-    Events.subscribe()
-    Logger.info("Slack.ActivityHandler started, subscribed to activity events")
+    Events.subscribe_global()
+    Logger.info("Slack.ActivityHandler started, subscribed to global activity events")
     {:ok, %{bot_token: bot_token, pending: %{}}}
   end
 

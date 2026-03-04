@@ -4,12 +4,44 @@ defmodule Manfrod.Factory do
   """
 
   alias Manfrod.Repo
+  alias Manfrod.Accounts.User
   alias Manfrod.Memory.{Conversation, Message, Node, Link}
 
   def fake_embedding(seed \\ "test") do
     :rand.seed(:exsss, {:erlang.phash2(seed), 0, 0})
     for _ <- 1..1024, do: :rand.uniform() - 0.5
   end
+
+  # Users
+
+  def insert_user!(attrs \\ %{}) do
+    defaults = %{
+      slack_id: "U#{System.unique_integer([:positive])}",
+      name: "Test User #{System.unique_integer([:positive])}"
+    }
+
+    %User{}
+    |> User.changeset(Map.merge(defaults, attrs))
+    |> Repo.insert!()
+  end
+
+  @doc """
+  Returns a test user, creating one if needed.
+  Stores the user in the process dictionary to reuse across a single test.
+  """
+  def test_user do
+    case Process.get(:test_user) do
+      nil ->
+        user = insert_user!()
+        Process.put(:test_user, user)
+        user
+
+      user ->
+        user
+    end
+  end
+
+  def test_user_id, do: test_user().id
 
   # Messages
 
@@ -25,7 +57,7 @@ defmodule Manfrod.Factory do
   end
 
   def insert_message!(attrs \\ %{}) do
-    %Message{}
+    %Message{user_id: test_user_id()}
     |> Message.changeset(message_attrs(attrs))
     |> Repo.insert!()
   end
@@ -46,7 +78,7 @@ defmodule Manfrod.Factory do
   end
 
   def insert_conversation!(attrs \\ %{}) do
-    %Conversation{}
+    %Conversation{user_id: test_user_id()}
     |> Conversation.changeset(conversation_attrs(attrs))
     |> Repo.insert!()
   end
@@ -63,7 +95,7 @@ defmodule Manfrod.Factory do
   end
 
   def insert_node!(attrs \\ %{}) do
-    %Node{}
+    %Node{user_id: test_user_id()}
     |> Node.changeset(node_attrs(attrs))
     |> Repo.insert!()
   end

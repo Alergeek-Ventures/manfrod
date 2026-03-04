@@ -3,7 +3,7 @@ defmodule Manfrod.Memory.Extractor do
   Extracts knowledge nodes and links from conversations via LLM.
 
   Flow:
-  1. Fetch pending messages from DB
+  1. Fetch pending messages for the user from DB
   2. Generate conversation summary
   3. Close conversation (create record, link messages)
   4. Extract facts from conversation
@@ -38,45 +38,47 @@ defmodule Manfrod.Memory.Extractor do
   """
 
   @doc """
-  Fire-and-forget extraction triggered on idle.
+  Fire-and-forget extraction triggered on idle for a specific user.
   Fetches pending messages from DB, processes them, stores results.
   """
-  def extract_async do
-    Task.start(fn -> extract_and_store() end)
+  def extract_async(user_id) do
+    Task.start(fn -> extract_and_store(user_id) end)
     :ok
   end
 
   @doc """
-  Synchronous extraction and storage.
+  Synchronous extraction and storage for a specific user.
   Returns {:ok, conversation, node_ids} or {:error, reason}.
   """
-  def extract_and_store do
-    messages = Memory.get_pending_messages()
+  def extract_and_store(user_id) do
+    messages = Memory.get_pending_messages(user_id)
 
     if messages == [] do
-      Logger.debug("Extractor: no pending messages to process")
+      Logger.debug("Extractor: no pending messages to process for user #{user_id}")
       {:ok, nil, []}
     else
-      do_extract_and_store(messages)
+      do_extract_and_store(user_id, messages)
     end
   end
 
-  defp do_extract_and_store(messages) do
+  defp do_extract_and_store(user_id, messages) do
     conversation_text = format_messages(messages)
 
     Events.broadcast(:extraction_started, %{
+      user_id: user_id,
       source: :extractor,
       meta: %{message_count: length(messages)}
     })
 
     with {:ok, summary} <- generate_summary(conversation_text),
-         {:ok, conversation} <- Memory.close_conversation(%{summary: summary}),
-         {:ok, node_ids} <- extract_and_create_nodes(conversation_text, conversation.id) do
+         {:ok, conversation} <- Memory.close_conversation(user_id, %{summary: summary}),
+         {:ok, node_ids} <- extract_and_create_nodes(user_id, conversation_text, conversation.id) do
       Logger.info(
-        "Extracted conversation #{conversation.id}: #{length(node_ids)} nodes, summary: #{String.slice(summary, 0, 50)}..."
+        "Extracted conversation #{conversation.id} for user #{user_id}: #{length(node_ids)} nodes, summary: #{String.slice(summary, 0, 50)}..."
       )
 
       Events.broadcast(:extraction_completed, %{
+        user_id: user_id,
         source: :extractor,
         meta: %{
           conversation_id: conversation.id,
@@ -88,13 +90,14 @@ defmodule Manfrod.Memory.Extractor do
       {:ok, conversation, node_ids}
     else
       {:error, :no_pending_messages} ->
-        Logger.debug("Extractor: no pending messages (race condition)")
+        Logger.debug("Extractor: no pending messages (race condition) for user #{user_id}")
         {:ok, nil, []}
 
       {:error, reason} = err ->
-        Logger.error("Extraction failed: #{inspect(reason)}")
+        Logger.error("Extraction failed for user #{user_id}: #{inspect(reason)}")
 
         Events.broadcast(:extraction_failed, %{
+          user_id: user_id,
           source: :extractor,
           meta: %{reason: inspect(reason)}
         })
@@ -126,7 +129,7 @@ defmodule Manfrod.Memory.Extractor do
     end
   end
 
-  defp extract_and_create_nodes(conversation_text, conversation_id) do
+  defp extract_and_create_nodes(user_id, conversation_text, conversation_id) do
     with {:ok, %{"nodes" => [_ | _] = texts, "links" => links}} <-
            extract_facts(conversation_text),
          {:ok, embeddings} <- Voyage.embed(texts) do
@@ -135,7 +138,7 @@ defmodule Manfrod.Memory.Extractor do
         |> Enum.zip(embeddings)
         |> Enum.map(fn {content, embedding} ->
           {:ok, node} =
-            Memory.create_node(%{
+            Memory.create_node(user_id, %{
               content: content,
               embedding: embedding,
               conversation_id: conversation_id
@@ -146,10 +149,10 @@ defmodule Manfrod.Memory.Extractor do
         end)
 
       for [a, b] <- links, a < length(node_ids), b < length(node_ids) do
-        Memory.create_link(Enum.at(node_ids, a), Enum.at(node_ids, b))
+        Memory.create_link(user_id, Enum.at(node_ids, a), Enum.at(node_ids, b))
       end
 
-      Logger.info("Created #{length(node_ids)} nodes, #{length(links)} links")
+      Logger.info("Created #{length(node_ids)} nodes, #{length(links)} links for user #{user_id}")
       {:ok, node_ids}
     else
       {:ok, %{"nodes" => []}} ->

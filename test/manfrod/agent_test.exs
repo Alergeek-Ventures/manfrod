@@ -5,29 +5,25 @@ defmodule Manfrod.AgentTest do
   alias Manfrod.Events
 
   @moduletag :db
+  @moduletag :slow
 
-  describe "state structure" do
-    test "has inbox field" do
-      pid = Process.whereis(Agent)
-      # Use longer timeout as agent might be busy with LLM call
-      state = :sys.get_state(pid, 30_000)
+  # These tests require a running LLM backend and are skipped in CI.
+  # They verify the per-user Agent lifecycle: start → process → respond → idle.
 
-      assert Map.has_key?(state, :inbox)
-      assert Map.has_key?(state, :messages)
-      assert Map.has_key?(state, :flush_timer)
-      assert is_list(state.inbox)
-      assert is_list(state.messages)
-    end
+  defp test_user_id_for_agent do
+    user = insert_user!(%{slack_id: "U_AGENT_TEST", name: "Agent Test User"})
+    user.id
   end
 
   describe "event broadcasting" do
     setup do
-      Events.subscribe()
-      :ok
+      user_id = test_user_id_for_agent()
+      Events.subscribe(user_id)
+      {:ok, user_id: user_id}
     end
 
-    test "broadcasts :thinking when processing message" do
-      Agent.send_message(%{
+    test "broadcasts :thinking when processing message", %{user_id: user_id} do
+      Agent.send_message(user_id, %{
         content: "Test message #{System.unique_integer()}",
         source: :test,
         reply_to: self()
@@ -37,8 +33,8 @@ defmodule Manfrod.AgentTest do
       assert_receive {:activity, %{type: :thinking, source: :test}}, 60_000
     end
 
-    test "broadcasts :responding after processing" do
-      Agent.send_message(%{
+    test "broadcasts :responding after processing", %{user_id: user_id} do
+      Agent.send_message(user_id, %{
         content: "Quick test #{System.unique_integer()}",
         source: :test,
         reply_to: self()
@@ -52,13 +48,13 @@ defmodule Manfrod.AgentTest do
 
   describe "interrupt behavior" do
     setup do
-      Events.subscribe()
-      :ok
+      user_id = test_user_id_for_agent()
+      Events.subscribe(user_id)
+      {:ok, user_id: user_id}
     end
 
-    @tag :slow
     @tag :interrupt
-    test "new message during processing triggers interrupt" do
+    test "new message during processing triggers interrupt", %{user_id: user_id} do
       # This test verifies the interrupt mechanism by sending messages
       # in rapid succession and checking that:
       # 1. Messages queue up in inbox
@@ -66,7 +62,7 @@ defmodule Manfrod.AgentTest do
       # 3. All messages get processed
 
       # Send first message
-      Agent.send_message(%{
+      Agent.send_message(user_id, %{
         content: "First message #{System.unique_integer()}",
         source: :test,
         reply_to: self()
@@ -76,7 +72,7 @@ defmodule Manfrod.AgentTest do
       assert_receive {:activity, %{type: :thinking, source: :test}}, 60_000
 
       # Immediately send second message while first is processing
-      Agent.send_message(%{
+      Agent.send_message(user_id, %{
         content: "Second message (interrupt) #{System.unique_integer()}",
         source: :test,
         reply_to: self()
@@ -107,27 +103,40 @@ defmodule Manfrod.AgentTest do
 
   describe "loop behavior" do
     test "empty inbox loop is no-op" do
-      pid = Process.whereis(Agent)
+      user_id = test_user_id_for_agent()
+
+      # Start agent by sending a message, then look up the pid
+      {:ok, pid} =
+        DynamicSupervisor.start_child(
+          Manfrod.Agent.DynamicSupervisor,
+          {Manfrod.Agent.Server, user_id}
+        )
 
       # Send :loop - should be safe even during work
       send(pid, :loop)
 
       # If inbox is empty, this is a no-op
       # We can't easily verify, but at least it shouldn't crash
-      Process.sleep(100)
-      assert Process.alive?(pid)
+      ref = Process.monitor(pid)
+      refute_receive {:DOWN, ^ref, :process, ^pid, _}, 200
     end
 
     test "multiple :loop messages don't cause issues" do
-      pid = Process.whereis(Agent)
+      user_id = test_user_id_for_agent()
+
+      {:ok, pid} =
+        DynamicSupervisor.start_child(
+          Manfrod.Agent.DynamicSupervisor,
+          {Manfrod.Agent.Server, user_id}
+        )
 
       # Send multiple :loop messages rapidly
       for _ <- 1..10 do
         send(pid, :loop)
       end
 
-      Process.sleep(100)
-      assert Process.alive?(pid)
+      ref = Process.monitor(pid)
+      refute_receive {:DOWN, ^ref, :process, ^pid, _}, 200
     end
   end
 

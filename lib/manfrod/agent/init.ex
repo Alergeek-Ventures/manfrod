@@ -30,17 +30,17 @@ defmodule Manfrod.Agent.Init do
     * `:event_types` - filter event types (default: all)
     * `:sample_size` - random graph sample size (default: 5)
   """
-  def build_context(opts \\ []) do
+  def build_context(user_id, opts \\ []) do
     since = Keyword.get(opts, :since, default_since())
     event_limit = Keyword.get(opts, :event_limit, 100)
     event_types = Keyword.get(opts, :event_types, nil)
     sample_size = Keyword.get(opts, :sample_size, 5)
 
-    soul = Memory.get_soul()
+    soul = Memory.get_soul(user_id)
 
     linked_notes =
       if soul do
-        Memory.get_node_links(soul.id)
+        Memory.get_node_links(user_id, soul.id)
       else
         []
       end
@@ -52,7 +52,7 @@ defmodule Manfrod.Agent.Init do
       end)
 
     recent_events = Store.get_events_since(since, event_opts)
-    graph_sample = Memory.get_random_nodes(sample_size)
+    graph_sample = Memory.get_random_nodes(user_id, sample_size)
 
     %{
       soul: soul,
@@ -83,7 +83,7 @@ defmodule Manfrod.Agent.Init do
       # Assistant gets just soul + linked notes
       Init.build_system_prompt(include_events: false, include_samples: false)
   """
-  def build_system_prompt(opts \\ []) do
+  def build_system_prompt(user_id, opts \\ []) do
     include_events = Keyword.get(opts, :include_events, true)
     include_samples = Keyword.get(opts, :include_samples, true)
 
@@ -93,7 +93,7 @@ defmodule Manfrod.Agent.Init do
       |> Keyword.put_new(:event_limit, if(include_events, do: 100, else: 0))
       |> Keyword.put_new(:sample_size, if(include_samples, do: 5, else: 0))
 
-    ctx = build_context(context_opts)
+    ctx = build_context(user_id, context_opts)
     format_context(ctx)
   end
 

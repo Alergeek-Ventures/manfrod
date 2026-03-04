@@ -8,6 +8,7 @@ defmodule Manfrod.Memory.Node do
   use Ecto.Schema
   import Ecto.Changeset
 
+  alias Manfrod.Accounts.User
   alias Manfrod.Memory.Conversation
 
   @primary_key {:id, :binary_id, autogenerate: true}
@@ -18,6 +19,7 @@ defmodule Manfrod.Memory.Node do
     field :embedding, Pgvector.Ecto.Vector
     field :processed_at, :utc_datetime
 
+    belongs_to :user, User
     belongs_to :conversation, Conversation
 
     timestamps()

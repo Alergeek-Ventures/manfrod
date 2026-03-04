@@ -9,7 +9,7 @@ defmodule Manfrod.Agent.TypingRefresher do
 
   ## Usage
 
-      {:ok, pid} = TypingRefresher.start(event_ctx)
+      {:ok, pid} = TypingRefresher.start(user_id, event_ctx)
       result = LLM.generate_text(messages, opts)
       TypingRefresher.stop(pid)
   """
@@ -19,14 +19,14 @@ defmodule Manfrod.Agent.TypingRefresher do
   @llm_events [:llm_call_started, :llm_retry, :llm_fallback]
 
   @doc """
-  Start a typing refresher process for the given event context.
+  Start a typing refresher process for the given user and event context.
 
-  The process subscribes to the event bus and relays LLM events as :thinking
-  events to trigger typing indicator refresh.
+  The process subscribes to the user's PubSub topic and relays LLM events
+  as :thinking events to trigger typing indicator refresh.
   """
-  def start(event_ctx) do
+  def start(user_id, event_ctx) do
     parent = self()
-    pid = spawn_link(fn -> run(event_ctx, parent) end)
+    pid = spawn_link(fn -> run(user_id, event_ctx, parent) end)
 
     receive do
       {:subscribed, ^pid} -> {:ok, pid}
@@ -43,8 +43,8 @@ defmodule Manfrod.Agent.TypingRefresher do
     :ok
   end
 
-  defp run(event_ctx, parent) do
-    Events.subscribe()
+  defp run(user_id, event_ctx, parent) do
+    Events.subscribe(user_id)
     send(parent, {:subscribed, self()})
     loop(event_ctx)
   end

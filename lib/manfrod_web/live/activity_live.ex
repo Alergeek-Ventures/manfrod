@@ -43,7 +43,7 @@ defmodule ManfrodWeb.ActivityLive do
 
     # Only subscribe to live events if not filtered
     if connected?(socket) and is_nil(filter) do
-      Events.subscribe()
+      Events.subscribe_global()
     end
 
     # Load events based on filter

@@ -5,6 +5,9 @@ defmodule Manfrod.Memory do
 
   Also manages conversations and messages for provenance tracking.
 
+  All data is scoped by `user_id` — each user has their own isolated
+  knowledge graph, conversations, and reminders.
+
   All mutating operations emit events to the event bus for audit visibility.
   """
 
@@ -28,21 +31,21 @@ defmodule Manfrod.Memory do
   # --- Messages ---
 
   @doc """
-  Create a pending message (conversation_id = nil).
+  Create a pending message (conversation_id = nil) for a user.
   """
-  def create_message(attrs) do
-    %Message{}
+  def create_message(user_id, attrs) do
+    %Message{user_id: user_id}
     |> Message.changeset(attrs)
     |> Repo.insert()
   end
 
   @doc """
-  Get all pending messages (not yet assigned to a conversation).
+  Get all pending messages for a user (not yet assigned to a conversation).
   Ordered by received_at ascending.
   """
-  def get_pending_messages do
+  def get_pending_messages(user_id) do
     Message
-    |> where([m], is_nil(m.conversation_id))
+    |> where([m], m.user_id == ^user_id and is_nil(m.conversation_id))
     |> order_by([m], asc: m.received_at)
     |> Repo.all()
   end
@@ -50,14 +53,14 @@ defmodule Manfrod.Memory do
   # --- Conversations ---
 
   @doc """
-  Close a conversation: create conversation record and link all pending messages.
+  Close a conversation for a user: create conversation record and link all pending messages.
   Returns {:ok, conversation} or {:error, changeset}.
 
   Expects attrs with :summary key. started_at and ended_at are computed from messages.
   """
-  def close_conversation(attrs) do
+  def close_conversation(user_id, attrs) do
     Repo.transaction(fn ->
-      messages = get_pending_messages()
+      messages = get_pending_messages(user_id)
 
       if messages == [] do
         Repo.rollback(:no_pending_messages)
@@ -71,7 +74,9 @@ defmodule Manfrod.Memory do
         |> Map.put(:started_at, started_at)
         |> Map.put(:ended_at, ended_at)
 
-      case %Conversation{} |> Conversation.changeset(conversation_attrs) |> Repo.insert() do
+      case %Conversation{user_id: user_id}
+           |> Conversation.changeset(conversation_attrs)
+           |> Repo.insert() do
         {:ok, conversation} ->
           # Link all pending messages to this conversation
           message_ids = Enum.map(messages, & &1.id)
@@ -89,24 +94,23 @@ defmodule Manfrod.Memory do
   end
 
   @doc """
-  Get a conversation with its messages preloaded.
+  Get a conversation with its messages preloaded, scoped to a user.
   """
-  def get_conversation_with_messages(conversation_id) do
+  def get_conversation_with_messages(user_id, conversation_id) do
     Conversation
-    |> where([c], c.id == ^conversation_id)
+    |> where([c], c.user_id == ^user_id and c.id == ^conversation_id)
     |> preload(:messages)
     |> Repo.one()
   end
 
   @doc """
-  Get conversations from the last N hours with their messages preloaded.
-  Useful for self-improvement retrospectives.
+  Get conversations for a user from the last N hours with their messages preloaded.
   """
-  def get_recent_conversations(hours \\ 24) do
+  def get_recent_conversations(user_id, hours \\ 24) do
     cutoff = DateTime.utc_now() |> DateTime.add(-hours, :hour)
 
     Conversation
-    |> where([c], c.ended_at >= ^cutoff)
+    |> where([c], c.user_id == ^user_id and c.ended_at >= ^cutoff)
     |> order_by([c], desc: c.ended_at)
     |> preload(:messages)
     |> Repo.all()
@@ -115,18 +119,19 @@ defmodule Manfrod.Memory do
   # --- Soul ---
 
   @doc """
-  Check if the zettelkasten has a soul (any nodes exist).
+  Check if the user's zettelkasten has a soul (any nodes exist).
   """
-  def has_soul? do
-    Repo.exists?(Node)
+  def has_soul?(user_id) do
+    Repo.exists?(from(n in Node, where: n.user_id == ^user_id))
   end
 
   @doc """
-  Get the soul - the first node by insertion time.
-  Returns nil if no nodes exist.
+  Get the soul for a user - the first node by insertion time.
+  Returns nil if no nodes exist for the user.
   """
-  def get_soul do
+  def get_soul(user_id) do
     Node
+    |> where([n], n.user_id == ^user_id)
     |> order_by([n], asc: n.inserted_at)
     |> limit(1)
     |> Repo.one()
@@ -134,15 +139,16 @@ defmodule Manfrod.Memory do
 
   # --- Nodes ---
 
-  def create_node(attrs) do
+  def create_node(user_id, attrs) do
     result =
-      %Node{}
+      %Node{user_id: user_id}
       |> Node.changeset(attrs)
       |> Repo.insert()
 
     case result do
       {:ok, node} ->
         Events.broadcast(:memory_node_created, %{
+          user_id: user_id,
           source: :memory,
           meta: %{
             node_id: node.id,
@@ -157,41 +163,45 @@ defmodule Manfrod.Memory do
     end
   end
 
-  def list_nodes(opts \\ []) do
+  def list_nodes(user_id, opts \\ []) do
     Node
+    |> where([n], n.user_id == ^user_id)
     |> order_by([n], desc: n.inserted_at)
     |> limit(^Keyword.get(opts, :limit, 100))
     |> Repo.all()
   end
 
   @doc """
-  Get all nodes in the slipbox (unprocessed).
+  Get all nodes in the slipbox (unprocessed) for a user.
   """
-  def get_slipbox_nodes(opts \\ []) do
+  def get_slipbox_nodes(user_id, opts \\ []) do
     Node
-    |> where([n], is_nil(n.processed_at))
+    |> where([n], n.user_id == ^user_id and is_nil(n.processed_at))
     |> order_by([n], asc: n.inserted_at)
     |> limit(^Keyword.get(opts, :limit, 100))
     |> Repo.all()
   end
 
   @doc """
-  Get a node by ID.
+  Get a node by ID, scoped to a user.
   """
-  def get_node(id) do
-    Repo.get(Node, id)
+  def get_node(user_id, id) do
+    Node
+    |> where([n], n.user_id == ^user_id and n.id == ^id)
+    |> Repo.one()
   end
 
   @doc """
-  Mark a node as processed (integrated into the graph).
+  Mark a node as processed (integrated into the graph), scoped to a user.
   """
-  def mark_processed(node_id) do
+  def mark_processed(user_id, node_id) do
     now = DateTime.utc_now() |> DateTime.truncate(:second)
 
-    from(n in Node, where: n.id == ^node_id)
+    from(n in Node, where: n.user_id == ^user_id and n.id == ^node_id)
     |> Repo.update_all(set: [processed_at: now])
 
     Events.broadcast(:memory_node_processed, %{
+      user_id: user_id,
       source: :memory,
       meta: %{node_id: node_id}
     })
@@ -200,12 +210,12 @@ defmodule Manfrod.Memory do
   end
 
   @doc """
-  Update a node's content and re-embed it.
+  Update a node's content and re-embed it, scoped to a user.
   Preserves the node's ID, links, and provenance.
   Returns {:ok, node} or {:error, :not_found} or {:error, changeset}.
   """
-  def update_node(node_id, attrs) do
-    case get_node(node_id) do
+  def update_node(user_id, node_id, attrs) do
+    case get_node(user_id, node_id) do
       nil ->
         {:error, :not_found}
 
@@ -218,6 +228,7 @@ defmodule Manfrod.Memory do
         case result do
           {:ok, updated} ->
             Events.broadcast(:memory_node_updated, %{
+              user_id: user_id,
               source: :memory,
               meta: %{
                 node_id: updated.id,
@@ -234,11 +245,11 @@ defmodule Manfrod.Memory do
   end
 
   @doc """
-  Delete a node and all its links (cascade).
+  Delete a node and all its links (cascade), scoped to a user.
   Returns {:ok, node} or {:error, :not_found}.
   """
-  def delete_node(node_id) do
-    case get_node(node_id) do
+  def delete_node(user_id, node_id) do
+    case get_node(user_id, node_id) do
       nil ->
         {:error, :not_found}
 
@@ -253,6 +264,7 @@ defmodule Manfrod.Memory do
         Repo.delete(node)
 
         Events.broadcast(:memory_node_deleted, %{
+          user_id: user_id,
           source: :memory,
           meta: %{node_id: node_id}
         })
@@ -263,7 +275,7 @@ defmodule Manfrod.Memory do
 
   # --- Links ---
 
-  def create_link(node_a_id, node_b_id, opts \\ []) do
+  def create_link(user_id, node_a_id, node_b_id, opts \\ []) do
     context = Keyword.get(opts, :context)
 
     attrs =
@@ -278,6 +290,7 @@ defmodule Manfrod.Memory do
     case result do
       {:ok, link} ->
         Events.broadcast(:memory_link_created, %{
+          user_id: user_id,
           source: :memory,
           meta: %{node_a_id: link.node_a_id, node_b_id: link.node_b_id}
         })
@@ -290,54 +303,69 @@ defmodule Manfrod.Memory do
   end
 
   @doc """
-  Delete a link between two nodes.
+  Delete a link between two nodes, scoped to a user.
   Returns {:ok, link} or {:error, :not_found}.
+
+  Verifies that both nodes belong to the user before deleting.
   """
-  def delete_link(node_a_id, node_b_id) do
+  def delete_link(user_id, node_a_id, node_b_id) do
     # Normalize order (same logic as Link changeset)
     {a, b} = if node_a_id < node_b_id, do: {node_a_id, node_b_id}, else: {node_b_id, node_a_id}
 
-    case Repo.get_by(Link, node_a_id: a, node_b_id: b) do
-      nil ->
-        {:error, :not_found}
+    # Verify both nodes belong to the user
+    user_node_ids =
+      from(n in Node, where: n.user_id == ^user_id and n.id in ^[a, b], select: n.id)
+      |> Repo.all()
+      |> MapSet.new()
 
-      link ->
-        Repo.delete(link)
+    if MapSet.size(user_node_ids) == 2 do
+      case Repo.get_by(Link, node_a_id: a, node_b_id: b) do
+        nil ->
+          {:error, :not_found}
 
-        Events.broadcast(:memory_link_deleted, %{
-          source: :memory,
-          meta: %{node_a_id: a, node_b_id: b}
-        })
+        link ->
+          Repo.delete(link)
 
-        {:ok, link}
+          Events.broadcast(:memory_link_deleted, %{
+            user_id: user_id,
+            source: :memory,
+            meta: %{node_a_id: a, node_b_id: b}
+          })
+
+          {:ok, link}
+      end
+    else
+      {:error, :not_found}
     end
   end
 
   @doc """
-  Get all linked nodes for a given node.
+  Get all linked nodes for a given node, scoped to a user.
   Returns a list of nodes that are directly connected.
   """
-  def get_node_links(node_id) do
+  def get_node_links(user_id, node_id) do
     from(n in Node,
       join: l in Link,
       on:
         (l.node_a_id == ^node_id and l.node_b_id == n.id) or
           (l.node_b_id == ^node_id and l.node_a_id == n.id),
+      where: n.user_id == ^user_id,
       distinct: n.id
     )
     |> Repo.all()
   end
 
   @doc """
-  Get all linked nodes for a given node, with link context.
+  Get all linked nodes for a given node, with link context, scoped to a user.
   Returns a list of `{node, context}` tuples where context may be nil.
   """
-  def get_node_links_with_context(node_id) do
+  def get_node_links_with_context(user_id, node_id) do
     from(n in Node,
       join: l in Link,
       on:
         (l.node_a_id == ^node_id and l.node_b_id == n.id) or
           (l.node_b_id == ^node_id and l.node_a_id == n.id),
+      where: n.user_id == ^user_id,
       select: {n, l.context},
       distinct: n.id
     )
@@ -345,12 +373,11 @@ defmodule Manfrod.Memory do
   end
 
   @doc """
-  Get a random sample of processed nodes from the graph.
-  Useful for graph review and maintenance.
+  Get a random sample of processed nodes from the user's graph.
   """
-  def get_random_nodes(limit \\ 10) do
+  def get_random_nodes(user_id, limit \\ 10) do
     Node
-    |> where([n], not is_nil(n.processed_at))
+    |> where([n], n.user_id == ^user_id and not is_nil(n.processed_at))
     |> order_by(fragment("RANDOM()"))
     |> limit(^limit)
     |> Repo.all()
@@ -359,7 +386,7 @@ defmodule Manfrod.Memory do
   # --- Graph Health ---
 
   @doc """
-  Get graph health statistics.
+  Get graph health statistics for a user.
 
   Returns a map with:
     * `:total_nodes` - Total number of nodes
@@ -369,15 +396,27 @@ defmodule Manfrod.Memory do
     * `:weakly_connected_count` - Processed nodes with exactly 1 link
     * `:link_to_note_ratio` - Total links / total nodes (0.0 if no nodes)
   """
-  def graph_stats do
-    total_nodes = Repo.aggregate(Node, :count)
-    total_links = Repo.aggregate(Link, :count)
-    slipbox_count = Repo.aggregate(from(n in Node, where: is_nil(n.processed_at)), :count)
+  def graph_stats(user_id) do
+    user_nodes = from(n in Node, where: n.user_id == ^user_id)
+    total_nodes = Repo.aggregate(user_nodes, :count)
+
+    # Links between the user's nodes
+    user_node_ids = from(n in Node, where: n.user_id == ^user_id, select: n.id)
+
+    total_links =
+      from(l in Link,
+        where: l.node_a_id in subquery(user_node_ids) and l.node_b_id in subquery(user_node_ids)
+      )
+      |> Repo.aggregate(:count)
+
+    slipbox_count =
+      from(n in Node, where: n.user_id == ^user_id and is_nil(n.processed_at))
+      |> Repo.aggregate(:count)
 
     # Orphans: processed nodes with 0 links
     orphan_count =
       from(n in Node,
-        where: not is_nil(n.processed_at),
+        where: n.user_id == ^user_id and not is_nil(n.processed_at),
         left_join: la in Link,
         on: la.node_a_id == n.id,
         left_join: lb in Link,
@@ -390,7 +429,7 @@ defmodule Manfrod.Memory do
     # Weakly connected: processed nodes with exactly 1 link
     weakly_connected_count =
       from(n in Node,
-        where: not is_nil(n.processed_at),
+        where: n.user_id == ^user_id and not is_nil(n.processed_at),
         left_join: la in Link,
         on: la.node_a_id == n.id,
         left_join: lb in Link,
@@ -418,13 +457,13 @@ defmodule Manfrod.Memory do
   end
 
   @doc """
-  Get processed nodes with 0 links (orphans).
+  Get processed nodes with 0 links (orphans) for a user.
   """
-  def get_orphan_nodes(opts \\ []) do
+  def get_orphan_nodes(user_id, opts \\ []) do
     limit = Keyword.get(opts, :limit, 25)
 
     from(n in Node,
-      where: not is_nil(n.processed_at),
+      where: n.user_id == ^user_id and not is_nil(n.processed_at),
       left_join: la in Link,
       on: la.node_a_id == n.id,
       left_join: lb in Link,
@@ -437,13 +476,13 @@ defmodule Manfrod.Memory do
   end
 
   @doc """
-  Get processed nodes with exactly 1 link (weakly connected).
+  Get processed nodes with exactly 1 link (weakly connected) for a user.
   """
-  def get_weakly_connected_nodes(opts \\ []) do
+  def get_weakly_connected_nodes(user_id, opts \\ []) do
     limit = Keyword.get(opts, :limit, 25)
 
     from(n in Node,
-      where: not is_nil(n.processed_at),
+      where: n.user_id == ^user_id and not is_nil(n.processed_at),
       left_join: la in Link,
       on: la.node_a_id == n.id,
       left_join: lb in Link,
@@ -457,14 +496,13 @@ defmodule Manfrod.Memory do
   end
 
   @doc """
-  Get the oldest processed nodes (stalest, least recently created).
-  Useful for periodic review of old content.
+  Get the oldest processed nodes for a user (stalest, least recently created).
   """
-  def get_stalest_nodes(opts \\ []) do
+  def get_stalest_nodes(user_id, opts \\ []) do
     limit = Keyword.get(opts, :limit, 25)
 
     Node
-    |> where([n], not is_nil(n.processed_at))
+    |> where([n], n.user_id == ^user_id and not is_nil(n.processed_at))
     |> order_by([n], asc: n.inserted_at)
     |> limit(^limit)
     |> Repo.all()
@@ -473,46 +511,28 @@ defmodule Manfrod.Memory do
   # --- Graph Visualization ---
 
   @doc """
-  Get all graph data for visualization.
+  Get all graph data for a user for visualization.
 
   Returns a map with nodes and edges suitable for graph rendering.
 
   ## Options
 
     * `:filter` - Filter nodes: `:all` (default), `:processed`, or `:slipbox`
-
-  ## Example
-
-      %{
-        nodes: [
-          %{
-            id: "uuid",
-            content: "full content",
-            content_preview: "first 100 chars...",
-            processed: true,
-            link_count: 5,
-            inserted_at: ~U[2024-01-01 00:00:00Z]
-          }
-        ],
-        edges: [
-          %{source: "uuid-a", target: "uuid-b"}
-        ]
-      }
   """
-  def get_graph_data(opts \\ []) do
+  def get_graph_data(user_id, opts \\ []) do
     filter = Keyword.get(opts, :filter, :all)
 
     # Fetch nodes based on filter
     nodes_query =
       case filter do
         :processed ->
-          from(n in Node, where: not is_nil(n.processed_at))
+          from(n in Node, where: n.user_id == ^user_id and not is_nil(n.processed_at))
 
         :slipbox ->
-          from(n in Node, where: is_nil(n.processed_at))
+          from(n in Node, where: n.user_id == ^user_id and is_nil(n.processed_at))
 
         :all ->
-          from(n in Node)
+          from(n in Node, where: n.user_id == ^user_id)
       end
 
     nodes = Repo.all(nodes_query)
@@ -557,7 +577,7 @@ defmodule Manfrod.Memory do
   # --- Hybrid Search with Query Expansion ---
 
   @doc """
-  Hybrid retrieval with query expansion and reranking.
+  Hybrid retrieval with query expansion and reranking, scoped to a user.
 
   1. Expands the query into multiple search queries using LLM
   2. Runs vector + BM25 search for each expanded query in parallel
@@ -574,7 +594,7 @@ defmodule Manfrod.Memory do
     * `:expand_query` - Whether to use query expansion (default: true)
     * `:rerank` - Whether to use Voyage reranker (default: true)
   """
-  def search(query_text, opts \\ []) do
+  def search(user_id, query_text, opts \\ []) do
     limit = Keyword.get(opts, :limit, 10)
     expand_query? = Keyword.get(opts, :expand_query, true)
     rerank? = Keyword.get(opts, :rerank, true)
@@ -591,8 +611,8 @@ defmodule Manfrod.Memory do
     search_tasks =
       Enum.flat_map(queries, fn query ->
         [
-          Task.async(fn -> {:vector, query, search_vector(query, limit)} end),
-          Task.async(fn -> {:bm25, query, search_bm25(query, limit)} end)
+          Task.async(fn -> {:vector, query, search_vector(user_id, query, limit)} end),
+          Task.async(fn -> {:bm25, query, search_bm25(user_id, query, limit)} end)
         ]
       end)
 
@@ -640,6 +660,7 @@ defmodule Manfrod.Memory do
 
     # Broadcast with verbose stats for logging
     Events.broadcast(:memory_searched, %{
+      user_id: user_id,
       source: :memory,
       meta: %{
         query: query_text,
@@ -664,13 +685,13 @@ defmodule Manfrod.Memory do
   end
 
   @doc """
-  Search using only vector similarity (no query expansion).
+  Search using only vector similarity (no query expansion), scoped to a user.
   Returns `[{node, distance}]` tuples sorted by distance ascending.
   """
-  def search_vector(query_text, limit \\ 10) do
+  def search_vector(user_id, query_text, limit \\ 10) do
     case Manfrod.Voyage.embed_query(query_text) do
       {:ok, embedding} ->
-        vector_search_with_distance(embedding, limit)
+        vector_search_with_distance(user_id, embedding, limit)
 
       {:error, _} ->
         []
@@ -678,19 +699,19 @@ defmodule Manfrod.Memory do
   end
 
   @doc """
-  Search using only BM25 keyword matching.
+  Search using only BM25 keyword matching, scoped to a user.
   Returns list of nodes sorted by BM25 score descending.
   """
-  def search_bm25(query_text, limit \\ 10) do
-    bm25_search(query_text, limit)
+  def search_bm25(user_id, query_text, limit \\ 10) do
+    bm25_search(user_id, query_text, limit)
   end
 
   # Vector search returning {node, distance} tuples
-  defp vector_search_with_distance(embedding, limit) do
+  defp vector_search_with_distance(user_id, embedding, limit) do
     vec = Pgvector.new(embedding)
 
     from(n in Node,
-      where: not is_nil(n.embedding),
+      where: n.user_id == ^user_id and not is_nil(n.embedding),
       select: {n, cosine_distance(n.embedding, ^vec)},
       order_by: cosine_distance(n.embedding, ^vec),
       limit: ^limit
@@ -698,10 +719,10 @@ defmodule Manfrod.Memory do
     |> Repo.all()
   end
 
-  defp bm25_search(query_text, limit) do
+  defp bm25_search(user_id, query_text, limit) do
     from(n in Node,
       select: {n, score(n.id)},
-      where: n.id ~> match("content", ^query_text),
+      where: n.id ~> match("content", ^query_text) and n.user_id == ^user_id,
       order_by: [desc: score()],
       limit: ^limit
     )
@@ -820,18 +841,21 @@ defmodule Manfrod.Memory do
   # --- Recurring Reminders ---
 
   @doc """
-  List recurring reminders.
+  List recurring reminders for a user.
 
   ## Options
 
     * `:enabled` - Filter by enabled status (true/false). Default: all.
     * `:preload` - Preload associations. Default: [:node].
   """
-  def list_recurring_reminders(opts \\ []) do
+  def list_recurring_reminders(user_id, opts \\ []) do
     query =
       case Keyword.get(opts, :enabled) do
-        nil -> from(r in RecurringReminder)
-        enabled -> from(r in RecurringReminder, where: r.enabled == ^enabled)
+        nil ->
+          from(r in RecurringReminder, where: r.user_id == ^user_id)
+
+        enabled ->
+          from(r in RecurringReminder, where: r.user_id == ^user_id and r.enabled == ^enabled)
       end
 
     preload = Keyword.get(opts, :preload, [:node])
@@ -843,40 +867,41 @@ defmodule Manfrod.Memory do
   end
 
   @doc """
-  Get a recurring reminder by ID with node preloaded.
+  Get a recurring reminder by ID with node preloaded, scoped to a user.
   """
-  def get_recurring_reminder(id) do
+  def get_recurring_reminder(user_id, id) do
     RecurringReminder
-    |> where([r], r.id == ^id)
+    |> where([r], r.user_id == ^user_id and r.id == ^id)
     |> preload(:node)
     |> Repo.one()
   end
 
   @doc """
-  Get a recurring reminder by name with node preloaded.
+  Get a recurring reminder by name with node preloaded, scoped to a user.
   """
-  def get_recurring_reminder_by_name(name) do
+  def get_recurring_reminder_by_name(user_id, name) do
     RecurringReminder
-    |> where([r], r.name == ^name)
+    |> where([r], r.user_id == ^user_id and r.name == ^name)
     |> preload(:node)
     |> Repo.one()
   end
 
   @doc """
-  Create a recurring reminder.
+  Create a recurring reminder for a user.
 
   Expects attrs with :name, :cron, and :node_id.
   Optional: :timezone (default "Europe/Warsaw"), :enabled (default true).
   """
-  def create_recurring_reminder(attrs) do
+  def create_recurring_reminder(user_id, attrs) do
     result =
-      %RecurringReminder{}
+      %RecurringReminder{user_id: user_id}
       |> RecurringReminder.changeset(attrs)
       |> Repo.insert()
 
     case result do
       {:ok, reminder} ->
         Events.broadcast(:recurring_reminder_created, %{
+          user_id: user_id,
           source: :memory,
           meta: %{reminder_id: reminder.id, name: reminder.name}
         })
@@ -889,12 +914,14 @@ defmodule Manfrod.Memory do
   end
 
   @doc """
-  Update a recurring reminder.
+  Update a recurring reminder, scoped to a user.
 
   If the cron expression changes, all pending Oban jobs for this reminder
   are cancelled so the SchedulerWorker can reschedule with the new pattern.
+
+  The reminder struct must belong to the given user_id (verified by caller).
   """
-  def update_recurring_reminder(%RecurringReminder{} = reminder, attrs) do
+  def update_recurring_reminder(user_id, %RecurringReminder{} = reminder, attrs) do
     changeset = RecurringReminder.changeset(reminder, attrs)
     cron_changed? = Ecto.Changeset.get_change(changeset, :cron) != nil
 
@@ -907,6 +934,7 @@ defmodule Manfrod.Memory do
         end
 
         Events.broadcast(:recurring_reminder_updated, %{
+          user_id: user_id,
           source: :memory,
           meta: %{reminder_id: updated.id, name: updated.name, cron_changed: cron_changed?}
         })
@@ -919,17 +947,18 @@ defmodule Manfrod.Memory do
   end
 
   @doc """
-  Delete a recurring reminder.
+  Delete a recurring reminder, scoped to a user.
 
   Accepts either a RecurringReminder struct or an ID string.
   Cancels all pending Oban jobs for this reminder before deletion.
   """
-  def delete_recurring_reminder(%RecurringReminder{} = reminder) do
+  def delete_recurring_reminder(user_id, %RecurringReminder{} = reminder) do
     cancel_pending_trigger_jobs(reminder.id)
 
     case Repo.delete(reminder) do
       {:ok, deleted} ->
         Events.broadcast(:recurring_reminder_deleted, %{
+          user_id: user_id,
           source: :memory,
           meta: %{reminder_id: deleted.id, name: deleted.name}
         })
@@ -941,10 +970,10 @@ defmodule Manfrod.Memory do
     end
   end
 
-  def delete_recurring_reminder(id) when is_binary(id) do
-    case get_recurring_reminder(id) do
+  def delete_recurring_reminder(user_id, id) when is_binary(id) do
+    case get_recurring_reminder(user_id, id) do
       nil -> {:error, :not_found}
-      reminder -> delete_recurring_reminder(reminder)
+      reminder -> delete_recurring_reminder(user_id, reminder)
     end
   end
 

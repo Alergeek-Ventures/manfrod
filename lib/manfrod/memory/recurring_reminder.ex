@@ -9,6 +9,7 @@ defmodule Manfrod.Memory.RecurringReminder do
   use Ecto.Schema
   import Ecto.Changeset
 
+  alias Manfrod.Accounts.User
   alias Manfrod.Memory.Node
 
   @primary_key {:id, :binary_id, autogenerate: true}
@@ -20,6 +21,7 @@ defmodule Manfrod.Memory.RecurringReminder do
     field :timezone, :string, default: "Europe/Warsaw"
     field :enabled, :boolean, default: true
 
+    belongs_to :user, User
     belongs_to :node, Node
 
     timestamps()

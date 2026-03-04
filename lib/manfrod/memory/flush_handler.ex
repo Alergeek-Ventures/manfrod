@@ -2,9 +2,9 @@ defmodule Manfrod.Memory.FlushHandler do
   @moduledoc """
   Handles memory extraction on conversation idle.
 
-  Subscribes to the event bus and triggers extraction
-  when the agent broadcasts an :idle event. The Extractor
-  fetches pending messages directly from the database.
+  Subscribes to the global event bus and triggers per-user extraction
+  when any Agent broadcasts an :idle event. The Extractor fetches
+  pending messages for that user from the database.
   """
   use GenServer
 
@@ -20,19 +20,20 @@ defmodule Manfrod.Memory.FlushHandler do
 
   @impl true
   def init(_opts) do
-    Events.subscribe()
+    Events.subscribe_global()
     {:ok, %{}}
   end
 
   @impl true
-  def handle_info({:activity, %Activity{type: :idle}}, state) do
-    Logger.info("FlushHandler: idle detected, triggering extraction")
-    Extractor.extract_async()
+  def handle_info({:activity, %Activity{type: :idle, user_id: user_id}}, state)
+      when is_binary(user_id) do
+    Logger.info("FlushHandler: idle detected for user #{user_id}, triggering extraction")
+    Extractor.extract_async(user_id)
     {:noreply, state}
   end
 
   def handle_info({:activity, %Activity{}}, state) do
-    # Ignore other event types
+    # Ignore other event types or events without user_id
     {:noreply, state}
   end
 end

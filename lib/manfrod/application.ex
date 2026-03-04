@@ -10,11 +10,11 @@ defmodule Manfrod.Application do
         Manfrod.Repo,
         {Phoenix.PubSub, name: Manfrod.PubSub},
         {Oban, Application.fetch_env!(:manfrod, Oban)},
-        # Event handlers (subscribe to PubSub)
+        # Event handlers (subscribe to global PubSub)
         Manfrod.Events.Persister,
         Manfrod.Memory.FlushHandler,
-        # Core agent
-        Manfrod.Agent,
+        # Per-user agent processes (DynamicSupervisor + Registry)
+        Manfrod.Agent.Supervisor,
         ManfrodWeb.Endpoint
       ] ++ slack_children()
 

@@ -9,10 +9,12 @@ defmodule Manfrod.Workers.TriggerWorker do
 
   For recurring reminders (from SchedulerWorker):
   - `recurring_reminder_id` - UUID of the recurring reminder
+  - `user_id` - UUID of the user who owns the reminder
 
   For one-time reminders (from Agent):
   - `trigger_id` - identifier of the trigger (for logging)
   - `prompt` - the message to send to the Agent
+  - `user_id` - UUID of the user
   """
   use Oban.Worker,
     queue: :default,
@@ -23,10 +25,12 @@ defmodule Manfrod.Workers.TriggerWorker do
   alias Manfrod.Memory
 
   @impl Oban.Worker
-  def perform(%Oban.Job{args: %{"recurring_reminder_id" => reminder_id}}) do
-    Logger.info("TriggerWorker: executing recurring reminder '#{reminder_id}'")
+  def perform(%Oban.Job{args: %{"recurring_reminder_id" => reminder_id, "user_id" => user_id}}) do
+    Logger.info(
+      "TriggerWorker: executing recurring reminder '#{reminder_id}' for user #{user_id}"
+    )
 
-    case Memory.get_recurring_reminder(reminder_id) do
+    case Memory.get_recurring_reminder(user_id, reminder_id) do
       nil ->
         Logger.warning("TriggerWorker: recurring reminder '#{reminder_id}' not found, skipping")
         :ok
@@ -34,7 +38,7 @@ defmodule Manfrod.Workers.TriggerWorker do
       reminder ->
         if reminder.enabled do
           prompt = build_recurring_reminder_prompt(reminder)
-          send_to_agent(prompt, "recurring:#{reminder.name}")
+          send_to_agent(user_id, prompt, "recurring:#{reminder.name}")
         else
           Logger.info(
             "TriggerWorker: recurring reminder '#{reminder.name}' is disabled, skipping"
@@ -45,25 +49,27 @@ defmodule Manfrod.Workers.TriggerWorker do
     end
   end
 
-  def perform(%Oban.Job{args: %{"prompt" => prompt, "trigger_id" => trigger_id}}) do
-    Logger.info("TriggerWorker: executing one-time trigger '#{trigger_id}'")
-    send_to_agent(prompt, trigger_id)
+  def perform(%Oban.Job{
+        args: %{"prompt" => prompt, "trigger_id" => trigger_id, "user_id" => user_id}
+      }) do
+    Logger.info("TriggerWorker: executing one-time trigger '#{trigger_id}' for user #{user_id}")
+    send_to_agent(user_id, prompt, trigger_id)
   end
 
-  defp send_to_agent(prompt, trigger_id) do
-    Manfrod.Agent.send_message(%{
+  defp send_to_agent(user_id, prompt, trigger_id) do
+    Manfrod.Agent.send_message(user_id, %{
       content: prompt,
       source: :scheduled,
       reply_to: nil
     })
 
-    Logger.info("TriggerWorker: trigger '#{trigger_id}' sent to Agent")
+    Logger.info("TriggerWorker: trigger '#{trigger_id}' sent to Agent for user #{user_id}")
     :ok
   end
 
   defp build_recurring_reminder_prompt(reminder) do
     node = reminder.node
-    linked_nodes = Memory.get_node_links(node.id)
+    linked_nodes = Memory.get_node_links(reminder.user_id, node.id)
 
     linked_section =
       if linked_nodes == [] do

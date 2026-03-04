@@ -35,7 +35,7 @@ config :manfrod, ManfrodWeb.Endpoint,
     port: env!("PORT", :integer, 35233)
   ],
   secret_key_base: secret_key_base,
-  server: true,
+  server: config_env() != :test,
   # Allow websocket connections from Tailscale hosts
   check_origin: :conn
 

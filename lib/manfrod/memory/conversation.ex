@@ -9,6 +9,7 @@ defmodule Manfrod.Memory.Conversation do
   use Ecto.Schema
   import Ecto.Changeset
 
+  alias Manfrod.Accounts.User
   alias Manfrod.Memory.{Message, Node}
 
   @primary_key {:id, :binary_id, autogenerate: true}
@@ -19,6 +20,7 @@ defmodule Manfrod.Memory.Conversation do
     field :ended_at, :utc_datetime
     field :summary, :string
 
+    belongs_to :user, User
     has_many :messages, Message
     has_many :nodes, Node
 

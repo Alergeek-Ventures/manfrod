@@ -3,6 +3,8 @@ defmodule Manfrod.Workers.SchedulerWorker do
   Runs hourly via Oban cron. Reads recurring reminders from the database
   and idempotently schedules `TriggerWorker` jobs for the next 48 hours.
 
+  Iterates all enabled recurring reminders across all users.
+
   ## How it works
 
   1. Reads all enabled recurring reminders from `Manfrod.Memory`
@@ -21,7 +23,6 @@ defmodule Manfrod.Workers.SchedulerWorker do
 
   require Logger
 
-  alias Manfrod.Memory
   alias Manfrod.Workers.TriggerWorker
 
   @schedule_window_hours 48
@@ -31,7 +32,9 @@ defmodule Manfrod.Workers.SchedulerWorker do
     Logger.info("SchedulerWorker: scheduling triggers for next #{@schedule_window_hours} hours")
 
     now = DateTime.utc_now()
-    reminders = Memory.list_recurring_reminders(enabled: true, preload: [])
+
+    # Query all enabled reminders across all users
+    reminders = all_enabled_reminders()
 
     scheduled_count =
       for reminder <- reminders,
@@ -40,6 +43,7 @@ defmodule Manfrod.Workers.SchedulerWorker do
         count ->
           args = %{
             recurring_reminder_id: reminder.id,
+            user_id: reminder.user_id,
             # scheduled_at is included in args for uniqueness checking.
             # Oban's unique keys refer to args fields, not job fields.
             scheduled_at: DateTime.to_iso8601(scheduled_at)
@@ -77,12 +81,22 @@ defmodule Manfrod.Workers.SchedulerWorker do
     :ok
   end
 
+  # Query all enabled reminders across all users (no user_id filter)
+  defp all_enabled_reminders do
+    import Ecto.Query
+
+    Manfrod.Memory.RecurringReminder
+    |> where([r], r.enabled == true)
+    |> order_by([r], asc: r.name)
+    |> Manfrod.Repo.all()
+  end
+
   @doc """
   Calculates the next occurrences of a cron schedule within the scheduling window.
 
   Returns a list of UTC DateTimes for the reminder to fire.
   """
-  @spec next_occurrences(Memory.RecurringReminder.t(), DateTime.t()) :: [DateTime.t()]
+  @spec next_occurrences(Manfrod.Memory.RecurringReminder.t(), DateTime.t()) :: [DateTime.t()]
   def next_occurrences(reminder, now) do
     case Crontab.CronExpression.Parser.parse(reminder.cron) do
       {:ok, cron_expr} ->

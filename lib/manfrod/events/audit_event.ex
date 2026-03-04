@@ -10,15 +10,19 @@ defmodule Manfrod.Events.AuditEvent do
 
   import Ecto.Changeset
 
+  alias Manfrod.Accounts.User
   alias Manfrod.Events.Activity
 
   @primary_key {:id, :binary_id, autogenerate: true}
+  @foreign_key_type :binary_id
 
   schema "audit_events" do
     field :type, :string
     field :source, :string
     field :meta, :map, default: %{}
     field :timestamp, :utc_datetime_usec
+
+    belongs_to :user, User
 
     timestamps(updated_at: false)
   end
@@ -31,11 +35,12 @@ defmodule Manfrod.Events.AuditEvent do
       type: to_string(activity.type),
       source: if(activity.source, do: to_string(activity.source)),
       meta: stringify_meta(activity.meta),
-      timestamp: activity.timestamp
+      timestamp: activity.timestamp,
+      user_id: activity.user_id
     }
 
     %__MODULE__{}
-    |> cast(attrs, [:type, :source, :meta, :timestamp])
+    |> cast(attrs, [:type, :source, :meta, :timestamp, :user_id])
     |> validate_required([:type, :timestamp])
   end
 
@@ -48,6 +53,7 @@ defmodule Manfrod.Events.AuditEvent do
       type: String.to_atom(event.type),
       source: if(event.source, do: String.to_atom(event.source)),
       reply_to: nil,
+      user_id: event.user_id,
       meta: atomize_meta(event.meta),
       timestamp: event.timestamp
     }

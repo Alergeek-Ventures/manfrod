@@ -98,8 +98,8 @@ defmodule Manfrod.Memory.Retrospector do
   #{@zettelkasten_guide}
   """
 
-  # Tool definitions
-  defp tools do
+  # Tool definitions — user_id is baked into closures for search/create
+  defp tools(user_id) do
     [
       ReqLLM.Tool.new!(
         name: "search",
@@ -109,7 +109,7 @@ defmodule Manfrod.Memory.Retrospector do
           query: [type: :string, required: true, doc: "Search query text"],
           limit: [type: :integer, doc: "Maximum results to return (default: 5)"]
         ],
-        callback: &tool_search/1
+        callback: fn args -> tool_search(user_id, args) end
       ),
       ReqLLM.Tool.new!(
         name: "get_node",
@@ -117,7 +117,7 @@ defmodule Manfrod.Memory.Retrospector do
         parameter_schema: [
           id: [type: :string, required: true, doc: "Node UUID"]
         ],
-        callback: &tool_get_node/1
+        callback: fn args -> tool_get_node(user_id, args) end
       ),
       ReqLLM.Tool.new!(
         name: "create_node",
@@ -130,7 +130,7 @@ defmodule Manfrod.Memory.Retrospector do
             doc: "The atomic idea or fact (1-2 sentences)"
           ]
         ],
-        callback: &tool_create_node/1
+        callback: fn args -> tool_create_node(user_id, args) end
       ),
       ReqLLM.Tool.new!(
         name: "update_node",
@@ -144,7 +144,7 @@ defmodule Manfrod.Memory.Retrospector do
             doc: "The new content for the node (1-2 sentences)"
           ]
         ],
-        callback: &tool_update_node/1
+        callback: fn args -> tool_update_node(user_id, args) end
       ),
       ReqLLM.Tool.new!(
         name: "create_link",
@@ -158,7 +158,7 @@ defmodule Manfrod.Memory.Retrospector do
             doc: "Why this link exists - what should someone expect when following it?"
           ]
         ],
-        callback: &tool_create_link/1
+        callback: fn args -> tool_create_link(user_id, args) end
       ),
       ReqLLM.Tool.new!(
         name: "mark_processed",
@@ -167,7 +167,7 @@ defmodule Manfrod.Memory.Retrospector do
         parameter_schema: [
           id: [type: :string, required: true, doc: "Node UUID to mark as processed"]
         ],
-        callback: &tool_mark_processed/1
+        callback: fn args -> tool_mark_processed(user_id, args) end
       ),
       ReqLLM.Tool.new!(
         name: "delete_node",
@@ -176,7 +176,7 @@ defmodule Manfrod.Memory.Retrospector do
         parameter_schema: [
           id: [type: :string, required: true, doc: "Node UUID to delete"]
         ],
-        callback: &tool_delete_node/1
+        callback: fn args -> tool_delete_node(user_id, args) end
       ),
       ReqLLM.Tool.new!(
         name: "delete_link",
@@ -185,7 +185,7 @@ defmodule Manfrod.Memory.Retrospector do
           node_a_id: [type: :string, required: true, doc: "First node UUID"],
           node_b_id: [type: :string, required: true, doc: "Second node UUID"]
         ],
-        callback: &tool_delete_link/1
+        callback: fn args -> tool_delete_link(user_id, args) end
       ),
       ReqLLM.Tool.new!(
         name: "list_links",
@@ -194,23 +194,23 @@ defmodule Manfrod.Memory.Retrospector do
         parameter_schema: [
           id: [type: :string, required: true, doc: "Node UUID to get links for"]
         ],
-        callback: &tool_list_links/1
+        callback: fn args -> tool_list_links(user_id, args) end
       ),
       ReqLLM.Tool.new!(
         name: "graph_stats",
         description:
           "Get graph health statistics: total nodes, total links, slipbox count, orphan count (0 links), weakly connected count (1 link), and link-to-note ratio. Call this at the start of each session to understand graph health and prioritize work.",
         parameter_schema: [],
-        callback: &tool_graph_stats/1
+        callback: fn args -> tool_graph_stats(user_id, args) end
       )
     ]
   end
 
   # Tool callbacks
 
-  def tool_search(%{query: query} = args) do
+  def tool_search(user_id, %{query: query} = args) do
     limit = Map.get(args, :limit, 5)
-    {:ok, nodes} = Memory.search(query, limit: limit)
+    {:ok, nodes} = Memory.search(user_id, query, limit: limit)
 
     if Enum.empty?(nodes) do
       {:ok, "No matching nodes found."}
@@ -224,8 +224,8 @@ defmodule Manfrod.Memory.Retrospector do
     end
   end
 
-  def tool_get_node(%{id: id}) do
-    case Memory.get_node(id) do
+  def tool_get_node(user_id, %{id: id}) do
+    case Memory.get_node(user_id, id) do
       nil ->
         {:ok, "Node not found: #{id}"}
 
@@ -235,12 +235,12 @@ defmodule Manfrod.Memory.Retrospector do
     end
   end
 
-  def tool_create_node(%{content: content}) do
+  def tool_create_node(user_id, %{content: content}) do
     case Voyage.embed_query(content) do
       {:ok, embedding} ->
         now = DateTime.utc_now() |> DateTime.truncate(:second)
 
-        case Memory.create_node(%{
+        case Memory.create_node(user_id, %{
                content: content,
                embedding: embedding,
                processed_at: now
@@ -257,10 +257,10 @@ defmodule Manfrod.Memory.Retrospector do
     end
   end
 
-  def tool_update_node(%{id: id, content: content}) do
+  def tool_update_node(user_id, %{id: id, content: content}) do
     case Voyage.embed_query(content) do
       {:ok, embedding} ->
-        case Memory.update_node(id, %{content: content, embedding: embedding}) do
+        case Memory.update_node(user_id, id, %{content: content, embedding: embedding}) do
           {:ok, _node} ->
             {:ok, "Updated node: #{id}"}
 
@@ -276,10 +276,10 @@ defmodule Manfrod.Memory.Retrospector do
     end
   end
 
-  def tool_create_link(%{node_a_id: a, node_b_id: b} = args) do
+  def tool_create_link(user_id, %{node_a_id: a, node_b_id: b} = args) do
     opts = if args[:context], do: [context: args[:context]], else: []
 
-    case Memory.create_link(a, b, opts) do
+    case Memory.create_link(user_id, a, b, opts) do
       {:ok, _link} ->
         {:ok, "Linked #{a} <-> #{b}"}
 
@@ -288,13 +288,13 @@ defmodule Manfrod.Memory.Retrospector do
     end
   end
 
-  def tool_mark_processed(%{id: id}) do
-    Memory.mark_processed(id)
+  def tool_mark_processed(user_id, %{id: id}) do
+    Memory.mark_processed(user_id, id)
     {:ok, "Marked #{id} as processed"}
   end
 
-  def tool_delete_node(%{id: id}) do
-    case Memory.delete_node(id) do
+  def tool_delete_node(user_id, %{id: id}) do
+    case Memory.delete_node(user_id, id) do
       {:ok, _node} ->
         {:ok, "Deleted node: #{id}"}
 
@@ -303,8 +303,8 @@ defmodule Manfrod.Memory.Retrospector do
     end
   end
 
-  def tool_delete_link(%{node_a_id: a, node_b_id: b}) do
-    case Memory.delete_link(a, b) do
+  def tool_delete_link(user_id, %{node_a_id: a, node_b_id: b}) do
+    case Memory.delete_link(user_id, a, b) do
       {:ok, _link} ->
         {:ok, "Deleted link: #{a} <-> #{b}"}
 
@@ -313,8 +313,8 @@ defmodule Manfrod.Memory.Retrospector do
     end
   end
 
-  def tool_list_links(%{id: id}) do
-    linked = Memory.get_node_links_with_context(id)
+  def tool_list_links(user_id, %{id: id}) do
+    linked = Memory.get_node_links_with_context(user_id, id)
 
     if linked == [] do
       {:ok, "Node #{id} has no links (orphan)."}
@@ -331,8 +331,8 @@ defmodule Manfrod.Memory.Retrospector do
     end
   end
 
-  def tool_graph_stats(_args) do
-    stats = Memory.graph_stats()
+  def tool_graph_stats(user_id, _args) do
+    stats = Memory.graph_stats(user_id)
 
     {:ok,
      """
@@ -357,36 +357,36 @@ defmodule Manfrod.Memory.Retrospector do
 
   Returns :ok or {:error, reason}.
   """
-  def process_slipbox(opts \\ []) do
+  def process_slipbox(user_id, opts \\ []) do
     batch_size = Keyword.get(opts, :batch_size, 20)
     review_budget = Keyword.get(opts, :review_budget, 25)
 
-    slipbox = Memory.get_slipbox_nodes(limit: batch_size)
-    review_sample = build_review_sample(review_budget)
+    slipbox = Memory.get_slipbox_nodes(user_id, limit: batch_size)
+    review_sample = build_review_sample(user_id, review_budget)
 
     if slipbox == [] and review_sample == [] do
-      Logger.debug("Retrospector: nothing to process (empty graph)")
+      Logger.debug("Retrospector: nothing to process for user #{user_id} (empty graph)")
       :ok
     else
       Logger.info(
-        "Retrospector: processing #{length(slipbox)} slipbox nodes, reviewing #{length(review_sample)} graph nodes"
+        "Retrospector: processing #{length(slipbox)} slipbox nodes, reviewing #{length(review_sample)} graph nodes for user #{user_id}"
       )
 
-      run_agent(slipbox, review_sample)
+      run_agent(user_id, slipbox, review_sample)
     end
   end
 
   # Build a review sample using priority cascade:
   # orphans → weakly connected → stalest → random
   # Each tier fills remaining budget, deduplicating by node ID.
-  defp build_review_sample(budget) do
-    orphans = Memory.get_orphan_nodes(limit: budget)
+  defp build_review_sample(user_id, budget) do
+    orphans = Memory.get_orphan_nodes(user_id, limit: budget)
     seen = MapSet.new(orphans, & &1.id)
     remaining = budget - length(orphans)
 
     {weak, seen, remaining} =
       if remaining > 0 do
-        nodes = Memory.get_weakly_connected_nodes(limit: remaining + MapSet.size(seen))
+        nodes = Memory.get_weakly_connected_nodes(user_id, limit: remaining + MapSet.size(seen))
         new = Enum.reject(nodes, fn n -> MapSet.member?(seen, n.id) end) |> Enum.take(remaining)
         {new, MapSet.union(seen, MapSet.new(new, & &1.id)), remaining - length(new)}
       else
@@ -395,7 +395,7 @@ defmodule Manfrod.Memory.Retrospector do
 
     {stale, seen, remaining} =
       if remaining > 0 do
-        nodes = Memory.get_stalest_nodes(limit: remaining + MapSet.size(seen))
+        nodes = Memory.get_stalest_nodes(user_id, limit: remaining + MapSet.size(seen))
         new = Enum.reject(nodes, fn n -> MapSet.member?(seen, n.id) end) |> Enum.take(remaining)
         {new, MapSet.union(seen, MapSet.new(new, & &1.id)), remaining - length(new)}
       else
@@ -404,7 +404,7 @@ defmodule Manfrod.Memory.Retrospector do
 
     random =
       if remaining > 0 do
-        nodes = Memory.get_random_nodes(remaining + MapSet.size(seen))
+        nodes = Memory.get_random_nodes(user_id, remaining + MapSet.size(seen))
         Enum.reject(nodes, fn n -> MapSet.member?(seen, n.id) end) |> Enum.take(remaining)
       else
         []
@@ -415,11 +415,12 @@ defmodule Manfrod.Memory.Retrospector do
 
   # Private
 
-  defp run_agent(slipbox, review_sample) do
+  defp run_agent(user_id, slipbox, review_sample) do
     slipbox_text = format_nodes(slipbox)
     review_text = format_nodes(review_sample)
 
     Events.broadcast(:retrospection_started, %{
+      user_id: user_id,
       source: :retrospector,
       meta: %{slipbox_count: length(slipbox), review_count: length(review_sample)}
     })
@@ -431,7 +432,7 @@ defmodule Manfrod.Memory.Retrospector do
       ReqLLM.Context.user(user_message)
     ]
 
-    case call_with_tools(messages, 0, %{
+    case call_with_tools(user_id, messages, 0, %{
            nodes_processed: 0,
            nodes_updated: 0,
            links_created: 0,
@@ -440,9 +441,10 @@ defmodule Manfrod.Memory.Retrospector do
            links_deleted: 0
          }) do
       {:ok, _final_text, stats} ->
-        Logger.info("Retrospector: agent completed successfully")
+        Logger.info("Retrospector: agent completed successfully for user #{user_id}")
 
         Events.broadcast(:retrospection_completed, %{
+          user_id: user_id,
           source: :retrospector,
           meta: stats
         })
@@ -450,9 +452,10 @@ defmodule Manfrod.Memory.Retrospector do
         :ok
 
       {:error, reason} = err ->
-        Logger.error("Retrospector: agent failed: #{inspect(reason)}")
+        Logger.error("Retrospector: agent failed for user #{user_id}: #{inspect(reason)}")
 
         Events.broadcast(:retrospection_failed, %{
+          user_id: user_id,
           source: :retrospector,
           meta: %{reason: inspect(reason)}
         })
@@ -500,11 +503,11 @@ defmodule Manfrod.Memory.Retrospector do
     slipbox_section <> review_section
   end
 
-  defp call_with_tools(messages, iteration, stats) do
+  defp call_with_tools(user_id, messages, iteration, stats) do
     if iteration > 150 do
       {:error, :max_iterations}
     else
-      case LLM.generate_text(messages, tools: tools(), purpose: :retrospector) do
+      case LLM.generate_text(messages, tools: tools(user_id), purpose: :retrospector) do
         {:ok, response} ->
           case ReqLLM.Response.finish_reason(response) do
             :tool_calls ->
@@ -523,7 +526,7 @@ defmodule Manfrod.Memory.Retrospector do
               {messages_with_results, new_stats} =
                 Enum.reduce(tool_calls, {messages_with_assistant, stats}, fn tool_call,
                                                                              {msgs, acc_stats} ->
-                  result = execute_tool(tool_call)
+                  result = execute_tool(user_id, tool_call)
 
                   tool_result_msg =
                     ReqLLM.Context.tool_result(tool_call.id, tool_call.function.name, result)
@@ -533,7 +536,7 @@ defmodule Manfrod.Memory.Retrospector do
                 end)
 
               # Continue
-              call_with_tools(messages_with_results, iteration + 1, new_stats)
+              call_with_tools(user_id, messages_with_results, iteration + 1, new_stats)
 
             _other ->
               text = ReqLLM.Response.text(response) || ""
@@ -555,13 +558,13 @@ defmodule Manfrod.Memory.Retrospector do
   defp update_stats(stats, "delete_link"), do: Map.update!(stats, :links_deleted, &(&1 + 1))
   defp update_stats(stats, _tool), do: stats
 
-  defp execute_tool(tool_call) do
+  defp execute_tool(user_id, tool_call) do
     tool_name = tool_call.function.name
     args_json = tool_call.function.arguments
 
     case Jason.decode(args_json) do
       {:ok, args} ->
-        tool = Enum.find(tools(), &(&1.name == tool_name))
+        tool = Enum.find(tools(user_id), &(&1.name == tool_name))
 
         if tool do
           case ReqLLM.Tool.execute(tool, args) do

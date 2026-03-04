@@ -11,16 +11,29 @@ defmodule ManfrodWeb.GraphLive do
   """
   use ManfrodWeb, :live_view
 
+  alias Manfrod.Accounts
   alias Manfrod.Memory
 
   @impl true
   def mount(_params, _session, socket) do
-    graph_data = Memory.get_graph_data()
-    soul = Memory.get_soul()
-    stats = Memory.graph_stats()
+    users = Accounts.list_users()
+    current_user = List.first(users)
+
+    {graph_data, soul, stats} =
+      if current_user do
+        {
+          Memory.get_graph_data(current_user.id),
+          Memory.get_soul(current_user.id),
+          Memory.graph_stats(current_user.id)
+        }
+      else
+        {%{nodes: [], edges: []}, nil, empty_stats()}
+      end
 
     socket =
       socket
+      |> assign(users: users)
+      |> assign(current_user: current_user)
       |> assign(graph_data: graph_data)
       |> assign(soul_id: soul && soul.id)
       |> assign(selected_node: nil)
@@ -34,8 +47,9 @@ defmodule ManfrodWeb.GraphLive do
 
   @impl true
   def handle_event("node_clicked", %{"id" => node_id}, socket) do
-    node = Memory.get_node(node_id)
-    links = Memory.get_node_links(node_id)
+    user_id = socket.assigns.current_user && socket.assigns.current_user.id
+    node = user_id && Memory.get_node(user_id, node_id)
+    links = if node, do: Memory.get_node_links(user_id, node_id), else: []
 
     selected =
       if node do
@@ -70,7 +84,9 @@ defmodule ManfrodWeb.GraphLive do
   end
 
   def handle_event("search", %{"query" => query}, socket) do
-    case Memory.search(query, limit: 20, expand_query: false) do
+    user_id = socket.assigns.current_user && socket.assigns.current_user.id
+
+    case user_id && Memory.search(user_id, query, limit: 20, expand_query: false) do
       {:ok, nodes} when nodes != [] ->
         ids = Enum.map(nodes, & &1.id)
         first_id = List.first(ids)
@@ -104,9 +120,42 @@ defmodule ManfrodWeb.GraphLive do
     {:noreply, socket}
   end
 
+  def handle_event("select_user", %{"user_id" => user_id}, socket) do
+    current_user = Enum.find(socket.assigns.users, &(&1.id == user_id))
+
+    {graph_data, soul, stats} =
+      if current_user do
+        {
+          Memory.get_graph_data(current_user.id, filter: socket.assigns.filter),
+          Memory.get_soul(current_user.id),
+          Memory.graph_stats(current_user.id)
+        }
+      else
+        {%{nodes: [], edges: []}, nil, empty_stats()}
+      end
+
+    socket =
+      socket
+      |> assign(current_user: current_user)
+      |> assign(graph_data: graph_data)
+      |> assign(soul_id: soul && soul.id)
+      |> assign(selected_node: nil)
+      |> assign(search_query: "")
+      |> assign(search_results: [])
+      |> assign(stats: stats)
+      |> push_event("update_graph", graph_data)
+
+    {:noreply, socket}
+  end
+
   def handle_event("set_filter", %{"filter" => filter}, socket) do
     filter_atom = String.to_existing_atom(filter)
-    graph_data = Memory.get_graph_data(filter: filter_atom)
+    user_id = socket.assigns.current_user && socket.assigns.current_user.id
+
+    graph_data =
+      if user_id,
+        do: Memory.get_graph_data(user_id, filter: filter_atom),
+        else: %{nodes: [], edges: []}
 
     socket =
       socket
@@ -119,8 +168,9 @@ defmodule ManfrodWeb.GraphLive do
 
   def handle_event("select_linked_node", %{"id" => node_id}, socket) do
     # Select a linked node from the panel
-    node = Memory.get_node(node_id)
-    links = Memory.get_node_links(node_id)
+    user_id = socket.assigns.current_user && socket.assigns.current_user.id
+    node = user_id && Memory.get_node(user_id, node_id)
+    links = if node, do: Memory.get_node_links(user_id, node_id), else: []
 
     selected =
       if node do
@@ -176,6 +226,23 @@ defmodule ManfrodWeb.GraphLive do
                 <% end %>
               </div>
             </form>
+
+            <%!-- User Picker --%>
+            <%= if length(@users) > 1 do %>
+              <form phx-change="select_user" class="flex items-center gap-2 text-xs">
+                <span class="text-zinc-500">User:</span>
+                <select
+                  name="user_id"
+                  class="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-200 focus:outline-none focus:border-blue-500"
+                >
+                  <%= for user <- @users do %>
+                    <option value={user.id} selected={@current_user && @current_user.id == user.id}>
+                      <%= user.name || user.slack_id %>
+                    </option>
+                  <% end %>
+                </select>
+              </form>
+            <% end %>
 
             <%!-- Filters --%>
             <div class="flex items-center gap-2 text-xs">
@@ -374,5 +441,16 @@ defmodule ManfrodWeb.GraphLive do
 
   defp format_date(%NaiveDateTime{} = dt) do
     Calendar.strftime(dt, "%Y-%m-%d %H:%M")
+  end
+
+  defp empty_stats do
+    %{
+      total_nodes: 0,
+      total_links: 0,
+      slipbox_count: 0,
+      orphan_count: 0,
+      weakly_connected_count: 0,
+      link_to_note_ratio: 0.0
+    }
   end
 end

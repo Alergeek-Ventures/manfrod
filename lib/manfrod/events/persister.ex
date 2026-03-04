@@ -24,9 +24,9 @@ defmodule Manfrod.Events.Persister do
 
   @impl true
   def init(_opts) do
-    Events.subscribe()
+    Events.subscribe_global()
     schedule_cleanup()
-    Logger.info("Events.Persister started, subscribed to activity events")
+    Logger.info("Events.Persister started, subscribed to global activity events")
     {:ok, %{}}
   end
 
