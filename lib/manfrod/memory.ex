@@ -40,12 +40,15 @@ defmodule Manfrod.Memory do
   end
 
   @doc """
-  Get all pending messages for a user (not yet assigned to a conversation).
+  Get all pending messages for a user and session (not yet assigned to a conversation).
   Ordered by received_at ascending.
   """
-  def get_pending_messages(user_id) do
+  def get_pending_messages(user_id, session_key) do
     Message
-    |> where([m], m.user_id == ^user_id and is_nil(m.conversation_id))
+    |> where(
+      [m],
+      m.user_id == ^user_id and m.session_key == ^session_key and is_nil(m.conversation_id)
+    )
     |> order_by([m], asc: m.received_at)
     |> Repo.all()
   end
@@ -53,14 +56,17 @@ defmodule Manfrod.Memory do
   # --- Conversations ---
 
   @doc """
-  Close a conversation for a user: create conversation record and link all pending messages.
+  Close a conversation for a user session: create conversation record and link
+  all pending messages for that session.
+
   Returns {:ok, conversation} or {:error, changeset}.
 
   Expects attrs with :summary key. started_at and ended_at are computed from messages.
+  The session_key is stored on the conversation record.
   """
-  def close_conversation(user_id, attrs) do
+  def close_conversation(user_id, session_key, attrs) do
     Repo.transaction(fn ->
-      messages = get_pending_messages(user_id)
+      messages = get_pending_messages(user_id, session_key)
 
       if messages == [] do
         Repo.rollback(:no_pending_messages)
@@ -73,6 +79,7 @@ defmodule Manfrod.Memory do
         attrs
         |> Map.put(:started_at, started_at)
         |> Map.put(:ended_at, ended_at)
+        |> Map.put(:session_key, session_key)
 
       case %Conversation{user_id: user_id}
            |> Conversation.changeset(conversation_attrs)

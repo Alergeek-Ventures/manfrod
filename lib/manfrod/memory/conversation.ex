@@ -19,6 +19,7 @@ defmodule Manfrod.Memory.Conversation do
     field :started_at, :utc_datetime
     field :ended_at, :utc_datetime
     field :summary, :string
+    field :session_key, :string
 
     belongs_to :user, User
     has_many :messages, Message
@@ -29,7 +30,7 @@ defmodule Manfrod.Memory.Conversation do
 
   def changeset(conversation, attrs) do
     conversation
-    |> cast(attrs, [:started_at, :ended_at, :summary])
-    |> validate_required([:started_at, :ended_at, :summary])
+    |> cast(attrs, [:started_at, :ended_at, :summary, :session_key])
+    |> validate_required([:started_at, :ended_at, :summary, :session_key])
   end
 end

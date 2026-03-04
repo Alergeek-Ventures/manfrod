@@ -8,7 +8,9 @@ defmodule Manfrod.AgentTest do
   @moduletag :slow
 
   # These tests require a running LLM backend and are skipped in CI.
-  # They verify the per-user Agent lifecycle: start → process → respond → idle.
+  # They verify the per-session Agent lifecycle: start → process → respond → idle.
+
+  @test_session_key "D0001:1700000000.000001"
 
   defp test_user_id_for_agent do
     user = insert_user!(%{slack_id: "U_AGENT_TEST", name: "Agent Test User"})
@@ -23,7 +25,7 @@ defmodule Manfrod.AgentTest do
     end
 
     test "broadcasts :thinking when processing message", %{user_id: user_id} do
-      Agent.send_message(user_id, %{
+      Agent.send_message(user_id, @test_session_key, %{
         content: "Test message #{System.unique_integer()}",
         source: :test,
         reply_to: self()
@@ -34,7 +36,7 @@ defmodule Manfrod.AgentTest do
     end
 
     test "broadcasts :responding after processing", %{user_id: user_id} do
-      Agent.send_message(user_id, %{
+      Agent.send_message(user_id, @test_session_key, %{
         content: "Quick test #{System.unique_integer()}",
         source: :test,
         reply_to: self()
@@ -62,7 +64,7 @@ defmodule Manfrod.AgentTest do
       # 3. All messages get processed
 
       # Send first message
-      Agent.send_message(user_id, %{
+      Agent.send_message(user_id, @test_session_key, %{
         content: "First message #{System.unique_integer()}",
         source: :test,
         reply_to: self()
@@ -72,7 +74,7 @@ defmodule Manfrod.AgentTest do
       assert_receive {:activity, %{type: :thinking, source: :test}}, 60_000
 
       # Immediately send second message while first is processing
-      Agent.send_message(user_id, %{
+      Agent.send_message(user_id, @test_session_key, %{
         content: "Second message (interrupt) #{System.unique_integer()}",
         source: :test,
         reply_to: self()
@@ -109,7 +111,7 @@ defmodule Manfrod.AgentTest do
       {:ok, pid} =
         DynamicSupervisor.start_child(
           Manfrod.Agent.DynamicSupervisor,
-          {Manfrod.Agent.Server, user_id}
+          {Manfrod.Agent.Server, {user_id, @test_session_key}}
         )
 
       # Send :loop - should be safe even during work
@@ -127,7 +129,7 @@ defmodule Manfrod.AgentTest do
       {:ok, pid} =
         DynamicSupervisor.start_child(
           Manfrod.Agent.DynamicSupervisor,
-          {Manfrod.Agent.Server, user_id}
+          {Manfrod.Agent.Server, {user_id, @test_session_key}}
         )
 
       # Send multiple :loop messages rapidly

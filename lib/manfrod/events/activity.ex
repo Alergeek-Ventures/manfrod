@@ -97,6 +97,7 @@ defmodule Manfrod.Events.Activity do
   @type t :: %__MODULE__{
           id: String.t(),
           user_id: String.t() | nil,
+          session_key: String.t() | nil,
           source: atom(),
           reply_to: term(),
           type: activity_type(),
@@ -105,7 +106,7 @@ defmodule Manfrod.Events.Activity do
         }
 
   @enforce_keys [:id, :type, :timestamp]
-  defstruct [:id, :user_id, :source, :reply_to, :type, :meta, :timestamp]
+  defstruct [:id, :user_id, :session_key, :source, :reply_to, :type, :meta, :timestamp]
 
   @doc """
   Create a new Activity event.
@@ -123,6 +124,7 @@ defmodule Manfrod.Events.Activity do
       id: generate_id(),
       type: type,
       user_id: Map.get(attrs, :user_id),
+      session_key: Map.get(attrs, :session_key),
       source: Map.get(attrs, :source),
       reply_to: Map.get(attrs, :reply_to),
       meta: Map.get(attrs, :meta, %{}),

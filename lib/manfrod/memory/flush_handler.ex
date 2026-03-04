@@ -25,10 +25,16 @@ defmodule Manfrod.Memory.FlushHandler do
   end
 
   @impl true
-  def handle_info({:activity, %Activity{type: :idle, user_id: user_id}}, state)
-      when is_binary(user_id) do
-    Logger.info("FlushHandler: idle detected for user #{user_id}, triggering extraction")
-    Extractor.extract_async(user_id)
+  def handle_info(
+        {:activity, %Activity{type: :idle, user_id: user_id, session_key: session_key}},
+        state
+      )
+      when is_binary(user_id) and is_binary(session_key) do
+    Logger.info(
+      "FlushHandler: idle detected for user #{user_id}, session #{session_key}, triggering extraction"
+    )
+
+    Extractor.extract_async(user_id, session_key)
     {:noreply, state}
   end
 

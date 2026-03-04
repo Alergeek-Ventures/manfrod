@@ -1,9 +1,9 @@
 defmodule Manfrod.Workers.TriggerWorker do
   @moduledoc """
-  Executes a scheduled trigger by sending a prompt to the Agent.
+  Executes a scheduled trigger by sending a prompt to the Agent via Proactive.
 
-  Responses are broadcast on the event bus with `source: :scheduled`.
-  Transport adapters subscribe to these events to deliver them to the appropriate channel.
+  Proactive creates a new DM thread for the user and routes the Agent's
+  response there. The user sees the response and can reply to continue.
 
   ## Job args
 
@@ -23,6 +23,7 @@ defmodule Manfrod.Workers.TriggerWorker do
   require Logger
 
   alias Manfrod.Memory
+  alias Manfrod.Proactive
 
   @impl Oban.Worker
   def perform(%Oban.Job{args: %{"recurring_reminder_id" => reminder_id, "user_id" => user_id}}) do
@@ -38,7 +39,7 @@ defmodule Manfrod.Workers.TriggerWorker do
       reminder ->
         if reminder.enabled do
           prompt = build_recurring_reminder_prompt(reminder)
-          send_to_agent(user_id, prompt, "recurring:#{reminder.name}")
+          send_proactive(user_id, prompt, "recurring:#{reminder.name}")
         else
           Logger.info(
             "TriggerWorker: recurring reminder '#{reminder.name}' is disabled, skipping"
@@ -53,18 +54,25 @@ defmodule Manfrod.Workers.TriggerWorker do
         args: %{"prompt" => prompt, "trigger_id" => trigger_id, "user_id" => user_id}
       }) do
     Logger.info("TriggerWorker: executing one-time trigger '#{trigger_id}' for user #{user_id}")
-    send_to_agent(user_id, prompt, trigger_id)
+    send_proactive(user_id, prompt, trigger_id)
   end
 
-  defp send_to_agent(user_id, prompt, trigger_id) do
-    Manfrod.Agent.send_message(user_id, %{
-      content: prompt,
-      source: :scheduled,
-      reply_to: nil
-    })
+  defp send_proactive(user_id, prompt, trigger_id) do
+    case Proactive.send(user_id, prompt) do
+      :ok ->
+        Logger.info(
+          "TriggerWorker: trigger '#{trigger_id}' sent via Proactive for user #{user_id}"
+        )
 
-    Logger.info("TriggerWorker: trigger '#{trigger_id}' sent to Agent for user #{user_id}")
-    :ok
+        :ok
+
+      {:error, reason} ->
+        Logger.error(
+          "TriggerWorker: failed to send trigger '#{trigger_id}' for user #{user_id}: #{inspect(reason)}"
+        )
+
+        {:error, reason}
+    end
   end
 
   defp build_recurring_reminder_prompt(reminder) do

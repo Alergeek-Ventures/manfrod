@@ -17,6 +17,7 @@ defmodule Manfrod.Factory do
   def insert_user!(attrs \\ %{}) do
     defaults = %{
       slack_id: "U#{System.unique_integer([:positive])}",
+      slack_dm_channel_id: "D#{System.unique_integer([:positive])}",
       name: "Test User #{System.unique_integer([:positive])}"
     }
 
@@ -45,11 +46,16 @@ defmodule Manfrod.Factory do
 
   # Messages
 
+  @test_session_key "D0001:1700000000.000001"
+
+  def test_session_key, do: @test_session_key
+
   def message_attrs(attrs \\ %{}) do
     Map.merge(
       %{
         role: "user",
         content: "Test message #{System.unique_integer([:positive])}",
+        session_key: @test_session_key,
         received_at: DateTime.utc_now() |> DateTime.truncate(:second)
       },
       attrs
@@ -71,7 +77,8 @@ defmodule Manfrod.Factory do
       %{
         started_at: DateTime.add(now, -3600, :second),
         ended_at: now,
-        summary: "Test conversation #{System.unique_integer([:positive])}"
+        summary: "Test conversation #{System.unique_integer([:positive])}",
+        session_key: @test_session_key
       },
       attrs
     )

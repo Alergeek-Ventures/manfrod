@@ -38,40 +38,45 @@ defmodule Manfrod.Memory.Extractor do
   """
 
   @doc """
-  Fire-and-forget extraction triggered on idle for a specific user.
+  Fire-and-forget extraction triggered on idle for a specific session.
   Fetches pending messages from DB, processes them, stores results.
   """
-  def extract_async(user_id) do
-    Task.start(fn -> extract_and_store(user_id) end)
+  def extract_async(user_id, session_key) do
+    Task.start(fn -> extract_and_store(user_id, session_key) end)
     :ok
   end
 
   @doc """
-  Synchronous extraction and storage for a specific user.
+  Synchronous extraction and storage for a specific session.
   Returns {:ok, conversation, node_ids} or {:error, reason}.
   """
-  def extract_and_store(user_id) do
-    messages = Memory.get_pending_messages(user_id)
+  def extract_and_store(user_id, session_key) do
+    messages = Memory.get_pending_messages(user_id, session_key)
 
     if messages == [] do
-      Logger.debug("Extractor: no pending messages to process for user #{user_id}")
+      Logger.debug(
+        "Extractor: no pending messages to process for user #{user_id}, session #{session_key}"
+      )
+
       {:ok, nil, []}
     else
-      do_extract_and_store(user_id, messages)
+      do_extract_and_store(user_id, session_key, messages)
     end
   end
 
-  defp do_extract_and_store(user_id, messages) do
+  defp do_extract_and_store(user_id, session_key, messages) do
     conversation_text = format_messages(messages)
 
     Events.broadcast(:extraction_started, %{
       user_id: user_id,
+      session_key: session_key,
       source: :extractor,
       meta: %{message_count: length(messages)}
     })
 
     with {:ok, summary} <- generate_summary(conversation_text),
-         {:ok, conversation} <- Memory.close_conversation(user_id, %{summary: summary}),
+         {:ok, conversation} <-
+           Memory.close_conversation(user_id, session_key, %{summary: summary}),
          {:ok, node_ids} <- extract_and_create_nodes(user_id, conversation_text, conversation.id) do
       Logger.info(
         "Extracted conversation #{conversation.id} for user #{user_id}: #{length(node_ids)} nodes, summary: #{String.slice(summary, 0, 50)}..."
@@ -79,6 +84,7 @@ defmodule Manfrod.Memory.Extractor do
 
       Events.broadcast(:extraction_completed, %{
         user_id: user_id,
+        session_key: session_key,
         source: :extractor,
         meta: %{
           conversation_id: conversation.id,
@@ -90,14 +96,20 @@ defmodule Manfrod.Memory.Extractor do
       {:ok, conversation, node_ids}
     else
       {:error, :no_pending_messages} ->
-        Logger.debug("Extractor: no pending messages (race condition) for user #{user_id}")
+        Logger.debug(
+          "Extractor: no pending messages (race condition) for user #{user_id}, session #{session_key}"
+        )
+
         {:ok, nil, []}
 
       {:error, reason} = err ->
-        Logger.error("Extraction failed for user #{user_id}: #{inspect(reason)}")
+        Logger.error(
+          "Extraction failed for user #{user_id}, session #{session_key}: #{inspect(reason)}"
+        )
 
         Events.broadcast(:extraction_failed, %{
           user_id: user_id,
+          session_key: session_key,
           source: :extractor,
           meta: %{reason: inspect(reason)}
         })

@@ -17,6 +17,7 @@ defmodule Manfrod.Memory.Message do
   schema "messages" do
     field :role, :string
     field :content, :string
+    field :session_key, :string
     field :received_at, :utc_datetime
 
     belongs_to :user, User
@@ -30,8 +31,8 @@ defmodule Manfrod.Memory.Message do
   """
   def changeset(message, attrs) do
     message
-    |> cast(attrs, [:role, :content, :received_at, :conversation_id])
-    |> validate_required([:role, :content, :received_at])
+    |> cast(attrs, [:role, :content, :session_key, :received_at, :conversation_id])
+    |> validate_required([:role, :content, :session_key, :received_at])
     |> validate_inclusion(:role, ["user", "assistant"])
   end
 end

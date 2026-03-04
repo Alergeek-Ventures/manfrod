@@ -14,13 +14,20 @@ defmodule Manfrod.Accounts do
   @doc """
   Find a user by Slack ID, or create one if they don't exist.
 
+  The `slack_dm_channel_id` is required for user creation (first interaction
+  must be a DM). For existing users the DM channel is already stored.
+
   Returns `{:ok, %User{}}`. The name is updated if provided and different.
   """
-  def find_or_create_by_slack_id(slack_id, name \\ nil) do
+  def find_or_create_by_slack_id(slack_id, slack_dm_channel_id, name \\ nil) do
     case Repo.one(from(u in User, where: u.slack_id == ^slack_id)) do
       nil ->
         %User{}
-        |> User.changeset(%{slack_id: slack_id, name: name})
+        |> User.changeset(%{
+          slack_id: slack_id,
+          slack_dm_channel_id: slack_dm_channel_id,
+          name: name
+        })
         |> Repo.insert()
 
       %User{} = user ->
@@ -32,6 +39,16 @@ defmodule Manfrod.Accounts do
           {:ok, user}
         end
     end
+  end
+
+  @doc """
+  Find a user by Slack ID. Returns nil if not found.
+
+  Used for channel @mentions where user must already exist (first
+  interaction must be a DM).
+  """
+  def get_user_by_slack_id(slack_id) do
+    Repo.one(from(u in User, where: u.slack_id == ^slack_id))
   end
 
   @doc """

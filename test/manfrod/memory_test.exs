@@ -16,8 +16,9 @@ defmodule Manfrod.MemoryTest do
       assert msg.user_id == user_id
     end
 
-    test "get_pending_messages/1 returns messages without conversation" do
+    test "get_pending_messages/2 returns messages without conversation" do
       user_id = test_user_id()
+      session_key = test_session_key()
       m1 = insert_message!(%{received_at: ~U[2024-01-01 10:00:00Z]})
       m2 = insert_message!(%{received_at: ~U[2024-01-01 10:01:00Z]})
 
@@ -25,30 +26,49 @@ defmodule Manfrod.MemoryTest do
       conv = insert_conversation!()
       Repo.update!(Ecto.Changeset.change(m2, conversation_id: conv.id))
 
-      pending = Memory.get_pending_messages(user_id)
+      pending = Memory.get_pending_messages(user_id, session_key)
       assert length(pending) == 1
       assert hd(pending).id == m1.id
     end
 
-    test "get_pending_messages/1 returns messages ordered by received_at" do
+    test "get_pending_messages/2 returns messages ordered by received_at" do
       user_id = test_user_id()
+      session_key = test_session_key()
       m2 = insert_message!(%{received_at: ~U[2024-01-01 10:01:00Z]})
       m1 = insert_message!(%{received_at: ~U[2024-01-01 10:00:00Z]})
       m3 = insert_message!(%{received_at: ~U[2024-01-01 10:02:00Z]})
 
-      pending = Memory.get_pending_messages(user_id)
+      pending = Memory.get_pending_messages(user_id, session_key)
       assert Enum.map(pending, & &1.id) == [m1.id, m2.id, m3.id]
+    end
+
+    test "get_pending_messages/2 scopes by session_key" do
+      user_id = test_user_id()
+      session_a = "D0001:1700000001.000001"
+      session_b = "D0001:1700000002.000001"
+
+      _m1 = insert_message!(%{session_key: session_a, received_at: ~U[2024-01-01 10:00:00Z]})
+      _m2 = insert_message!(%{session_key: session_b, received_at: ~U[2024-01-01 10:01:00Z]})
+
+      pending_a = Memory.get_pending_messages(user_id, session_a)
+      pending_b = Memory.get_pending_messages(user_id, session_b)
+      assert length(pending_a) == 1
+      assert length(pending_b) == 1
     end
   end
 
   describe "conversations" do
-    test "close_conversation/2 creates conversation and links pending messages" do
+    test "close_conversation/3 creates conversation and links pending messages" do
       user_id = test_user_id()
+      session_key = test_session_key()
       m1 = insert_message!(%{received_at: ~U[2024-01-01 10:00:00Z]})
       m2 = insert_message!(%{received_at: ~U[2024-01-01 10:05:00Z]})
 
-      assert {:ok, conv} = Memory.close_conversation(user_id, %{summary: "Test summary"})
+      assert {:ok, conv} =
+               Memory.close_conversation(user_id, session_key, %{summary: "Test summary"})
+
       assert conv.summary == "Test summary"
+      assert conv.session_key == session_key
       assert conv.started_at == ~U[2024-01-01 10:00:00Z]
       assert conv.ended_at == ~U[2024-01-01 10:05:00Z]
 
@@ -59,19 +79,41 @@ defmodule Manfrod.MemoryTest do
       assert m2_reloaded.conversation_id == conv.id
 
       # No more pending messages
-      assert Memory.get_pending_messages(user_id) == []
+      assert Memory.get_pending_messages(user_id, session_key) == []
     end
 
-    test "close_conversation/2 fails when no pending messages" do
+    test "close_conversation/3 fails when no pending messages" do
       user_id = test_user_id()
-      assert {:error, :no_pending_messages} = Memory.close_conversation(user_id, %{summary: "Test"})
+      session_key = test_session_key()
+
+      assert {:error, :no_pending_messages} =
+               Memory.close_conversation(user_id, session_key, %{summary: "Test"})
+    end
+
+    test "close_conversation/3 scopes to session" do
+      user_id = test_user_id()
+      session_a = "D0001:1700000001.000001"
+      session_b = "D0001:1700000002.000001"
+
+      _m1 = insert_message!(%{session_key: session_a, received_at: ~U[2024-01-01 10:00:00Z]})
+      _m2 = insert_message!(%{session_key: session_b, received_at: ~U[2024-01-01 10:01:00Z]})
+
+      # Close only session_a
+      assert {:ok, conv} =
+               Memory.close_conversation(user_id, session_a, %{summary: "Session A"})
+
+      assert conv.session_key == session_a
+
+      # session_b still has pending messages
+      assert length(Memory.get_pending_messages(user_id, session_b)) == 1
     end
 
     test "get_conversation_with_messages/2 preloads messages" do
       user_id = test_user_id()
+      session_key = test_session_key()
       m1 = insert_message!(%{received_at: ~U[2024-01-01 10:00:00Z]})
       _m2 = insert_message!(%{received_at: ~U[2024-01-01 10:05:00Z]})
-      {:ok, conv} = Memory.close_conversation(user_id, %{summary: "Test"})
+      {:ok, conv} = Memory.close_conversation(user_id, session_key, %{summary: "Test"})
 
       loaded = Memory.get_conversation_with_messages(user_id, conv.id)
       assert length(loaded.messages) == 2

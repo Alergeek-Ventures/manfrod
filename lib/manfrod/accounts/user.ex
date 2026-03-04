@@ -16,6 +16,7 @@ defmodule Manfrod.Accounts.User do
 
   schema "users" do
     field :slack_id, :string
+    field :slack_dm_channel_id, :string
     field :name, :string
 
     timestamps()
@@ -24,8 +25,8 @@ defmodule Manfrod.Accounts.User do
   @doc false
   def changeset(user, attrs) do
     user
-    |> cast(attrs, [:slack_id, :name])
-    |> validate_required([:slack_id])
+    |> cast(attrs, [:slack_id, :slack_dm_channel_id, :name])
+    |> validate_required([:slack_id, :slack_dm_channel_id])
     |> unique_constraint(:slack_id)
   end
 end

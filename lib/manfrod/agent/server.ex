@@ -1,17 +1,18 @@
 defmodule Manfrod.Agent.Server do
   @moduledoc """
-  Per-user Agent GenServer.
+  Per-session Agent GenServer.
 
-  Each user gets their own Agent process with isolated conversation history,
-  inbox, and flush timer. Processes are started on demand and terminate
-  after an idle timeout (60 minutes), triggering memory extraction.
+  Each session (user + thread) gets its own Agent process with isolated
+  conversation history, inbox, and flush timer. Processes are started on
+  demand and terminate after an idle timeout (60 minutes), triggering
+  memory extraction for that session.
 
   ## Lifecycle
 
-  1. Started by `Agent.send_message/2` via DynamicSupervisor
+  1. Started by `Agent.send_message/3` via DynamicSupervisor
   2. Processes messages, calls LLM, broadcasts events on per-user topic
-  3. On idle timeout: broadcasts `:idle`, terminates normally
-  4. Next message for the user starts a fresh process
+  3. On idle timeout: broadcasts `:idle` (with session_key), terminates normally
+  4. Next message for the same session starts a fresh process
   """
 
   use GenServer, restart: :temporary
@@ -216,15 +217,15 @@ defmodule Manfrod.Agent.Server do
 
   # Client API
 
-  def start_link(user_id) do
-    GenServer.start_link(__MODULE__, user_id, name: via(user_id))
+  def start_link({user_id, session_key}) do
+    GenServer.start_link(__MODULE__, {user_id, session_key}, name: via(user_id, session_key))
   end
 
   @doc """
-  Registry-based name for per-user Agent processes.
+  Registry-based name for per-session Agent processes.
   """
-  def via(user_id) do
-    {:via, Registry, {Manfrod.Agent.Registry, user_id}}
+  def via(user_id, session_key) do
+    {:via, Registry, {Manfrod.Agent.Registry, {user_id, session_key}}}
   end
 
   # Server Callbacks
@@ -233,14 +234,14 @@ defmodule Manfrod.Agent.Server do
   @flush_delay :timer.minutes(60)
 
   @impl true
-  def init(user_id) do
+  def init({user_id, session_key}) do
     system_message = ReqLLM.Context.system(build_system_prompt(user_id))
 
     # Subscribe to own PubSub topic for FlushHandler-like behavior
     Events.subscribe(user_id)
 
     # Restore any pending messages from DB (survives crashes/restarts)
-    pending = Memory.get_pending_messages(user_id)
+    pending = Memory.get_pending_messages(user_id, session_key)
     restored_messages = Enum.map(pending, &message_to_context/1)
 
     # If we restored messages, add a system notice so agent knows it restarted
@@ -258,11 +259,12 @@ defmodule Manfrod.Agent.Server do
         [system_message]
       end
 
-    Logger.info("Agent.Server started for user #{user_id}")
+    Logger.info("Agent.Server started for user #{user_id}, session #{session_key}")
 
     {:ok,
      %{
        user_id: user_id,
+       session_key: session_key,
        messages: messages,
        inbox: [],
        flush_timer: nil
@@ -293,7 +295,13 @@ defmodule Manfrod.Agent.Server do
   @impl true
   def handle_cast({:message, message}, state) do
     %{content: content, source: source, reply_to: reply_to} = message
-    event_ctx = %{user_id: state.user_id, source: source, reply_to: reply_to}
+
+    event_ctx = %{
+      user_id: state.user_id,
+      session_key: state.session_key,
+      source: source,
+      reply_to: reply_to
+    }
 
     # Queue message and trigger loop
     state = %{state | inbox: state.inbox ++ [{content, event_ctx}]}
@@ -302,7 +310,7 @@ defmodule Manfrod.Agent.Server do
   end
 
   def handle_cast({:trigger_idle, event_ctx}, state) do
-    Logger.info("Manual idle triggered via /idle command for user #{state.user_id}")
+    Logger.info("Manual idle triggered for user #{state.user_id}, session #{state.session_key}")
 
     # Cancel any pending flush timer
     if state.flush_timer, do: Process.cancel_timer(state.flush_timer)
@@ -317,7 +325,7 @@ defmodule Manfrod.Agent.Server do
   # Handle idle from FlushHandler-like behavior (self-subscribes to own topic)
   @impl true
   def handle_info({:flush, event_ctx}, state) do
-    Logger.info("Conversation idle timeout for user #{state.user_id} - triggering extraction")
+    Logger.info("Session idle timeout for user #{state.user_id}, session #{state.session_key}")
 
     # Broadcast idle event
     Events.broadcast(:idle, event_ctx)
@@ -420,6 +428,7 @@ defmodule Manfrod.Agent.Server do
           Memory.create_message(state.user_id, %{
             role: "user",
             content: content,
+            session_key: state.session_key,
             received_at: now
           })
 
@@ -517,6 +526,7 @@ defmodule Manfrod.Agent.Server do
           Memory.create_message(state.user_id, %{
             role: "assistant",
             content: response_text,
+            session_key: state.session_key,
             received_at: DateTime.utc_now() |> DateTime.truncate(:second)
           })
 
