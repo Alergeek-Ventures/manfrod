@@ -5,7 +5,7 @@ defmodule Manfrod.Events.Activity do
   ## Types
 
   Messages:
-  - `:message_received` - incoming message from any source (telegram, web, cron)
+  - `:message_received` - incoming message from any source (slack, web, scheduled)
 
   Actions (tool/command execution):
   - `:action_started` - action beginning (shell, eval, code write, etc.)
@@ -50,7 +50,7 @@ defmodule Manfrod.Events.Activity do
   ## Fields
 
   - `id` - unique event id (UUID)
-  - `source` - origin of the event (:telegram, :memory, :extractor, :retrospector, :logger, etc.)
+  - `source` - origin of the event (:slack, :memory, :extractor, :retrospector, :logger, etc.)
   - `reply_to` - opaque reference for response routing (chat_id, pid, etc.)
   - `type` - activity type atom
   - `meta` - optional map with extra context
@@ -111,10 +111,10 @@ defmodule Manfrod.Events.Activity do
 
   ## Examples
 
-      Activity.new(:message_received, %{source: :telegram, meta: %{content: "Hello", from_id: 123}})
+      Activity.new(:message_received, %{source: :slack, meta: %{content: "Hello"}})
       Activity.new(:action_started, %{source: :agent, meta: %{action: "run_shell", action_id: "abc123", args: %{command: "ls"}}})
       Activity.new(:action_completed, %{source: :agent, meta: %{action_id: "abc123", result: "file1\\nfile2", duration_ms: 150, success: true}})
-      Activity.new(:thinking, %{source: :telegram, reply_to: 456})
+      Activity.new(:thinking, %{source: :slack, reply_to: %{channel: "D123", thread_ts: "1234.5678"}})
       Activity.new(:log, %{source: :logger, meta: %{level: :error, message: "Something failed", module: MyApp.Worker}})
   """
   def new(type, attrs \\ %{}) when is_atom(type) do

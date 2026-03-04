@@ -50,3 +50,7 @@ config :manfrod, :voyage_api_key, env!("VOYAGE_API_KEY", :string?)
 
 # Groq API (query expansion)
 config :manfrod, :groq_api_key, env!("GROQ_API_KEY", :string?)
+
+# Slack (Socket Mode bot)
+config :manfrod, :slack_app_token, env!("SLACK_APP_TOKEN", :string?)
+config :manfrod, :slack_bot_token, env!("SLACK_BOT_TOKEN", :string?)

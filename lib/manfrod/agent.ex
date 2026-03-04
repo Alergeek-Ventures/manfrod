@@ -13,7 +13,7 @@ defmodule Manfrod.Agent do
   - `:responding` - final response ready
   - `:idle` - conversation timed out
 
-  Subscribers (Telegram.ActivityHandler, Memory.FlushHandler, ActivityLive) handle
+  Subscribers (Slack.ActivityHandler, Memory.FlushHandler, ActivityLive) handle
   these events appropriately for their context.
 
   ## Message persistence

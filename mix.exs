@@ -43,6 +43,7 @@ defmodule Manfrod.MixProject do
       {:crontab, "~> 1.1"},
       {:tzdata, "~> 1.1"},
       {:tailwind, "~> 0.3", runtime: Mix.env() == :dev},
+      {:websockex, "~> 0.5.1"},
       {:mox, "~> 1.0", only: :test}
     ]
   end
