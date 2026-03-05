@@ -226,6 +226,28 @@ defmodule Manfrod.Slack.ActivityHandler do
     {:noreply, state}
   end
 
+  # -- :idle (conversation wrap-up) --------------------------------------------
+
+  @idle_message "───\nWrapping up this conversation. I've saved what I learned to memory. Next message starts fresh.\n───"
+
+  def handle_info(
+        {:activity,
+         %Activity{
+           type: :idle,
+           reply_to: %{channel: channel, thread_ts: thread_ts}
+         }},
+        state
+      ) do
+    MessageServer.ensure_started(state.bot_token, channel)
+
+    MessageServer.send_message(channel, %{
+      thread_ts: thread_ts,
+      text: @idle_message
+    })
+
+    {:noreply, state}
+  end
+
   # -- Events without reply_to or with nil reply_to: ignore -------------------
 
   def handle_info({:activity, %Activity{}}, state) do
