@@ -40,6 +40,7 @@ defmodule Manfrod.MixProject do
       {:pgvector, "~> 0.3"},
       {:paradex, "~> 0.4"},
       {:oban, "~> 2.20"},
+      {:oban_web, "~> 2.11"},
       {:crontab, "~> 1.1"},
       {:tzdata, "~> 1.1"},
       {:tailwind, "~> 0.3", runtime: Mix.env() == :dev},

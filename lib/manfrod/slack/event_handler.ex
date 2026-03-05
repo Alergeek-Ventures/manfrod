@@ -46,7 +46,7 @@ defmodule Manfrod.Slack.EventHandler do
 
     if text_present?(text) and slack_user_id do
       if dm_channel?(channel) do
-        handle_dm_message(event, text, slack_user_id, channel)
+        handle_dm_message(bot, event, text, slack_user_id, channel)
       else
         handle_channel_thread_reply(event, bot, text, slack_user_id, channel)
       end
@@ -109,11 +109,17 @@ defmodule Manfrod.Slack.EventHandler do
 
   # -- DM messages: create user on first interaction, forward to Agent ---------
 
-  defp handle_dm_message(event, text, slack_user_id, channel) do
+  defp handle_dm_message(bot, event, text, slack_user_id, channel) do
     thread_ts = event["thread_ts"] || event["ts"]
     session_key = "#{channel}:#{thread_ts}"
 
-    {:ok, user} = Accounts.find_or_create_by_slack_id(slack_user_id, channel)
+    name =
+      case API.fetch_user_name(bot.token, slack_user_id) do
+        {:ok, name} -> name
+        :error -> nil
+      end
+
+    {:ok, user} = Accounts.find_or_create_by_slack_id(slack_user_id, channel, name)
 
     Agent.send_message(user.id, session_key, %{
       content: text,
@@ -195,10 +201,9 @@ defmodule Manfrod.Slack.EventHandler do
   end
 
   defp resolve_user_name(token, slack_user_id) do
-    case API.get("users.info", token, %{user: slack_user_id}) do
-      {:ok, %{"user" => %{"real_name" => name}}} when name != "" -> name
-      {:ok, %{"user" => %{"name" => name}}} -> name
-      _ -> nil
+    case API.fetch_user_name(token, slack_user_id) do
+      {:ok, name} -> name
+      :error -> nil
     end
   end
 end

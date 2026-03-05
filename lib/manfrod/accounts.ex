@@ -73,11 +73,40 @@ defmodule Manfrod.Accounts do
   end
 
   @doc """
+  Backfill display names from Slack for users without names.
+
+  Takes a Slack bot token. Iterates users where `name` is nil,
+  fetches their real name from Slack, and updates the user record.
+
+  Intended for one-time use from IEx:
+
+      Manfrod.Accounts.backfill_names_from_slack(System.get_env("SLACK_BOT_TOKEN"))
+  """
+  def backfill_names_from_slack(token) when is_binary(token) do
+    users_without_names =
+      User
+      |> where([u], is_nil(u.name))
+      |> Repo.all()
+
+    Enum.each(users_without_names, fn user ->
+      case Manfrod.Slack.API.fetch_user_name(token, user.slack_id) do
+        {:ok, name} ->
+          user
+          |> User.changeset(%{name: name})
+          |> Repo.update()
+
+        :error ->
+          :skip
+      end
+    end)
+  end
+
+  @doc """
   List all user IDs that have unprocessed slipbox nodes.
   Used by RetrospectionWorker to iterate per-user.
   """
   def user_ids_with_slipbox_nodes do
-    from(n in "nodes",
+    from(n in Manfrod.Memory.Node,
       where: is_nil(n.processed_at),
       distinct: n.user_id,
       select: n.user_id

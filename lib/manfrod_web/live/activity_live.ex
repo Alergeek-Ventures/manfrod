@@ -18,6 +18,7 @@ defmodule ManfrodWeb.ActivityLive do
   """
   use ManfrodWeb, :live_view
 
+  alias Manfrod.Accounts
   alias Manfrod.Events
   alias Manfrod.Events.Activity
   alias Manfrod.Events.Store
@@ -32,6 +33,7 @@ defmodule ManfrodWeb.ActivityLive do
       |> assign(show_all_logs: false)
       |> assign(expanded: MapSet.new())
       |> assign(filter: nil)
+      |> assign(users: [])
 
     {:ok, socket}
   end
@@ -49,10 +51,18 @@ defmodule ManfrodWeb.ActivityLive do
     # Load events based on filter
     events = load_events(filter, socket.assigns.show_all_logs)
 
+    users =
+      if connected?(socket) do
+        Accounts.list_users()
+      else
+        []
+      end
+
     socket =
       socket
       |> assign(filter: filter)
       |> assign(events: events)
+      |> assign(users: users)
 
     {:noreply, socket}
   end
@@ -62,11 +72,13 @@ defmodule ManfrodWeb.ActivityLive do
     to_str = Map.get(params, "to")
     source = Map.get(params, "source")
 
+    user_id = Map.get(params, "user_id")
+
     from_dt = parse_datetime(from_str)
     to_dt = parse_datetime(to_str)
 
-    if from_dt || to_dt || source do
-      %{from: from_dt, to: to_dt, source: source}
+    if from_dt || to_dt || source || user_id do
+      %{from: from_dt, to: to_dt, source: source, user_id: user_id}
     else
       nil
     end
@@ -81,6 +93,48 @@ defmodule ManfrodWeb.ActivityLive do
     end
   end
 
+  defp build_filter_params(nil, opts), do: build_filter_params(%{}, opts)
+
+  defp build_filter_params(filter, opts) do
+    params = %{}
+
+    params =
+      if filter[:from] do
+        Map.put(params, "from", DateTime.to_iso8601(filter.from))
+      else
+        params
+      end
+
+    params =
+      if filter[:to] do
+        Map.put(params, "to", DateTime.to_iso8601(filter.to))
+      else
+        params
+      end
+
+    params =
+      if filter[:source] do
+        Map.put(params, "source", filter.source)
+      else
+        params
+      end
+
+    # Apply modifications
+    params =
+      case Keyword.get(opts, :exclude) do
+        :user_id -> Map.delete(params, "user_id")
+        _ -> params
+      end
+
+    params =
+      case Keyword.get(opts, :put) do
+        {:user_id, uid} -> Map.put(params, "user_id", uid)
+        _ -> params
+      end
+
+    params
+  end
+
   defp load_events(nil, show_all_logs) do
     Store.list_recent_filtered(@max_events, include_all_logs: show_all_logs)
   end
@@ -90,7 +144,8 @@ defmodule ManfrodWeb.ActivityLive do
       include_all_logs: show_all_logs,
       from: filter.from,
       to: filter.to,
-      source: filter.source
+      source: filter.source,
+      user_id: filter.user_id
     ]
 
     Store.list_recent_filtered(@max_events, opts)
@@ -151,6 +206,19 @@ defmodule ManfrodWeb.ActivityLive do
     {:noreply, push_patch(socket, to: "/")}
   end
 
+  def handle_event("select_user", %{"user_id" => ""}, socket) do
+    # Clear user filter - rebuild URL without user_id
+    params = build_filter_params(socket.assigns.filter, exclude: :user_id)
+    path = if params == %{}, do: "/", else: "/?" <> URI.encode_query(params)
+    {:noreply, push_patch(socket, to: path)}
+  end
+
+  def handle_event("select_user", %{"user_id" => user_id}, socket) do
+    # Add user_id to existing filter params
+    params = build_filter_params(socket.assigns.filter, put: {:user_id, user_id})
+    {:noreply, push_patch(socket, to: "/?" <> URI.encode_query(params))}
+  end
+
   @impl true
   def render(assigns) do
     ~H"""
@@ -164,7 +232,29 @@ defmodule ManfrodWeb.ActivityLive do
 
         <%!-- Navbar --%>
         <header class="sticky top-0 z-10 bg-zinc-950 border-b border-zinc-700 px-4 py-3">
-          <div class="flex justify-end items-center">
+          <div class="flex justify-between items-center">
+            <%!-- User Filter --%>
+            <div class="flex items-center gap-2">
+              <%= if length(@users) > 0 do %>
+                <form phx-change="select_user" class="flex items-center gap-2 text-xs">
+                  <span class="text-zinc-500">User:</span>
+                  <select
+                    name="user_id"
+                    class="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-200 focus:outline-none focus:border-blue-500"
+                  >
+                    <option value="">all</option>
+                    <%= for user <- @users do %>
+                      <option
+                        value={user.id}
+                        selected={@filter && Map.get(@filter || %{}, :user_id) == user.id}
+                      >
+                        <%= user.name || user.slack_id %>
+                      </option>
+                    <% end %>
+                  </select>
+                </form>
+              <% end %>
+            </div>
             <div class="flex items-center gap-6">
               <label class="flex items-center gap-2 text-zinc-500 cursor-pointer text-xs hover:text-zinc-300 transition-colors">
                 <input
@@ -267,6 +357,13 @@ defmodule ManfrodWeb.ActivityLive do
     parts =
       if filter.to do
         parts ++ ["to #{format_datetime(filter.to)}"]
+      else
+        parts
+      end
+
+    parts =
+      if filter[:user_id] do
+        parts ++ ["user: #{filter.user_id}"]
       else
         parts
       end

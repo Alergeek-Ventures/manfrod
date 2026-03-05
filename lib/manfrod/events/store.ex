@@ -86,6 +86,7 @@ defmodule Manfrod.Events.Store do
     from_dt = Keyword.get(opts, :from)
     to_dt = Keyword.get(opts, :to)
     source = Keyword.get(opts, :source)
+    user_id = Keyword.get(opts, :user_id)
 
     query =
       AuditEvent
@@ -130,7 +131,50 @@ defmodule Manfrod.Events.Store do
         query
       end
 
+    # Apply user_id filter
+    query =
+      if user_id do
+        where(query, [e], e.user_id == ^user_id)
+      else
+        query
+      end
+
     query
+    |> Repo.all()
+    |> Enum.map(&AuditEvent.to_activity/1)
+  end
+
+  @doc """
+  List events within a retrospection run's time window.
+
+  Returns events from the retrospector and memory sources, excluding
+  the run-level events (started/completed/failed) and LLM telemetry.
+  Events are ordered chronologically (ascending) for conversation display.
+
+  The `ended_at` may be nil for in-progress runs (uses current time).
+  """
+  def list_run_events(started_at, ended_at) do
+    ended_at = ended_at || DateTime.utc_now()
+
+    # Event types we want for the conversation view
+    include_types = [
+      "narrating",
+      "action_started",
+      "action_completed",
+      "memory_node_created",
+      "memory_node_updated",
+      "memory_node_deleted",
+      "memory_link_created",
+      "memory_link_deleted",
+      "memory_node_processed",
+      "memory_searched"
+    ]
+
+    AuditEvent
+    |> where([e], e.timestamp >= ^started_at and e.timestamp <= ^ended_at)
+    |> where([e], e.source in ["retrospector", "memory"])
+    |> where([e], e.type in ^include_types)
+    |> order_by([e], asc: e.timestamp)
     |> Repo.all()
     |> Enum.map(&AuditEvent.to_activity/1)
   end

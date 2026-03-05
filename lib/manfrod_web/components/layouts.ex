@@ -245,6 +245,7 @@ defmodule ManfrodWeb.Layouts do
     ~H"""
     <nav class="flex justify-center items-center gap-4 w-full font-mono px-2 py-4">
       <.nav_link href="/" label="activity" current={@current == :activity} />
+      <.nav_link href="/retrospection" label="retrospection" current={@current == :retrospection} />
       <.nav_link href="/dashboard" label="dashboard" current={@current == :dashboard} />
       <.nav_link href="/graph" label="graph" current={@current == :graph} />
     </nav>

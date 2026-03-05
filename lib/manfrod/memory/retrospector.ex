@@ -537,6 +537,8 @@ defmodule Manfrod.Memory.Retrospector do
     if iteration > 150 do
       {:error, :max_iterations}
     else
+      ctx = %{user_id: user_id, source: :retrospector}
+
       case LLM.generate_text(messages, tools: tools(user_id), purpose: :retrospector) do
         {:ok, response} ->
           case ReqLLM.Response.finish_reason(response) do
@@ -548,6 +550,14 @@ defmodule Manfrod.Memory.Retrospector do
                 "Retrospector: executing #{length(tool_calls)} tool(s), iteration #{iteration}"
               )
 
+              # Broadcast narrative text if present
+              if narrative != "" do
+                Events.broadcast(
+                  :narrating,
+                  Map.put(ctx, :meta, %{text: narrative, iteration: iteration})
+                )
+              end
+
               # Add assistant message with tool calls
               assistant_msg = ReqLLM.Context.assistant(narrative, tool_calls: tool_calls)
               messages_with_assistant = messages ++ [assistant_msg]
@@ -556,12 +566,41 @@ defmodule Manfrod.Memory.Retrospector do
               {messages_with_results, new_stats} =
                 Enum.reduce(tool_calls, {messages_with_assistant, stats}, fn tool_call,
                                                                              {msgs, acc_stats} ->
-                  result = execute_tool(user_id, tool_call)
+                  action_id = generate_action_id()
+                  action_name = tool_call.function.name
+                  args = tool_call.function.arguments
+
+                  # Broadcast action started
+                  Events.broadcast(
+                    :action_started,
+                    Map.put(ctx, :meta, %{
+                      action_id: action_id,
+                      action: action_name,
+                      args: args,
+                      iteration: iteration
+                    })
+                  )
+
+                  # Execute and time the action
+                  {result, duration_ms, success} = timed_execute_tool(user_id, tool_call)
+
+                  # Broadcast action completed
+                  Events.broadcast(
+                    :action_completed,
+                    Map.put(ctx, :meta, %{
+                      action_id: action_id,
+                      action: action_name,
+                      result: truncate_result(result),
+                      duration_ms: duration_ms,
+                      success: success,
+                      iteration: iteration
+                    })
+                  )
 
                   tool_result_msg =
-                    ReqLLM.Context.tool_result(tool_call.id, tool_call.function.name, result)
+                    ReqLLM.Context.tool_result(tool_call.id, action_name, result)
 
-                  updated_stats = update_stats(acc_stats, tool_call.function.name)
+                  updated_stats = update_stats(acc_stats, action_name)
                   {msgs ++ [tool_result_msg], updated_stats}
                 end)
 
@@ -571,6 +610,15 @@ defmodule Manfrod.Memory.Retrospector do
             _other ->
               text = ReqLLM.Response.text(response) || ""
               Logger.debug("Retrospector: agent finished with: #{String.slice(text, 0, 100)}")
+
+              # Broadcast final narrative
+              if text != "" do
+                Events.broadcast(
+                  :narrating,
+                  Map.put(ctx, :meta, %{text: text, iteration: iteration, final: true})
+                )
+              end
+
               {:ok, text, stats}
           end
 
@@ -588,6 +636,15 @@ defmodule Manfrod.Memory.Retrospector do
   defp update_stats(stats, "delete_link"), do: Map.update!(stats, :links_deleted, &(&1 + 1))
   defp update_stats(stats, _tool), do: stats
 
+  defp timed_execute_tool(user_id, tool_call) do
+    start_time = System.monotonic_time(:millisecond)
+    {result, success} = execute_tool(user_id, tool_call)
+    end_time = System.monotonic_time(:millisecond)
+    duration_ms = end_time - start_time
+
+    {result, duration_ms, success}
+  end
+
   defp execute_tool(user_id, tool_call) do
     tool_name = tool_call.function.name
     args_json = tool_call.function.arguments
@@ -598,15 +655,25 @@ defmodule Manfrod.Memory.Retrospector do
 
         if tool do
           case ReqLLM.Tool.execute(tool, args) do
-            {:ok, result} -> result
-            {:error, reason} -> "Tool error: #{inspect(reason)}"
+            {:ok, result} -> {result, true}
+            {:error, reason} -> {"Tool error: #{inspect(reason)}", false}
           end
         else
-          "Unknown tool: #{tool_name}"
+          {"Unknown tool: #{tool_name}", false}
         end
 
       {:error, _} ->
-        "Failed to parse tool arguments"
+        {"Failed to parse tool arguments", false}
     end
   end
+
+  defp generate_action_id do
+    Base.encode16(:crypto.strong_rand_bytes(4), case: :lower)
+  end
+
+  defp truncate_result(result) when byte_size(result) > 500 do
+    String.slice(result, 0, 497) <> "..."
+  end
+
+  defp truncate_result(result), do: result
 end

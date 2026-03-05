@@ -90,6 +90,19 @@ defmodule Manfrod.Slack.API do
     end
   end
 
+  @doc """
+  Fetch a user's display name from Slack.
+
+  Returns `{:ok, name}` or `:error`. Prefers `real_name`, falls back to `name`.
+  """
+  def fetch_user_name(token, slack_user_id) do
+    case get("users.info", token, %{user: slack_user_id}) do
+      {:ok, %{"user" => %{"real_name" => name}}} when name != "" -> {:ok, name}
+      {:ok, %{"user" => %{"name" => name}}} when name != "" -> {:ok, name}
+      _ -> :error
+    end
+  end
+
   defp parse_retry_after(nil), do: 1
   defp parse_retry_after(value) when is_binary(value), do: String.to_integer(value)
 end

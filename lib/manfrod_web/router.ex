@@ -1,6 +1,8 @@
 defmodule ManfrodWeb.Router do
   use ManfrodWeb, :router
 
+  import Oban.Web.Router
+
   pipeline :browser do
     plug :accepts, ["html"]
     plug :fetch_session
@@ -27,6 +29,13 @@ defmodule ManfrodWeb.Router do
     live "/chat", ChatLive
     live "/dashboard", DashboardLive
     live "/graph", GraphLive
+    live "/retrospection", RetrospectionLive
+  end
+
+  scope "/" do
+    pipe_through :browser
+
+    oban_dashboard("/oban")
   end
 
   # LiveDashboard for debugging

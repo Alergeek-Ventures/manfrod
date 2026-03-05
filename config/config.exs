@@ -54,6 +54,7 @@ config :manfrod, Oban,
   repo: Manfrod.Repo,
   queues: [default: 10, retrospection: 1],
   plugins: [
+    Oban.Met,
     {Oban.Plugins.Pruner, max_age: 60 * 60 * 24 * 7},
     {Oban.Plugins.Cron,
      crontab: [
