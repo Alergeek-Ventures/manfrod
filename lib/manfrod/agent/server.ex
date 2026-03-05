@@ -32,6 +32,10 @@ defmodule Manfrod.Agent.Server do
   alias Manfrod.Workers.TriggerWorker
 
   @system_prompt """
+  Current date, time, and timezone are provided in the [Current Context] section.
+  Use them for scheduling reminders and interpreting relative time references like
+  "tomorrow", "next Monday", etc. All reminder times should be in UTC (ISO8601).
+
   ## Your Capabilities
   - set_reminder: Schedule a one-time reminder for yourself at a specific time
   - list_reminders: See all pending one-time reminders you have scheduled
@@ -322,13 +326,46 @@ defmodule Manfrod.Agent.Server do
         )
 
       soul = Memory.get_soul(user_id)
+      user = Accounts.get_user!(user_id)
+      current_context = build_current_context(user)
 
-      if soul do
-        context <> "\n\n" <> @system_prompt
-      else
-        context <> "\n\n" <> @system_prompt <> Soul.base_prompt()
-      end
+      base =
+        if soul do
+          context <> "\n\n" <> @system_prompt
+        else
+          context <> "\n\n" <> @system_prompt <> Soul.base_prompt()
+        end
+
+      base <> "\n\n" <> current_context
     end
+  end
+
+  @timezone "Europe/Warsaw"
+
+  defp build_current_context(user) do
+    now = DateTime.utc_now() |> DateTime.shift_zone!(@timezone)
+    day_name = Calendar.strftime(now, "%A")
+
+    {_year, week} =
+      :calendar.iso_week_number({now.year, now.month, now.day})
+
+    utc_offset_hours = div(now.utc_offset + now.std_offset, 3600)
+    offset_sign = if utc_offset_hours >= 0, do: "+", else: "-"
+
+    user_line =
+      if user.name && user.name != "" do
+        "\nUser: #{user.name}"
+      else
+        ""
+      end
+
+    """
+    [Current Context]
+    Now: #{DateTime.to_iso8601(now)} (#{day_name})
+    Week: #{week} of #{now.year}
+    Timezone: #{@timezone} (#{now.zone_abbr}, UTC#{offset_sign}#{abs(utc_offset_hours)})#{user_line}
+    """
+    |> String.trim()
   end
 
   @impl true
