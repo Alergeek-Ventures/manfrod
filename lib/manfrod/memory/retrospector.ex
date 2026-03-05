@@ -37,6 +37,7 @@ defmodule Manfrod.Memory.Retrospector do
   - The existing knowledge graph (via search and list_links)
   - Tools to create nodes, create links, delete nodes, delete links, and mark notes as processed
   - A graph_stats tool to check overall graph health
+  - A web_search tool to look up current facts on the web when you need to verify or enrich notes
 
   ## First Step
 
@@ -202,6 +203,19 @@ defmodule Manfrod.Memory.Retrospector do
           "Get graph health statistics: total nodes, total links, slipbox count, orphan count (0 links), weakly connected count (1 link), and link-to-note ratio. Call this at the start of each session to understand graph health and prioritize work.",
         parameter_schema: [],
         callback: fn args -> tool_graph_stats(user_id, args) end
+      ),
+      ReqLLM.Tool.new!(
+        name: "web_search",
+        description:
+          "Search the web for current factual information. Use this to verify or enrich notes when you need up-to-date data, confirm facts, or find additional context for graph nodes.",
+        parameter_schema: [
+          query: [
+            type: :string,
+            required: true,
+            doc: "Search query - what to look up on the web"
+          ]
+        ],
+        callback: &tool_web_search/1
       )
     ]
   end
@@ -344,6 +358,22 @@ defmodule Manfrod.Memory.Retrospector do
      - Weakly connected (1 link): #{stats.weakly_connected_count}
      - Link-to-note ratio: #{stats.link_to_note_ratio}\
      """}
+  end
+
+  def tool_web_search(%{query: query}) do
+    case Manfrod.BraveSearch.search(query) do
+      {:ok, results} ->
+        {:ok, results}
+
+      {:error, :api_key_not_configured} ->
+        {:ok, "Web search is not configured (missing API key)."}
+
+      {:error, :rate_limited} ->
+        {:ok, "Web search rate limited. Try again in a moment."}
+
+      {:error, reason} ->
+        {:ok, "Web search failed: #{inspect(reason)}"}
+    end
   end
 
   # Public API

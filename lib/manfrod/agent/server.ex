@@ -44,6 +44,7 @@ defmodule Manfrod.Agent.Server do
   - delete_note: Remove a note and all its links
   - link_notes: Connect two related notes
   - unlink_notes: Disconnect two notes
+  - web_search: Search the web for current information using Brave Search
 
   Note context is injected with each message, showing relevant notes with
   their UUIDs. Use search_notes to find more, get_note to explore
@@ -211,6 +212,19 @@ defmodule Manfrod.Agent.Server do
           note_b_id: [type: :string, required: true, doc: "Second note UUID"]
         ],
         callback: fn args -> tool_unlink_notes(user_id, args) end
+      ),
+      ReqLLM.Tool.new!(
+        name: "web_search",
+        description:
+          "Search the web for current information. Use this when you need up-to-date facts, news, documentation, or anything not in your notes.",
+        parameter_schema: [
+          query: [
+            type: :string,
+            required: true,
+            doc: "Search query - what to look up on the web"
+          ]
+        ],
+        callback: &tool_web_search/1
       )
     ]
   end
@@ -844,6 +858,22 @@ defmodule Manfrod.Agent.Server do
 
       {:error, :not_found} ->
         {:ok, "Link not found: #{a} <-> #{b}"}
+    end
+  end
+
+  defp tool_web_search(%{query: query}) do
+    case Manfrod.BraveSearch.search(query) do
+      {:ok, results} ->
+        {:ok, results}
+
+      {:error, :api_key_not_configured} ->
+        {:ok, "Web search is not configured (missing API key)."}
+
+      {:error, :rate_limited} ->
+        {:ok, "Web search rate limited. Try again in a moment."}
+
+      {:error, reason} ->
+        {:ok, "Web search failed: #{inspect(reason)}"}
     end
   end
 end
