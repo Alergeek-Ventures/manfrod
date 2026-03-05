@@ -23,7 +23,7 @@ defmodule ManfrodWeb.DashboardLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash}>
+    <Layouts.app flash={@flash} current_scope={@current_scope}>
       <Layouts.nav current={:dashboard} />
       <div class="min-h-screen bg-zinc-900 text-zinc-200 font-mono text-sm p-6">
         <header class="text-center py-4">

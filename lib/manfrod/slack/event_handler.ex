@@ -113,13 +113,13 @@ defmodule Manfrod.Slack.EventHandler do
     thread_ts = event["thread_ts"] || event["ts"]
     session_key = "#{channel}:#{thread_ts}"
 
-    name =
-      case API.fetch_user_name(bot.token, slack_user_id) do
-        {:ok, name} -> name
-        :error -> nil
+    {name, email} =
+      case API.fetch_user_info(bot.token, slack_user_id) do
+        {:ok, %{name: name, email: email}} -> {name, email}
+        :error -> {nil, nil}
       end
 
-    {:ok, user} = Accounts.find_or_create_by_slack_id(slack_user_id, channel, name)
+    {:ok, user} = Accounts.find_or_create_by_slack_id(slack_user_id, channel, name, email)
 
     Agent.send_message(user.id, session_key, %{
       content: text,

@@ -225,6 +225,7 @@ defmodule ManfrodWeb.Layouts do
   The app layout - wraps page content.
   """
   attr :flash, :map, default: %{}
+  attr :current_scope, :any, default: nil
   attr :class, :string, default: nil
   slot :inner_block, required: true
 

@@ -57,3 +57,7 @@ config :manfrod, :brave_search_api_key, env!("BRAVE_SEARCH_API_KEY", :string?)
 # Slack (Socket Mode bot)
 config :manfrod, :slack_app_token, env!("SLACK_APP_TOKEN", :string?)
 config :manfrod, :slack_bot_token, env!("SLACK_BOT_TOKEN", :string?)
+
+# Google OAuth (Sign-In + Calendar)
+config :manfrod, :google_client_id, env!("GOOGLE_CLIENT_ID", :string?)
+config :manfrod, :google_client_secret, env!("GOOGLE_CLIENT_SECRET", :string?)

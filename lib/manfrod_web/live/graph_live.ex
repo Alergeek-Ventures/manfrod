@@ -198,7 +198,7 @@ defmodule ManfrodWeb.GraphLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash}>
+    <Layouts.app flash={@flash} current_scope={@current_scope}>
       <Layouts.nav current={:graph} />
       <div class="h-[calc(100vh-60px)] flex flex-col font-mono text-sm bg-zinc-900 text-zinc-200">
         <%!-- Header with search and filters --%>

@@ -253,7 +253,7 @@ defmodule ManfrodWeb.RetrospectionLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash}>
+    <Layouts.app flash={@flash} current_scope={@current_scope}>
       <Layouts.nav current={:retrospection} />
       <div class="h-screen flex font-mono text-sm bg-zinc-900 text-zinc-200">
         <%!-- Left panel: Run list --%>

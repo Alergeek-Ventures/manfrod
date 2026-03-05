@@ -222,7 +222,7 @@ defmodule ManfrodWeb.ActivityLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash}>
+    <Layouts.app flash={@flash} current_scope={@current_scope}>
       <Layouts.nav current={:activity} />
       <div class="h-screen flex flex-col font-mono text-sm bg-zinc-900 text-zinc-200">
         <%!-- Context Banner (when filtered) --%>

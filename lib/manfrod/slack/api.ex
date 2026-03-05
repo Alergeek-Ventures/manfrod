@@ -103,6 +103,32 @@ defmodule Manfrod.Slack.API do
     end
   end
 
+  @doc """
+  Fetch a user's display name and email from Slack.
+
+  Returns `{:ok, %{name: name, email: email}}` or `:error`.
+  The email field requires the `users:read.email` bot token scope.
+  If the scope is missing, `email` will be nil.
+  """
+  def fetch_user_info(token, slack_user_id) do
+    case get("users.info", token, %{user: slack_user_id}) do
+      {:ok, %{"user" => user}} ->
+        name =
+          case user do
+            %{"real_name" => name} when name != "" -> name
+            %{"name" => name} when name != "" -> name
+            _ -> nil
+          end
+
+        email = get_in(user, ["profile", "email"])
+
+        {:ok, %{name: name, email: email}}
+
+      _ ->
+        :error
+    end
+  end
+
   defp parse_retry_after(nil), do: 1
   defp parse_retry_after(value) when is_binary(value), do: String.to_integer(value)
 end
