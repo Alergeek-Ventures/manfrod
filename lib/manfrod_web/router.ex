@@ -56,6 +56,13 @@ defmodule ManfrodWeb.Router do
     delete "/logout", LogoutController, :delete
   end
 
+  # Temporary local-only impersonation endpoint
+  scope "/dev", ManfrodWeb do
+    pipe_through :browser
+
+    get "/impersonate", DevImpersonationController, :create
+  end
+
   # Authenticated LiveView routes
   scope "/", ManfrodWeb do
     pipe_through [:browser, :require_auth]
