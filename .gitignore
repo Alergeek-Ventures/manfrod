@@ -28,6 +28,11 @@ manfred-*.tar
 # secrets
 .env
 
+# Eval — raw Slack exports and labeled dataset contain real messages, never commit
+/eval/slack_raw.json
+/eval/results_*.json
+/eval/dataset.json
+
 # Tailwind - compiled assets (generated from assets/css/app.css)
 /priv/static/assets/
 
