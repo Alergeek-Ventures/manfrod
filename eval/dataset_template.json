@@ -1,0 +1,58 @@
+{
+  "version": "1.0.0",
+  "description": "Labeled dataset for memory classification eval. Samples picked from eval/slack_raw.json and manually labeled.",
+  "label_schema": {
+    "channel_kind": ["dm", "company", "project_internal", "project_public_client", "unknown"],
+    "expected_action": [
+      "ignore",
+      "create_memory",
+      "create_fact",
+      "propose_memory",
+      "requires_human_confirmation"
+    ],
+    "target_scope": [
+      "none",
+      "user/internal",
+      "company/internal",
+      "project/internal",
+      "project/public_client"
+    ],
+    "safety_class": ["safe", "internal_only", "client_safe", "private", "sensitive", "forbidden"],
+    "fact_kind": [null, "vacation", "availability", "desk", "meeting", "project_status", "other"]
+  },
+  "notes": {
+    "channel_kind": "Confirmed channel type (override guessed_kind from slack_raw.json if needed)",
+    "project_slug": "Fill in if channel maps to a project (from channel name convention)",
+    "expected_action": "What the agent SHOULD do with this message",
+    "target_scope": "Where the data SHOULD be stored (none if action=ignore or requires_human_confirmation)",
+    "safety_class": "safe=can go anywhere, internal_only=team only never client, client_safe=can be shown to client, private=user only, sensitive=needs human review, forbidden=must never be stored",
+    "fact_kind": "Only fill if expected_action=create_fact or propose_fact",
+    "requires_review": "true if a human must confirm before any action",
+    "reason": "Short explanation of why this label is correct — especially important for sensitive/forbidden"
+  },
+  "critical_labels": {
+    "false_positive_risk": "Any sample where expected_action != create_memory but LLM might want to create_memory for a public_client scope is a CRITICAL false positive. Flag these.",
+    "forbidden_in_public_client": "Messages that are internal_only or sensitive in a project_public_client channel — the only valid actions are ignore or requires_human_confirmation, NEVER create_memory/create_fact directly."
+  },
+  "samples": [
+    {
+      "_comment": "TEMPLATE — copy this block for each sample, remove _comment field",
+      "id": "s001",
+      "channel_id": "C_FROM_SLACK_RAW",
+      "channel_name": "general",
+      "channel_kind": "company",
+      "project_slug": null,
+      "user_id": "U_FROM_SLACK_RAW",
+      "user_name": "Jan Kowalski",
+      "ts": "1234567890.000001",
+      "thread_context": null,
+      "message_text": "Treść wiadomości ze Slacka",
+      "expected_action": "create_memory",
+      "target_scope": "company/internal",
+      "safety_class": "internal_only",
+      "fact_kind": null,
+      "requires_review": false,
+      "reason": "Krótkie uzasadnienie dlaczego ta etykieta jest poprawna"
+    }
+  ]
+}
