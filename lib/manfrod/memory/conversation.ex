@@ -20,6 +20,8 @@ defmodule Manfrod.Memory.Conversation do
     field :ended_at, :utc_datetime
     field :summary, :string
     field :session_key, :string
+    field :access, {:array, :string}, default: ["internal"]
+    field :slack_channel_id, :string
 
     belongs_to :user, User
     has_many :messages, Message
@@ -30,7 +32,8 @@ defmodule Manfrod.Memory.Conversation do
 
   def changeset(conversation, attrs) do
     conversation
-    |> cast(attrs, [:started_at, :ended_at, :summary, :session_key])
-    |> validate_required([:started_at, :ended_at, :summary, :session_key])
+    |> cast(attrs, [:started_at, :ended_at, :summary, :session_key, :access, :slack_channel_id])
+    |> validate_required([:started_at, :ended_at, :summary, :session_key, :access])
+    |> validate_length(:access, min: 1)
   end
 end

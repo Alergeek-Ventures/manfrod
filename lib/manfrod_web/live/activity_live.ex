@@ -246,7 +246,7 @@ defmodule ManfrodWeb.ActivityLive do
                     <%= for user <- @users do %>
                       <option
                         value={user.id}
-                        selected={@filter && Map.get(@filter || %{}, :user_id) == user.id}
+                        selected={@filter && Map.get(@filter, :user_id) == user.id}
                       >
                         <%= user.name || user.slack_id %>
                       </option>

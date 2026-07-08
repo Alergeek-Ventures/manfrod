@@ -5,8 +5,9 @@ defmodule Manfrod.Memory do
 
   Also manages conversations and messages for provenance tracking.
 
-  All data is scoped by `user_id` — each user has their own isolated
-  knowledge graph, conversations, and reminders.
+  Single shared knowledge graph: nodes carry an `access` array and every
+  read path filters through `Access.dynamic_where/1`. `user_id` on nodes is
+  provenance (who said it), not access control.
 
   All mutating operations emit events to the event bus for audit visibility.
   """
@@ -18,7 +19,16 @@ defmodule Manfrod.Memory do
   alias Manfrod.Events
   alias Manfrod.Repo
   alias Manfrod.Voyage
-  alias Manfrod.Memory.{Conversation, Message, Node, Link, QueryExpander, RecurringReminder}
+
+  alias Manfrod.Memory.{
+    Access,
+    Conversation,
+    Message,
+    Node,
+    Link,
+    QueryExpander,
+    RecurringReminder
+  }
 
   # Relevance threshold for filtering search results (cosine distance)
   # Lower = more strict, higher = more permissive
@@ -136,9 +146,8 @@ defmodule Manfrod.Memory do
   Get the soul for a user - the first node by insertion time.
   Returns nil if no nodes exist for the user.
   """
-  def get_soul(user_id) do
-    Node
-    |> where([n], n.user_id == ^user_id)
+  def get_soul(user_id \\ nil) do
+    scoped_nodes_query(user_id)
     |> order_by([n], asc: n.inserted_at)
     |> limit(1)
     |> Repo.one()
@@ -146,10 +155,10 @@ defmodule Manfrod.Memory do
 
   # --- Nodes ---
 
-  def create_node(user_id, attrs) do
+  def create_node(user_id, access, attrs) when is_list(access) do
     result =
       %Node{user_id: user_id}
-      |> Node.changeset(attrs)
+      |> Node.changeset(Map.put(attrs, :access, access))
       |> Repo.insert()
 
     case result do
@@ -159,6 +168,7 @@ defmodule Manfrod.Memory do
           source: :memory,
           meta: %{
             node_id: node.id,
+            access: access,
             content_preview: String.slice(node.content, 0, 100)
           }
         })
@@ -190,11 +200,47 @@ defmodule Manfrod.Memory do
   end
 
   @doc """
-  Get a node by ID, scoped to a user.
+  Return distinct access buckets that have unprocessed slipbox nodes.
+  Used by Retrospector to iterate per-bucket instead of per-user.
+  """
+  def list_slipbox_access_buckets do
+    from(n in Node,
+      where: is_nil(n.processed_at),
+      select: n.access,
+      distinct: true
+    )
+    |> Repo.all()
+  end
+
+  @doc """
+  Get unprocessed slipbox nodes with a specific access array (for per-bucket retrospection).
+  """
+  def get_slipbox_nodes_by_access(access, opts \\ []) do
+    from(n in Node,
+      where: is_nil(n.processed_at) and n.access == ^access,
+      order_by: [asc: n.inserted_at],
+      limit: ^Keyword.get(opts, :limit, 100)
+    )
+    |> Repo.all()
+  end
+
+  @doc """
+  Get a node by ID, scoped to a user (provenance check only).
   """
   def get_node(user_id, id) do
     Node
     |> where([n], n.user_id == ^user_id and n.id == ^id)
+    |> Repo.one()
+  end
+
+  @doc """
+  Get a node by ID filtered by readable access levels (single-graph access check).
+  Returns nil if node doesn't exist or caller can't read it.
+  """
+  def get_node_accessible(readable_levels, id) do
+    Node
+    |> where([n], n.id == ^id)
+    |> where(^Access.dynamic_where(readable_levels))
     |> Repo.one()
   end
 
@@ -251,6 +297,36 @@ defmodule Manfrod.Memory do
     end
   end
 
+  def update_node_accessible(readable_levels, node_id, attrs) do
+    case get_node_accessible(readable_levels, node_id) do
+      nil ->
+        {:error, :not_found}
+
+      node ->
+        result =
+          node
+          |> Node.changeset(attrs)
+          |> Repo.update()
+
+        case result do
+          {:ok, updated} ->
+            Events.broadcast(:memory_node_updated, %{
+              user_id: updated.user_id,
+              source: :memory,
+              meta: %{
+                node_id: updated.id,
+                content_preview: String.slice(updated.content, 0, 100)
+              }
+            })
+
+            {:ok, updated}
+
+          error ->
+            error
+        end
+    end
+  end
+
   @doc """
   Delete a node and all its links (cascade), scoped to a user.
   Returns {:ok, node} or {:error, :not_found}.
@@ -272,6 +348,29 @@ defmodule Manfrod.Memory do
 
         Events.broadcast(:memory_node_deleted, %{
           user_id: user_id,
+          source: :memory,
+          meta: %{node_id: node_id}
+        })
+
+        {:ok, node}
+    end
+  end
+
+  def delete_node_accessible(readable_levels, node_id) do
+    case get_node_accessible(readable_levels, node_id) do
+      nil ->
+        {:error, :not_found}
+
+      node ->
+        from(l in Link,
+          where: l.node_a_id == ^node_id or l.node_b_id == ^node_id
+        )
+        |> Repo.delete_all()
+
+        Repo.delete(node)
+
+        Events.broadcast(:memory_node_deleted, %{
+          user_id: node.user_id,
           source: :memory,
           meta: %{node_id: node_id}
         })
@@ -363,6 +462,21 @@ defmodule Manfrod.Memory do
   end
 
   @doc """
+  Get linked nodes filtered by readable access levels.
+  """
+  def get_node_links_accessible(readable_levels, node_id) do
+    from(n in Node,
+      join: l in Link,
+      on:
+        (l.node_a_id == ^node_id and l.node_b_id == n.id) or
+          (l.node_b_id == ^node_id and l.node_a_id == n.id),
+      where: ^Access.dynamic_where(readable_levels),
+      distinct: n.id
+    )
+    |> Repo.all()
+  end
+
+  @doc """
   Get all linked nodes for a given node, with link context, scoped to a user.
   Returns a list of `{node, context}` tuples where context may be nil.
   """
@@ -393,7 +507,8 @@ defmodule Manfrod.Memory do
   # --- Graph Health ---
 
   @doc """
-  Get graph health statistics for a user.
+  Get graph health statistics — for one user (provenance) or the whole
+  shared graph when called without arguments.
 
   Returns a map with:
     * `:total_nodes` - Total number of nodes
@@ -403,27 +518,27 @@ defmodule Manfrod.Memory do
     * `:weakly_connected_count` - Processed nodes with exactly 1 link
     * `:link_to_note_ratio` - Total links / total nodes (0.0 if no nodes)
   """
-  def graph_stats(user_id) do
-    user_nodes = from(n in Node, where: n.user_id == ^user_id)
-    total_nodes = Repo.aggregate(user_nodes, :count)
+  def graph_stats(user_id \\ nil) do
+    scoped_nodes = scoped_nodes_query(user_id)
+    total_nodes = Repo.aggregate(scoped_nodes, :count)
 
-    # Links between the user's nodes
-    user_node_ids = from(n in Node, where: n.user_id == ^user_id, select: n.id)
+    scoped_node_ids = from(n in scoped_nodes, select: n.id)
 
     total_links =
       from(l in Link,
-        where: l.node_a_id in subquery(user_node_ids) and l.node_b_id in subquery(user_node_ids)
+        where:
+          l.node_a_id in subquery(scoped_node_ids) and l.node_b_id in subquery(scoped_node_ids)
       )
       |> Repo.aggregate(:count)
 
     slipbox_count =
-      from(n in Node, where: n.user_id == ^user_id and is_nil(n.processed_at))
+      from(n in scoped_nodes, where: is_nil(n.processed_at))
       |> Repo.aggregate(:count)
 
     # Orphans: processed nodes with 0 links
     orphan_count =
-      from(n in Node,
-        where: n.user_id == ^user_id and not is_nil(n.processed_at),
+      from(n in scoped_nodes,
+        where: not is_nil(n.processed_at),
         left_join: la in Link,
         on: la.node_a_id == n.id,
         left_join: lb in Link,
@@ -435,8 +550,8 @@ defmodule Manfrod.Memory do
 
     # Weakly connected: processed nodes with exactly 1 link
     weakly_connected_count =
-      from(n in Node,
-        where: n.user_id == ^user_id and not is_nil(n.processed_at),
+      from(n in scoped_nodes,
+        where: not is_nil(n.processed_at),
         left_join: la in Link,
         on: la.node_a_id == n.id,
         left_join: lb in Link,
@@ -462,6 +577,9 @@ defmodule Manfrod.Memory do
       link_to_note_ratio: link_to_note_ratio
     }
   end
+
+  defp scoped_nodes_query(nil), do: from(n in Node)
+  defp scoped_nodes_query(user_id), do: from(n in Node, where: n.user_id == ^user_id)
 
   @doc """
   Get processed nodes with 0 links (orphans) for a user.
@@ -518,28 +636,37 @@ defmodule Manfrod.Memory do
   # --- Graph Visualization ---
 
   @doc """
-  Get all graph data for a user for visualization.
+  Get the whole graph for visualization — single shared graph across all users.
 
   Returns a map with nodes and edges suitable for graph rendering.
 
   ## Options
 
     * `:filter` - Filter nodes: `:all` (default), `:processed`, or `:slipbox`
+    * `:access_level` - Optional access level used to scope the displayed subgraph
   """
-  def get_graph_data(user_id, opts \\ []) do
+  def get_graph_data(opts \\ []) do
     filter = Keyword.get(opts, :filter, :all)
+    access_level = Keyword.get(opts, :access_level)
 
     # Fetch nodes based on filter
     nodes_query =
       case filter do
         :processed ->
-          from(n in Node, where: n.user_id == ^user_id and not is_nil(n.processed_at))
+          from(n in Node, where: not is_nil(n.processed_at))
 
         :slipbox ->
-          from(n in Node, where: n.user_id == ^user_id and is_nil(n.processed_at))
+          from(n in Node, where: is_nil(n.processed_at))
 
         :all ->
-          from(n in Node, where: n.user_id == ^user_id)
+          from(n in Node)
+      end
+
+    nodes_query =
+      if access_level do
+        where(nodes_query, ^Access.dynamic_where([access_level]))
+      else
+        nodes_query
       end
 
     nodes = Repo.all(nodes_query)
@@ -601,7 +728,7 @@ defmodule Manfrod.Memory do
     * `:expand_query` - Whether to use query expansion (default: true)
     * `:rerank` - Whether to use Voyage reranker (default: true)
   """
-  def search(user_id, query_text, opts \\ []) do
+  def search(user_id, readable_levels, query_text, opts \\ []) do
     limit = Keyword.get(opts, :limit, 10)
     expand_query? = Keyword.get(opts, :expand_query, true)
     rerank? = Keyword.get(opts, :rerank, true)
@@ -618,8 +745,12 @@ defmodule Manfrod.Memory do
     search_tasks =
       Enum.flat_map(queries, fn query ->
         [
-          Task.async(fn -> {:vector, query, search_vector(user_id, query, limit)} end),
-          Task.async(fn -> {:bm25, query, search_bm25(user_id, query, limit)} end)
+          Task.async(fn ->
+            {:vector, query, search_vector(user_id, readable_levels, query, limit)}
+          end),
+          Task.async(fn ->
+            {:bm25, query, search_bm25(user_id, readable_levels, query, limit)}
+          end)
         ]
       end)
 
@@ -663,7 +794,7 @@ defmodule Manfrod.Memory do
       |> Enum.take(limit)
 
     # Step 6: Expand with 1-hop links
-    results = expand_with_links(filtered, limit * 2)
+    results = expand_with_links(filtered, readable_levels, limit * 2)
 
     # Broadcast with verbose stats for logging
     Events.broadcast(:memory_searched, %{
@@ -695,10 +826,10 @@ defmodule Manfrod.Memory do
   Search using only vector similarity (no query expansion), scoped to a user.
   Returns `[{node, distance}]` tuples sorted by distance ascending.
   """
-  def search_vector(user_id, query_text, limit \\ 10) do
+  def search_vector(user_id, readable_levels, query_text, limit \\ 10) do
     case Manfrod.Voyage.embed_query(query_text) do
       {:ok, embedding} ->
-        vector_search_with_distance(user_id, embedding, limit)
+        vector_search_with_distance(user_id, readable_levels, embedding, limit)
 
       {:error, _} ->
         []
@@ -706,19 +837,20 @@ defmodule Manfrod.Memory do
   end
 
   @doc """
-  Search using only BM25 keyword matching, scoped to a user.
+  Search using only BM25 keyword matching, filtered by readable access levels.
   Returns list of nodes sorted by BM25 score descending.
   """
-  def search_bm25(user_id, query_text, limit \\ 10) do
-    bm25_search(user_id, query_text, limit)
+  def search_bm25(user_id, readable_levels, query_text, limit \\ 10) do
+    bm25_search(user_id, readable_levels, query_text, limit)
   end
 
-  # Vector search returning {node, distance} tuples
-  defp vector_search_with_distance(user_id, embedding, limit) do
+  # Vector search returning {node, distance} tuples, filtered by access only (single graph)
+  defp vector_search_with_distance(_user_id, readable_levels, embedding, limit) do
     vec = Pgvector.new(embedding)
 
     from(n in Node,
-      where: n.user_id == ^user_id and not is_nil(n.embedding),
+      where: not is_nil(n.embedding),
+      where: ^Access.dynamic_where(readable_levels),
       select: {n, cosine_distance(n.embedding, ^vec)},
       order_by: cosine_distance(n.embedding, ^vec),
       limit: ^limit
@@ -726,10 +858,11 @@ defmodule Manfrod.Memory do
     |> Repo.all()
   end
 
-  defp bm25_search(user_id, query_text, limit) do
+  defp bm25_search(_user_id, readable_levels, query_text, limit) do
     from(n in Node,
       select: {n, score(n.id)},
-      where: n.id ~> match("content", ^query_text) and n.user_id == ^user_id,
+      where: n.id ~> match("content", ^query_text),
+      where: ^Access.dynamic_where(readable_levels),
       order_by: [desc: score()],
       limit: ^limit
     )
@@ -825,9 +958,9 @@ defmodule Manfrod.Memory do
   defp normalize_to_node({node, _score}), do: node
   defp normalize_to_node(node), do: node
 
-  defp expand_with_links([], _max), do: []
+  defp expand_with_links([], _readable_levels, _max), do: []
 
-  defp expand_with_links(nodes, max) do
+  defp expand_with_links(nodes, readable_levels, max) do
     ids = Enum.map(nodes, & &1.id)
 
     linked =
@@ -836,6 +969,7 @@ defmodule Manfrod.Memory do
         on:
           (l.node_a_id in ^ids and l.node_b_id == n.id) or
             (l.node_b_id in ^ids and l.node_a_id == n.id),
+        where: ^Access.dynamic_where(readable_levels),
         distinct: n.id
       )
       |> Repo.all()
@@ -1013,6 +1147,89 @@ defmodule Manfrod.Memory do
   `recall_memory` to search for more memories or `get_memory` to
   fetch a specific node by ID.
   """
+  def escalate_note_access(node_id, new_access_level, readable_levels) do
+    case validate_escalation_context(new_access_level, readable_levels) do
+      :ok ->
+        do_escalate_note_access(node_id, new_access_level, readable_levels)
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp do_escalate_note_access(node_id, new_access_level, readable_levels) do
+    case Repo.one(
+           from n in Node,
+             where: n.id == ^node_id and fragment("? && ?", n.access, ^readable_levels)
+         ) do
+      nil ->
+        {:error, :not_found}
+
+      node ->
+        current = node.access
+
+        case validate_escalation_target(current, new_access_level) do
+          :ok ->
+            merged = Enum.uniq(current ++ [new_access_level])
+
+            node
+            |> Node.changeset(%{access: merged})
+            |> Repo.update()
+            |> case do
+              {:ok, updated} ->
+                Events.broadcast(:memory_node_escalated, %{
+                  node_id: node_id,
+                  from_access: current,
+                  to_access: merged,
+                  source: :escalation
+                })
+
+                {:ok, updated}
+
+              err ->
+                err
+            end
+
+          {:error, reason} ->
+            {:error, reason}
+        end
+    end
+  end
+
+  defp validate_escalation_context(new_access_level, readable_levels) do
+    cond do
+      not String.starts_with?(new_access_level, "external/") ->
+        {:error, :invalid_escalation_level}
+
+      "internal" not in readable_levels ->
+        {:error, :external_channel_escalation_not_allowed}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp validate_escalation_target(current_access, new_access_level) do
+    current_external = Enum.filter(current_access, &String.starts_with?(&1, "external/"))
+
+    cond do
+      new_access_level in current_access ->
+        {:error, :already_accessible}
+
+      "internal" not in current_access ->
+        {:error, :downward_or_cross_scope_escalation}
+
+      new_access_level == "external/all" and current_external != [] ->
+        {:error, :external_all_escalation_not_allowed}
+
+      Enum.any?(current_external, &(&1 != new_access_level)) ->
+        {:error, :cross_client_escalation_not_allowed}
+
+      true ->
+        :ok
+    end
+  end
+
   def build_context([]), do: ""
 
   def build_context(nodes) do

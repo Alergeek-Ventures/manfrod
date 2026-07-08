@@ -52,6 +52,28 @@ defmodule Manfrod.Agent.Server do
   - unlink_notes: Disconnect two notes
   - web_search: Search the web for current information using Brave Search
   - get_calendar_events: Fetch events from the user's Google Calendar for a date range
+  - get_fact: Look up structured facts (vacations, absences, meetings) by key
+  - list_facts: List structured facts by key prefix
+  - report_vacation: Record a planned absence visible to all clients
+  - escalate_note: Widen a note's visibility level (only with explicit user confirmation)
+
+  ## MANDATORY tool usage rules (NEVER skip these)
+
+  ### Vacations and absences
+  - User says they will be absent/on vacation/off/unavailable on any date → FIRST ask the user
+    to confirm: report_vacation makes the absence visible to ALL clients (external/all).
+    Only call report_vacation after the user explicitly agrees in this conversation.
+    If they decline, save it with create_note instead (stays at the current access level).
+  - Once the user confirms, call report_vacation in the same response — do NOT just say
+    "I noted it" or "I saved it" without the tool call, or nothing is saved.
+  - User asks when they have vacation/leave/absence → call list_facts with prefix "absence:" FIRST, then reply based on the result.
+    Do NOT say "I don't have that info" without calling the tool first.
+
+  ### Meetings
+  - A meeting is confirmed → call create_note with the meeting details immediately.
+
+  ### Reminders
+  - User asks to be reminded of something → call set_reminder in the same response.
 
   Note context is injected with each message, showing relevant notes with
   their UUIDs. Use search_notes to find more, get_note to explore
@@ -64,10 +86,12 @@ defmodule Manfrod.Agent.Server do
   Google Calendar requires the user to have linked their Google account via the
   web app. If get_calendar_events returns a "no Google account" error, tell the
   user to sign in at the web app to connect their Google Calendar.
+
+  Note context is scoped to your current channel's access level — you only see notes you're allowed to see in this context.
   """
 
   # Tool definitions are created at runtime with user_id baked into closures
-  defp tools(user_id) do
+  defp tools(user_id, readable_levels, write_access) do
     [
       ReqLLM.Tool.new!(
         name: "set_reminder",
@@ -164,7 +188,7 @@ defmodule Manfrod.Agent.Server do
             doc: "Search query - what you want to find"
           ]
         ],
-        callback: fn args -> tool_search_notes(user_id, args) end
+        callback: fn args -> tool_search_notes(user_id, readable_levels, args) end
       ),
       ReqLLM.Tool.new!(
         name: "get_note",
@@ -177,7 +201,7 @@ defmodule Manfrod.Agent.Server do
             doc: "UUID of the note to fetch (e.g., '550e8400-e29b-41d4-a716-446655440000')"
           ]
         ],
-        callback: fn args -> tool_get_note(user_id, args) end
+        callback: fn args -> tool_get_note(readable_levels, args) end
       ),
       ReqLLM.Tool.new!(
         name: "create_note",
@@ -190,7 +214,7 @@ defmodule Manfrod.Agent.Server do
             doc: "The atomic idea or fact (1-2 sentences)"
           ]
         ],
-        callback: fn args -> tool_create_note(user_id, args) end
+        callback: fn args -> tool_create_note(user_id, write_access, args) end
       ),
       ReqLLM.Tool.new!(
         name: "delete_note",
@@ -203,7 +227,7 @@ defmodule Manfrod.Agent.Server do
             doc: "UUID of the note to delete"
           ]
         ],
-        callback: fn args -> tool_delete_note(user_id, args) end
+        callback: fn args -> tool_delete_note(user_id, readable_levels, args) end
       ),
       ReqLLM.Tool.new!(
         name: "link_notes",
@@ -213,7 +237,7 @@ defmodule Manfrod.Agent.Server do
           note_a_id: [type: :string, required: true, doc: "First note UUID"],
           note_b_id: [type: :string, required: true, doc: "Second note UUID"]
         ],
-        callback: fn args -> tool_link_notes(user_id, args) end
+        callback: fn args -> tool_link_notes(user_id, readable_levels, args) end
       ),
       ReqLLM.Tool.new!(
         name: "unlink_notes",
@@ -222,7 +246,7 @@ defmodule Manfrod.Agent.Server do
           note_a_id: [type: :string, required: true, doc: "First note UUID"],
           note_b_id: [type: :string, required: true, doc: "Second note UUID"]
         ],
-        callback: fn args -> tool_unlink_notes(user_id, args) end
+        callback: fn args -> tool_unlink_notes(user_id, readable_levels, args) end
       ),
       ReqLLM.Tool.new!(
         name: "web_search",
@@ -254,14 +278,60 @@ defmodule Manfrod.Agent.Server do
           ]
         ],
         callback: fn args -> tool_get_calendar_events(user_id, args) end
+      ),
+      ReqLLM.Tool.new!(
+        name: "get_fact",
+        description:
+          "Look up a structured fact by key (vacations, meetings, absences). Key format: 'vacation:user_id', 'absence:name:date', 'meeting:channel:ts'.",
+        parameter_schema: [
+          key: [type: :string, required: true, doc: "Exact fact key"]
+        ],
+        callback: fn args -> tool_get_fact(readable_levels, args) end
+      ),
+      ReqLLM.Tool.new!(
+        name: "list_facts",
+        description:
+          "List structured facts with a key prefix. E.g. prefix 'vacation:' lists all vacations you can see.",
+        parameter_schema: [
+          prefix: [type: :string, required: true, doc: "Key prefix to search"]
+        ],
+        callback: fn args -> tool_list_facts(readable_levels, args) end
+      ),
+      ReqLLM.Tool.new!(
+        name: "report_vacation",
+        description:
+          "Record a planned absence/vacation, stored as visible to all clients (external/all). " <>
+            "Call ONLY after the user explicitly confirmed in this conversation that it may be shared with all clients.",
+        parameter_schema: [
+          start_date: [type: :string, required: true, doc: "Start date ISO8601 (YYYY-MM-DD)"],
+          end_date: [type: :string, required: true, doc: "End date ISO8601 (YYYY-MM-DD)"],
+          note: [type: :string, doc: "Optional note (e.g. 'on vacation', 'public holiday')"]
+        ],
+        callback: fn args -> tool_report_vacation(user_id, args) end
+      ),
+      ReqLLM.Tool.new!(
+        name: "escalate_note",
+        description:
+          "Widen the visibility of an existing note (e.g. from internal to external/client). Use only when user explicitly confirms sharing.",
+        parameter_schema: [
+          node_id: [type: :string, required: true, doc: "Note UUID"],
+          new_access_level: [
+            type: :string,
+            required: true,
+            doc: "New access level to add, e.g. 'external/10bps' or 'external/all'"
+          ]
+        ],
+        callback: fn args -> tool_escalate_note(readable_levels, args) end
       )
     ]
   end
 
   # Client API
 
-  def start_link({user_id, session_key}) do
-    GenServer.start_link(__MODULE__, {user_id, session_key}, name: via(user_id, session_key))
+  def start_link({user_id, session_key, write_access, readable_levels}) do
+    GenServer.start_link(__MODULE__, {user_id, session_key, write_access, readable_levels},
+      name: via(user_id, session_key)
+    )
   end
 
   @doc """
@@ -273,11 +343,11 @@ defmodule Manfrod.Agent.Server do
 
   # Server Callbacks
 
-  # 60 minutes debounce before flushing conversation
-  @flush_delay :timer.minutes(60)
+  # 1 minute debounce for testing (change back to 60 for production)
+  @flush_delay :timer.minutes(1)
 
   @impl true
-  def init({user_id, session_key}) do
+  def init({user_id, session_key, write_access, readable_levels}) do
     system_message = ReqLLM.Context.system(build_system_prompt(user_id))
 
     # Subscribe to own PubSub topic for FlushHandler-like behavior
@@ -308,6 +378,8 @@ defmodule Manfrod.Agent.Server do
      %{
        user_id: user_id,
        session_key: session_key,
+       write_access: write_access,
+       readable_levels: readable_levels,
        messages: messages,
        inbox: [],
        flush_timer: nil
@@ -375,6 +447,10 @@ defmodule Manfrod.Agent.Server do
     event_ctx = %{
       user_id: state.user_id,
       session_key: state.session_key,
+      meta: %{
+        write_access: state.write_access,
+        slack_channel_id: Map.get(reply_to || %{}, :channel)
+      },
       source: source,
       reply_to: reply_to
     }
@@ -410,8 +486,9 @@ defmodule Manfrod.Agent.Server do
     {:stop, :normal, state}
   end
 
-  # Ignore PubSub events we subscribe to for flush detection
-  def handle_info({:activity, _}, %{inbox: []} = state) do
+  # Ignore PubSub events we subscribe to for observability/status updates.
+  # They can arrive while the server is draining inbox or calling tools.
+  def handle_info({:activity, _activity}, state) do
     {:noreply, state}
   end
 
@@ -466,7 +543,10 @@ defmodule Manfrod.Agent.Server do
       send(self(), :loop)
       {:noreply, state}
     else
-      case LLM.generate_text(state.messages, tools: tools(state.user_id), purpose: :agent) do
+      case LLM.generate_text(state.messages,
+             tools: tools(state.user_id, state.readable_levels, state.write_access),
+             purpose: :agent
+           ) do
         {:ok, response} ->
           handle_llm_response(response, ctx, iter, refresher_pid, state)
 
@@ -509,7 +589,7 @@ defmodule Manfrod.Agent.Server do
           })
 
         # Retrieve relevant note context
-        note_context = get_note_context(state.user_id, content)
+        note_context = get_note_context(state.user_id, state.readable_levels, content)
 
         # Build user message with note context prepended for LLM
         user_content =
@@ -569,7 +649,13 @@ defmodule Manfrod.Agent.Server do
             )
 
             # Execute and time the action
-            {result, duration_ms, success} = timed_execute_tool(state.user_id, tool_call)
+            {result, duration_ms, success} =
+              timed_execute_tool(
+                state.user_id,
+                state.readable_levels,
+                state.write_access,
+                tool_call
+              )
 
             # Broadcast action completed
             Events.broadcast(
@@ -624,23 +710,23 @@ defmodule Manfrod.Agent.Server do
     end
   end
 
-  defp timed_execute_tool(user_id, tool_call) do
+  defp timed_execute_tool(user_id, readable_levels, write_access, tool_call) do
     start_time = System.monotonic_time(:millisecond)
-    {result, success} = execute_tool(user_id, tool_call)
+    {result, success} = execute_tool(user_id, readable_levels, write_access, tool_call)
     end_time = System.monotonic_time(:millisecond)
     duration_ms = end_time - start_time
 
     {result, duration_ms, success}
   end
 
-  defp execute_tool(user_id, tool_call) do
+  defp execute_tool(user_id, readable_levels, write_access, tool_call) do
     tool_name = tool_call.function.name
     args_json = tool_call.function.arguments
 
     case Jason.decode(args_json) do
       {:ok, args} ->
         # Find and execute the tool
-        tool = Enum.find(tools(user_id), &(&1.name == tool_name))
+        tool = Enum.find(tools(user_id, readable_levels, write_access), &(&1.name == tool_name))
 
         if tool do
           case ReqLLM.Tool.execute(tool, args) do
@@ -666,7 +752,7 @@ defmodule Manfrod.Agent.Server do
 
   defp truncate_result(result), do: result
 
-  defp get_note_context(user_id, query) do
+  defp get_note_context(user_id, readable_levels, query) do
     soul = Memory.get_soul(user_id)
 
     # Get notes linked to soul (workspace notes)
@@ -678,11 +764,7 @@ defmodule Manfrod.Agent.Server do
       end
 
     # Semantic search for relevant notes based on user query
-    relevant =
-      case Memory.search(user_id, query, limit: 10) do
-        {:ok, nodes} -> nodes
-        _ -> []
-      end
+    {:ok, relevant} = Memory.search(user_id, readable_levels, query, limit: 10)
 
     # Combine soul + linked + relevant, deduplicated
     nodes =
@@ -825,8 +907,8 @@ defmodule Manfrod.Agent.Server do
     end
   end
 
-  defp tool_search_notes(user_id, %{query: query}) do
-    {:ok, nodes} = Memory.search(user_id, query, limit: 10)
+  defp tool_search_notes(user_id, readable_levels, %{query: query}) do
+    {:ok, nodes} = Memory.search(user_id, readable_levels, query, limit: 10)
 
     if Enum.empty?(nodes) do
       {:ok, "No relevant notes found for: #{query}"}
@@ -847,13 +929,13 @@ defmodule Manfrod.Agent.Server do
     end
   end
 
-  defp tool_get_note(user_id, %{id: id}) do
-    case Memory.get_node(user_id, id) do
+  defp tool_get_note(readable_levels, %{id: id}) do
+    case Memory.get_node_accessible(readable_levels, id) do
       nil ->
         {:ok, "Note not found: #{id}"}
 
       node ->
-        linked_nodes = Memory.get_node_links(user_id, node.id)
+        linked_nodes = Memory.get_node_links_accessible(readable_levels, node.id)
 
         linked_content =
           if Enum.empty?(linked_nodes) do
@@ -877,10 +959,10 @@ defmodule Manfrod.Agent.Server do
     end
   end
 
-  defp tool_create_note(user_id, %{content: content}) do
+  defp tool_create_note(user_id, write_access, %{content: content}) do
     case Voyage.embed_query(content) do
       {:ok, embedding} ->
-        case Memory.create_node(user_id, %{content: content, embedding: embedding}) do
+        case Memory.create_node(user_id, write_access, %{content: content, embedding: embedding}) do
           {:ok, node} ->
             {:ok, "Created note in slipbox: #{node.id}"}
 
@@ -893,33 +975,44 @@ defmodule Manfrod.Agent.Server do
     end
   end
 
-  defp tool_delete_note(user_id, %{id: id}) do
-    case Memory.delete_node(user_id, id) do
-      {:ok, _node} ->
-        {:ok, "Deleted note: #{id}"}
-
-      {:error, :not_found} ->
+  defp tool_delete_note(user_id, readable_levels, %{id: id}) do
+    case Memory.get_node_accessible(readable_levels, id) do
+      nil ->
         {:ok, "Note not found: #{id}"}
+
+      _node ->
+        case Memory.delete_node(user_id, id) do
+          {:ok, _node} -> {:ok, "Deleted note: #{id}"}
+          {:error, :not_found} -> {:ok, "Note not found or not yours: #{id}"}
+        end
     end
   end
 
-  defp tool_link_notes(user_id, %{note_a_id: a, note_b_id: b}) do
-    case Memory.create_link(user_id, a, b) do
-      {:ok, _link} ->
-        {:ok, "Linked #{a} <-> #{b}"}
+  defp tool_link_notes(user_id, readable_levels, %{note_a_id: a, note_b_id: b}) do
+    node_a = Memory.get_node_accessible(readable_levels, a)
+    node_b = Memory.get_node_accessible(readable_levels, b)
 
-      {:error, changeset} ->
-        {:ok, "Failed to create link: #{inspect(changeset.errors)}"}
+    if node_a && node_b do
+      case Memory.create_link(user_id, a, b) do
+        {:ok, _link} -> {:ok, "Linked #{a} <-> #{b}"}
+        {:error, changeset} -> {:ok, "Failed to create link: #{inspect(changeset.errors)}"}
+      end
+    else
+      {:ok, "One or both notes not found or not accessible"}
     end
   end
 
-  defp tool_unlink_notes(user_id, %{note_a_id: a, note_b_id: b}) do
-    case Memory.delete_link(user_id, a, b) do
-      {:ok, _link} ->
-        {:ok, "Unlinked #{a} <-> #{b}"}
+  defp tool_unlink_notes(user_id, readable_levels, %{note_a_id: a, note_b_id: b}) do
+    node_a = Memory.get_node_accessible(readable_levels, a)
+    node_b = Memory.get_node_accessible(readable_levels, b)
 
-      {:error, :not_found} ->
-        {:ok, "Link not found: #{a} <-> #{b}"}
+    if node_a && node_b do
+      case Memory.delete_link(user_id, a, b) do
+        {:ok, _link} -> {:ok, "Unlinked #{a} <-> #{b}"}
+        {:error, :not_found} -> {:ok, "Link not found: #{a} <-> #{b}"}
+      end
+    else
+      {:ok, "One or both notes not found or not accessible"}
     end
   end
 
@@ -1033,5 +1126,52 @@ defmodule Manfrod.Agent.Server do
       end)
 
     header <> Enum.join(lines, "\n\n")
+  end
+
+  defp tool_get_fact(readable_levels, %{key: key}) do
+    case Manfrod.Facts.get_fact(key, readable_levels) do
+      nil -> {:ok, "Fact not found: #{key}"}
+      fact -> {:ok, "#{fact.key}: #{fact.value}"}
+    end
+  end
+
+  defp tool_list_facts(readable_levels, %{prefix: prefix}) do
+    facts = Manfrod.Facts.list_facts(prefix, readable_levels)
+
+    if Enum.empty?(facts) do
+      {:ok, "No facts found with prefix: #{prefix}"}
+    else
+      lines = Enum.map(facts, fn f -> "- #{f.key}: #{f.value}" end)
+      {:ok, Enum.join(lines, "\n")}
+    end
+  end
+
+  defp tool_report_vacation(user_id, %{start_date: start_date, end_date: end_date} = args) do
+    note = Map.get(args, :note, "urlop")
+    key = "vacation:#{user_id}:#{start_date}"
+    value = "#{start_date}..#{end_date} — #{note}"
+    access = ["internal", "external/all"]
+    content = "#{note}: #{start_date}..#{end_date}"
+
+    with {:ok, _fact} <- Manfrod.Facts.set_fact(key, value, access, user_id),
+         {:ok, embedding} <- Voyage.embed_query(content),
+         {:ok, _node} <-
+           Memory.create_node(user_id, access, %{content: content, embedding: embedding}) do
+      {:ok, "Zapisałem urlop: #{value}"}
+    else
+      {:error, %Ecto.Changeset{} = changeset} ->
+        {:ok, "Błąd zapisu: #{inspect(changeset.errors)}"}
+
+      {:error, e} ->
+        {:ok, "Błąd zapisu: #{inspect(e)}"}
+    end
+  end
+
+  defp tool_escalate_note(readable_levels, %{node_id: node_id, new_access_level: level}) do
+    case Manfrod.Memory.escalate_note_access(node_id, level, readable_levels) do
+      {:ok, _} -> {:ok, "Nota #{node_id} teraz widoczna jako: #{level}"}
+      {:error, :not_found} -> {:ok, "Nota nie znaleziona: #{node_id}"}
+      {:error, e} -> {:ok, "Błąd: #{inspect(e)}"}
+    end
   end
 end

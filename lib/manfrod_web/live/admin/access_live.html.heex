@@ -1,0 +1,386 @@
+<Layouts.app flash={@flash} current_scope={@current_scope}>
+  <Layouts.nav current={:admin} />
+  <div class="max-w-6xl mx-auto p-6">
+  <div class="mb-6">
+    <h1 class="text-2xl font-bold text-gray-100">Panel dostępu</h1>
+    <p class="text-sm text-gray-400 mt-1">Zarządzaj projektami, kanałami i członkostwami</p>
+  </div>
+
+  <%!-- Tabs --%>
+  <div class="flex gap-1 mb-6 border-b border-gray-700">
+    <button
+      phx-click="switch_tab"
+      phx-value-tab="channels"
+      class={[
+        "px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors",
+        if(@tab == "channels",
+          do: "border-indigo-500 text-indigo-400",
+          else: "border-transparent text-gray-400 hover:text-gray-200"
+        )
+      ]}
+    >
+      Kanały (<%= length(@channels) %>)
+    </button>
+    <button
+      phx-click="switch_tab"
+      phx-value-tab="projects"
+      class={[
+        "px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors",
+        if(@tab == "projects",
+          do: "border-indigo-500 text-indigo-400",
+          else: "border-transparent text-gray-400 hover:text-gray-200"
+        )
+      ]}
+    >
+      Projekty (<%= length(@projects) %>)
+    </button>
+    <button
+      phx-click="switch_tab"
+      phx-value-tab="members"
+      class={[
+        "px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors",
+        if(@tab == "members",
+          do: "border-indigo-500 text-indigo-400",
+          else: "border-transparent text-gray-400 hover:text-gray-200"
+        )
+      ]}
+    >
+      Członkowie (<%= length(@members) %>)
+    </button>
+    <button
+      phx-click="switch_tab"
+      phx-value-tab="vacations"
+      class={[
+        "px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors",
+        if(@tab == "vacations",
+          do: "border-indigo-500 text-indigo-400",
+          else: "border-transparent text-gray-400 hover:text-gray-200"
+        )
+      ]}
+    >
+      Urlopy (<%= length(@vacations) %>)
+    </button>
+  </div>
+
+  <%!-- Channels tab --%>
+  <%= if @tab == "channels" do %>
+    <%= if @channels == [] do %>
+      <p class="text-gray-500 text-sm">Brak zmapowanych kanałów. Wyślij wiadomość na kanale — auto-detekcja doda go automatycznie.</p>
+    <% else %>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm text-left">
+          <thead>
+            <tr class="border-b border-gray-700 text-gray-400 text-xs uppercase tracking-wider">
+              <th class="pb-3 pr-4">Kanał</th>
+              <th class="pb-3 pr-4">ID</th>
+              <th class="pb-3 pr-4">Projekt</th>
+              <th class="pb-3 pr-4">Client ID</th>
+              <th class="pb-3 pr-4">Status</th>
+              <th class="pb-3 pr-4">Źródło</th>
+              <th class="pb-3"></th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-800">
+            <%= for ch <- @channels do %>
+              <tr class="text-gray-300">
+                <td class="py-3 pr-4 font-mono text-xs">
+                  <%= if ch.slack_channel_name, do: "##{ch.slack_channel_name}", else: "—" %>
+                </td>
+                <td class="py-3 pr-4 font-mono text-xs text-gray-500">
+                  <%= ch.slack_channel_id %>
+                </td>
+                <td class="py-3 pr-4 text-xs">
+                  <%= ch.project_slug || "—" %>
+                </td>
+                <td class="py-3 pr-4 text-xs">
+                  <%= ch.client_id || "—" %>
+                </td>
+                <td class="py-3 pr-4">
+                  <span class={[
+                    "px-2 py-0.5 rounded text-xs font-medium",
+                    if(ch.status == "active",
+                      do: "bg-green-900/50 text-green-400",
+                      else: "bg-yellow-900/50 text-yellow-400"
+                    )
+                  ]}>
+                    <%= ch.status %>
+                  </span>
+                </td>
+                <td class="py-3 pr-4 text-xs text-gray-500">
+                  <%= ch.source %>
+                </td>
+                <td class="py-3 flex gap-2 justify-end">
+                  <%= if ch.status == "active" do %>
+                    <button
+                      phx-click="deactivate_mapping"
+                      phx-value-id={ch.id}
+                      class="text-xs text-yellow-500 hover:text-yellow-300"
+                    >
+                      Dezaktywuj
+                    </button>
+                  <% else %>
+                    <button
+                      phx-click="activate_mapping"
+                      phx-value-id={ch.id}
+                      class="text-xs text-green-500 hover:text-green-300"
+                    >
+                      Aktywuj
+                    </button>
+                  <% end %>
+                  <button
+                    phx-click="delete_mapping"
+                    phx-value-id={ch.id}
+                    data-confirm="Usunąć ten mapping?"
+                    class="text-xs text-red-500 hover:text-red-300"
+                  >
+                    Usuń
+                  </button>
+                </td>
+              </tr>
+            <% end %>
+          </tbody>
+        </table>
+      </div>
+    <% end %>
+  <% end %>
+
+  <%!-- Projects tab --%>
+  <%= if @tab == "projects" do %>
+    <div class="mb-4 flex justify-end">
+      <button
+        phx-click="toggle_add_project"
+        class="px-3 py-1.5 text-sm bg-indigo-600 hover:bg-indigo-500 text-white rounded"
+      >
+        <%= if @show_add_project, do: "Anuluj", else: "Dodaj projekt" %>
+      </button>
+    </div>
+
+    <%= if @show_add_project do %>
+      <div class="mb-6 p-4 bg-gray-800 rounded border border-gray-700">
+        <h3 class="text-sm font-medium text-gray-200 mb-3">Nowy projekt</h3>
+        <div class="flex gap-3 items-end">
+          <div>
+            <label class="block text-xs text-gray-400 mb-1">Slug</label>
+            <input
+              type="text"
+              placeholder="np. klient-abc"
+              value={@add_project_form["slug"]}
+              phx-blur="update_add_project"
+              phx-value-field="slug"
+              class="bg-gray-700 border border-gray-600 rounded px-3 py-1.5 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:border-indigo-500"
+            />
+          </div>
+          <div>
+            <label class="block text-xs text-gray-400 mb-1">Nazwa</label>
+            <input
+              type="text"
+              placeholder="np. Klient ABC Sp. z o.o."
+              value={@add_project_form["name"]}
+              phx-blur="update_add_project"
+              phx-value-field="name"
+              class="bg-gray-700 border border-gray-600 rounded px-3 py-1.5 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:border-indigo-500"
+            />
+          </div>
+          <button
+            phx-click="save_project"
+            class="px-3 py-1.5 text-sm bg-green-700 hover:bg-green-600 text-white rounded"
+          >
+            Zapisz
+          </button>
+        </div>
+      </div>
+    <% end %>
+
+    <%= if @projects == [] do %>
+      <p class="text-gray-500 text-sm">Brak projektów.</p>
+    <% else %>
+      <table class="w-full text-sm text-left">
+        <thead>
+          <tr class="border-b border-gray-700 text-gray-400 text-xs uppercase tracking-wider">
+            <th class="pb-3 pr-4">Slug</th>
+            <th class="pb-3 pr-4">Nazwa</th>
+            <th class="pb-3 pr-4 text-right">Kanały</th>
+            <th class="pb-3 text-right">Członkowie</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-800">
+          <%= for p <- @projects do %>
+            <tr class="text-gray-300">
+              <td class="py-3 pr-4 font-mono text-xs"><%= p.slug %></td>
+              <td class="py-3 pr-4"><%= p.name %></td>
+              <td class="py-3 pr-4 text-right text-gray-400"><%= p.channel_count %></td>
+              <td class="py-3 text-right text-gray-400"><%= p.member_count %></td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    <% end %>
+  <% end %>
+
+  <%!-- Members tab --%>
+  <%= if @tab == "members" do %>
+    <%= if @members == [] do %>
+      <p class="text-gray-500 text-sm">Brak członkostw.</p>
+    <% else %>
+      <table class="w-full text-sm text-left">
+        <thead>
+          <tr class="border-b border-gray-700 text-gray-400 text-xs uppercase tracking-wider">
+            <th class="pb-3 pr-4">Użytkownik</th>
+            <th class="pb-3 pr-4">Slack ID</th>
+            <th class="pb-3 pr-4">Projekt</th>
+            <th class="pb-3">Źródło</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-800">
+          <%= for m <- @members do %>
+            <tr class="text-gray-300">
+              <td class="py-3 pr-4"><%= m.user_name || "—" %></td>
+              <td class="py-3 pr-4 font-mono text-xs text-gray-500"><%= m.user_slack_id %></td>
+              <td class="py-3 pr-4"><%= m.project_name %> <span class="text-gray-500 text-xs">(#{m.project_slug})</span></td>
+              <td class="py-3 text-xs text-gray-400"><%= m.source %></td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    <% end %>
+  <% end %>
+
+  <%!-- Vacations tab --%>
+  <%= if @tab == "vacations" do %>
+    <div class="mb-6 p-4 bg-gray-800 rounded border border-gray-700">
+      <h3 class="text-sm font-medium text-gray-200 mb-3">Dodaj urlop</h3>
+      <div class="grid grid-cols-1 md:grid-cols-5 gap-3 items-end">
+        <div>
+          <label class="block text-xs text-gray-400 mb-1">Osoba</label>
+          <select
+            name="user_id"
+            phx-change="update_vacation_form"
+            class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-indigo-500"
+          >
+            <option value="">Wybierz...</option>
+            <%= for user <- @users do %>
+              <option value={user.id} selected={@vacation_form["user_id"] == user.id}>
+                <%= user.name || user.email || user.slack_id %>
+              </option>
+            <% end %>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs text-gray-400 mb-1">Od</label>
+          <input
+            type="date"
+            name="start_date"
+            value={@vacation_form["start_date"]}
+            phx-change="update_vacation_form"
+            class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-indigo-500"
+          />
+        </div>
+        <div>
+          <label class="block text-xs text-gray-400 mb-1">Do</label>
+          <input
+            type="date"
+            name="end_date"
+            value={@vacation_form["end_date"]}
+            phx-change="update_vacation_form"
+            class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-indigo-500"
+          />
+        </div>
+        <div>
+          <label class="block text-xs text-gray-400 mb-1">Opis</label>
+          <input
+            type="text"
+            name="note"
+            value={@vacation_form["note"]}
+            phx-change="update_vacation_form"
+            placeholder="urlop"
+            class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-1.5 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:border-indigo-500"
+          />
+        </div>
+        <button
+          phx-click="save_vacation"
+          class="px-3 py-1.5 text-sm bg-green-700 hover:bg-green-600 text-white rounded"
+        >
+          Zapisz
+        </button>
+      </div>
+      <p class="text-xs text-gray-500 mt-3">Urlopy są zapisywane jako facts z dostępem <code>["internal", "external/all"]</code>.</p>
+    </div>
+
+    <%= if @vacations == [] do %>
+      <p class="text-gray-500 text-sm">Brak zapisanych urlopów/absencji.</p>
+    <% else %>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm text-left">
+          <thead>
+            <tr class="border-b border-gray-700 text-gray-400 text-xs uppercase tracking-wider">
+              <th class="pb-3 pr-4">Osoba</th>
+              <th class="pb-3 pr-4">Klucz</th>
+              <th class="pb-3 pr-4">Wartość</th>
+              <th class="pb-3 pr-4">Access</th>
+              <th class="pb-3 pr-4">Aktualizacja</th>
+              <th class="pb-3"></th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-800">
+            <%= for vacation <- @vacations do %>
+              <tr class="text-gray-300 align-top">
+                <td class="py-3 pr-4">
+                  <div><%= vacation.user_name || "—" %></div>
+                  <div class="text-xs text-gray-500"><%= vacation.user_slack_id || "system" %></div>
+                </td>
+                <td class="py-3 pr-4 font-mono text-xs text-gray-500"><%= vacation.key %></td>
+                <td class="py-3 pr-4 min-w-80">
+                  <%= if @editing_vacation_id == vacation.id do %>
+                    <textarea
+                      phx-change="update_vacation_value"
+                      name="value"
+                      class="w-full min-h-20 bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm text-gray-100 focus:outline-none focus:border-indigo-500"
+                    ><%= @editing_vacation_value %></textarea>
+                  <% else %>
+                    <div class="whitespace-pre-wrap"><%= vacation.value %></div>
+                  <% end %>
+                </td>
+                <td class="py-3 pr-4 font-mono text-xs text-gray-500"><%= Enum.join(vacation.access, ", ") %></td>
+                <td class="py-3 pr-4 text-xs text-gray-500"><%= vacation.updated_at || vacation.inserted_at %></td>
+                <td class="py-3 flex gap-2 justify-end">
+                  <%= if @editing_vacation_id == vacation.id do %>
+                    <button
+                      phx-click="save_vacation_edit"
+                      phx-value-id={vacation.id}
+                      class="text-xs text-green-500 hover:text-green-300"
+                    >
+                      Zapisz
+                    </button>
+                    <button
+                      phx-click="cancel_edit_vacation"
+                      class="text-xs text-gray-400 hover:text-gray-200"
+                    >
+                      Anuluj
+                    </button>
+                  <% else %>
+                    <button
+                      phx-click="edit_vacation"
+                      phx-value-id={vacation.id}
+                      class="text-xs text-indigo-400 hover:text-indigo-300"
+                    >
+                      Edytuj
+                    </button>
+                    <button
+                      phx-click="delete_vacation"
+                      phx-value-id={vacation.id}
+                      data-confirm="Usunąć ten urlop?"
+                      class="text-xs text-red-500 hover:text-red-300"
+                    >
+                      Usuń
+                    </button>
+                  <% end %>
+                </td>
+              </tr>
+            <% end %>
+          </tbody>
+        </table>
+      </div>
+    <% end %>
+  <% end %>
+  </div>
+</Layouts.app>

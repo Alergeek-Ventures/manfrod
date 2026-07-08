@@ -26,7 +26,8 @@ defmodule Manfrod.Memory.FlushHandler do
 
   @impl true
   def handle_info(
-        {:activity, %Activity{type: :idle, user_id: user_id, session_key: session_key}},
+        {:activity,
+         %Activity{type: :idle, user_id: user_id, session_key: session_key, meta: meta}},
         state
       )
       when is_binary(user_id) and is_binary(session_key) do
@@ -34,7 +35,9 @@ defmodule Manfrod.Memory.FlushHandler do
       "FlushHandler: idle detected for user #{user_id}, session #{session_key}, triggering extraction"
     )
 
-    Extractor.extract_async(user_id, session_key)
+    write_access = Map.get(meta || %{}, :write_access, ["internal"])
+    slack_channel_id = Map.get(meta || %{}, :slack_channel_id)
+    Extractor.extract_async(user_id, session_key, write_access, slack_channel_id)
     {:noreply, state}
   end
 

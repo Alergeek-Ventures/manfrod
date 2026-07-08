@@ -26,9 +26,12 @@ defmodule Manfrod.Events.Activity do
   - `:memory_node_created` - new node created
   - `:memory_node_updated` - node content updated
   - `:memory_node_deleted` - node deleted
+  - `:memory_node_escalated` - node access widened after confirmation
   - `:memory_link_created` - new link created
   - `:memory_link_deleted` - link deleted
   - `:memory_node_processed` - node marked as processed
+  - `:unmapped_channel_seen` - Slack channel encountered without active mapping
+  - `:sensitive_content_detected` - sensitive content was detected and blocked
 
   Extraction:
   - `:extraction_started` - extraction began
@@ -76,9 +79,12 @@ defmodule Manfrod.Events.Activity do
           | :memory_node_created
           | :memory_node_updated
           | :memory_node_deleted
+          | :memory_node_escalated
           | :memory_link_created
           | :memory_link_deleted
           | :memory_node_processed
+          | :unmapped_channel_seen
+          | :sensitive_content_detected
           # Extraction
           | :extraction_started
           | :extraction_completed

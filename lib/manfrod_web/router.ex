@@ -77,6 +77,16 @@ defmodule ManfrodWeb.Router do
     end
   end
 
+  # Admin routes
+  scope "/", ManfrodWeb do
+    pipe_through [:browser, :admin_only]
+
+    live_session :admin,
+      on_mount: [{ManfrodWeb.UserAuth, :require_authenticated}] do
+      live "/admin/access", Admin.AccessLive
+    end
+  end
+
   # Oban dashboard - admin only
   scope "/" do
     pipe_through [:browser, :admin_only]

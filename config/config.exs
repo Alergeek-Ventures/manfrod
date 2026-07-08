@@ -5,7 +5,8 @@ config :elixir, :time_zone_database, Tzdata.TimeZoneDatabase
 
 config :manfrod,
   ecto_repos: [Manfrod.Repo],
-  generators: [timestamp_type: :utc_datetime, binary_id: true]
+  generators: [timestamp_type: :utc_datetime, binary_id: true],
+  admin_emails: ["franek@alergeek.ventures", "kamil@alergeek.ventures"]
 
 config :manfrod, Manfrod.Repo, types: Manfrod.PostgrexTypes
 

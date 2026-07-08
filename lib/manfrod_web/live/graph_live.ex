@@ -11,29 +11,19 @@ defmodule ManfrodWeb.GraphLive do
   """
   use ManfrodWeb, :live_view
 
-  alias Manfrod.Accounts
-  alias Manfrod.Memory
+  import Ecto.Query
+
+  alias Manfrod.{Memory, Repo, Voyage}
+  alias Manfrod.Memory.ChannelMapping
 
   @impl true
   def mount(_params, _session, socket) do
-    users = Accounts.list_users()
-    current_user = List.first(users)
-
-    {graph_data, soul, stats} =
-      if current_user do
-        {
-          Memory.get_graph_data(current_user.id),
-          Memory.get_soul(current_user.id),
-          Memory.graph_stats(current_user.id)
-        }
-      else
-        {%{nodes: [], edges: []}, nil, empty_stats()}
-      end
+    graph_data = Memory.get_graph_data(access_level: "internal")
+    soul = Memory.get_soul()
+    stats = Memory.graph_stats()
 
     socket =
       socket
-      |> assign(users: users)
-      |> assign(current_user: current_user)
       |> assign(graph_data: graph_data)
       |> assign(soul_id: soul && soul.id)
       |> assign(selected_node: nil)
@@ -41,15 +31,19 @@ defmodule ManfrodWeb.GraphLive do
       |> assign(search_query: "")
       |> assign(search_results: [])
       |> assign(stats: stats)
+      |> assign(access_filter: "internal")
+      |> assign(available_access_levels: load_access_levels())
+      |> assign(editing_node: false)
+      |> assign(node_edit_content: "")
 
     {:ok, socket}
   end
 
   @impl true
   def handle_event("node_clicked", %{"id" => node_id}, socket) do
-    user_id = socket.assigns.current_user && socket.assigns.current_user.id
-    node = user_id && Memory.get_node(user_id, node_id)
-    links = if node, do: Memory.get_node_links(user_id, node_id), else: []
+    readable_levels = [socket.assigns.access_filter]
+    node = Memory.get_node_accessible(readable_levels, node_id)
+    links = if node, do: Memory.get_node_links_accessible(readable_levels, node_id), else: []
 
     selected =
       if node do
@@ -66,11 +60,92 @@ defmodule ManfrodWeb.GraphLive do
         nil
       end
 
-    {:noreply, assign(socket, selected_node: selected)}
+    {:noreply,
+     assign(socket,
+       selected_node: selected,
+       editing_node: false,
+       node_edit_content: selected && selected.content
+     )}
   end
 
   def handle_event("node_deselected", _params, socket) do
-    {:noreply, assign(socket, selected_node: nil)}
+    {:noreply, assign(socket, selected_node: nil, editing_node: false, node_edit_content: "")}
+  end
+
+  def handle_event("start_edit_node", _params, socket) do
+    content = socket.assigns.selected_node && socket.assigns.selected_node.content
+    {:noreply, assign(socket, editing_node: true, node_edit_content: content || "")}
+  end
+
+  def handle_event("cancel_edit_node", _params, socket) do
+    content = socket.assigns.selected_node && socket.assigns.selected_node.content
+    {:noreply, assign(socket, editing_node: false, node_edit_content: content || "")}
+  end
+
+  def handle_event("update_node_content", %{"content" => content}, socket) do
+    {:noreply, assign(socket, node_edit_content: content)}
+  end
+
+  def handle_event("save_node", _params, socket) do
+    readable_levels = [socket.assigns.access_filter]
+    content = String.trim(socket.assigns.node_edit_content || "")
+
+    with %{id: node_id} <- socket.assigns.selected_node,
+         true <- content != "",
+         {:ok, embedding} <- Voyage.embed_query(content),
+         {:ok, node} <-
+           Memory.update_node_accessible(readable_levels, node_id, %{
+             content: content,
+             embedding: embedding
+           }) do
+      socket =
+        socket
+        |> reload_graph()
+        |> assign(
+          selected_node: selected_node_map(node, readable_levels),
+          editing_node: false,
+          node_edit_content: node.content
+        )
+        |> put_flash(:info, "Node updated")
+
+      {:noreply, socket}
+    else
+      nil ->
+        {:noreply, put_flash(socket, :error, "No node selected")}
+
+      false ->
+        {:noreply, put_flash(socket, :error, "Content can't be empty")}
+
+      {:error, :not_found} ->
+        {:noreply, put_flash(socket, :error, "Node not found or not accessible")}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Save failed: #{inspect(reason)}")}
+    end
+  end
+
+  def handle_event("delete_node", _params, socket) do
+    readable_levels = [socket.assigns.access_filter]
+
+    case socket.assigns.selected_node do
+      nil ->
+        {:noreply, put_flash(socket, :error, "No node selected")}
+
+      %{id: node_id} ->
+        case Memory.delete_node_accessible(readable_levels, node_id) do
+          {:ok, _node} ->
+            socket =
+              socket
+              |> assign(selected_node: nil, editing_node: false, node_edit_content: "")
+              |> reload_graph()
+              |> put_flash(:info, "Node deleted")
+
+            {:noreply, socket}
+
+          {:error, :not_found} ->
+            {:noreply, put_flash(socket, :error, "Node not found or not accessible")}
+        end
+    end
   end
 
   def handle_event("search", %{"query" => query}, socket) when byte_size(query) < 3 do
@@ -84,9 +159,9 @@ defmodule ManfrodWeb.GraphLive do
   end
 
   def handle_event("search", %{"query" => query}, socket) do
-    user_id = socket.assigns.current_user && socket.assigns.current_user.id
+    readable_levels = [socket.assigns.access_filter]
 
-    case user_id && Memory.search(user_id, query, limit: 20, expand_query: false) do
+    case Memory.search(nil, readable_levels, query, limit: 20, expand_query: false) do
       {:ok, nodes} when nodes != [] ->
         ids = Enum.map(nodes, & &1.id)
         first_id = List.first(ids)
@@ -110,6 +185,22 @@ defmodule ManfrodWeb.GraphLive do
     end
   end
 
+  def handle_event("filter_access", %{"level" => level}, socket) do
+    graph_data = Memory.get_graph_data(filter: socket.assigns.filter, access_level: level)
+
+    socket =
+      socket
+      |> assign(
+        access_filter: level,
+        search_results: [],
+        search_query: "",
+        graph_data: graph_data
+      )
+      |> push_event("update_graph", graph_data)
+
+    {:noreply, socket}
+  end
+
   def handle_event("clear_search", _params, socket) do
     socket =
       socket
@@ -120,42 +211,14 @@ defmodule ManfrodWeb.GraphLive do
     {:noreply, socket}
   end
 
-  def handle_event("select_user", %{"user_id" => user_id}, socket) do
-    current_user = Enum.find(socket.assigns.users, &(&1.id == user_id))
-
-    {graph_data, soul, stats} =
-      if current_user do
-        {
-          Memory.get_graph_data(current_user.id, filter: socket.assigns.filter),
-          Memory.get_soul(current_user.id),
-          Memory.graph_stats(current_user.id)
-        }
-      else
-        {%{nodes: [], edges: []}, nil, empty_stats()}
-      end
-
-    socket =
-      socket
-      |> assign(current_user: current_user)
-      |> assign(graph_data: graph_data)
-      |> assign(soul_id: soul && soul.id)
-      |> assign(selected_node: nil)
-      |> assign(search_query: "")
-      |> assign(search_results: [])
-      |> assign(stats: stats)
-      |> push_event("update_graph", graph_data)
-
-    {:noreply, socket}
-  end
-
   def handle_event("set_filter", %{"filter" => filter}, socket) do
     filter_atom = String.to_existing_atom(filter)
-    user_id = socket.assigns.current_user && socket.assigns.current_user.id
 
     graph_data =
-      if user_id,
-        do: Memory.get_graph_data(user_id, filter: filter_atom),
-        else: %{nodes: [], edges: []}
+      Memory.get_graph_data(
+        filter: filter_atom,
+        access_level: socket.assigns.access_filter
+      )
 
     socket =
       socket
@@ -168,9 +231,9 @@ defmodule ManfrodWeb.GraphLive do
 
   def handle_event("select_linked_node", %{"id" => node_id}, socket) do
     # Select a linked node from the panel
-    user_id = socket.assigns.current_user && socket.assigns.current_user.id
-    node = user_id && Memory.get_node(user_id, node_id)
-    links = if node, do: Memory.get_node_links(user_id, node_id), else: []
+    readable_levels = [socket.assigns.access_filter]
+    node = Memory.get_node_accessible(readable_levels, node_id)
+    links = if node, do: Memory.get_node_links_accessible(readable_levels, node_id), else: []
 
     selected =
       if node do
@@ -190,9 +253,38 @@ defmodule ManfrodWeb.GraphLive do
     socket =
       socket
       |> assign(selected_node: selected)
+      |> assign(editing_node: false, node_edit_content: selected && selected.content)
       |> push_event("highlight_nodes", %{ids: [node_id], center_on: node_id})
 
     {:noreply, socket}
+  end
+
+  defp selected_node_map(node, readable_levels) do
+    links = Memory.get_node_links_accessible(readable_levels, node.id)
+
+    %{
+      id: node.id,
+      content: node.content,
+      processed: not is_nil(node.processed_at),
+      link_count: length(links),
+      inserted_at: node.inserted_at,
+      links:
+        Enum.map(links, fn n -> %{id: n.id, preview: String.slice(n.content || "", 0, 50)} end)
+    }
+  end
+
+  defp reload_graph(socket) do
+    graph_data =
+      Memory.get_graph_data(
+        filter: socket.assigns.filter,
+        access_level: socket.assigns.access_filter
+      )
+
+    stats = Memory.graph_stats()
+
+    socket
+    |> assign(graph_data: graph_data, stats: stats)
+    |> push_event("update_graph", graph_data)
   end
 
   @impl true
@@ -226,23 +318,6 @@ defmodule ManfrodWeb.GraphLive do
                 <% end %>
               </div>
             </form>
-
-            <%!-- User Picker --%>
-            <%= if length(@users) > 1 do %>
-              <form phx-change="select_user" class="flex items-center gap-2 text-xs">
-                <span class="text-zinc-500">User:</span>
-                <select
-                  name="user_id"
-                  class="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-200 focus:outline-none focus:border-blue-500"
-                >
-                  <%= for user <- @users do %>
-                    <option value={user.id} selected={@current_user && @current_user.id == user.id}>
-                      <%= user.name || user.slack_id %>
-                    </option>
-                  <% end %>
-                </select>
-              </form>
-            <% end %>
 
             <%!-- Filters --%>
             <div class="flex items-center gap-2 text-xs">
@@ -281,6 +356,19 @@ defmodule ManfrodWeb.GraphLive do
                 slipbox
               </button>
             </div>
+
+            <%!-- Access filter --%>
+            <form phx-change="filter_access" class="flex items-center gap-2 text-xs">
+              <span class="text-zinc-500">Access:</span>
+              <select
+                name="level"
+                class="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-200 focus:outline-none focus:border-blue-500"
+              >
+                <%= for level <- @available_access_levels do %>
+                  <option value={level} selected={@access_filter == level}><%= level %></option>
+                <% end %>
+              </select>
+            </form>
 
           </div>
 
@@ -390,9 +478,48 @@ defmodule ManfrodWeb.GraphLive do
                 <%!-- Content --%>
                 <div class="mb-4">
                   <label class="block text-xs text-zinc-500 mb-1">Content</label>
-                  <div class="text-sm text-zinc-200 bg-zinc-800 rounded p-3 max-h-64 overflow-y-auto">
-                    <%= @selected_node.content %>
-                  </div>
+                  <%= if @editing_node do %>
+                    <textarea
+                      name="content"
+                      phx-change="update_node_content"
+                      class="w-full min-h-40 text-sm text-zinc-200 bg-zinc-800 border border-zinc-700 rounded p-3 focus:outline-none focus:border-blue-500"
+                    ><%= @node_edit_content %></textarea>
+                  <% else %>
+                    <div class="text-sm text-zinc-200 bg-zinc-800 rounded p-3 max-h-64 overflow-y-auto">
+                      <%= @selected_node.content %>
+                    </div>
+                  <% end %>
+                </div>
+
+                <div class="flex gap-2 mb-4">
+                  <%= if @editing_node do %>
+                    <button
+                      phx-click="save_node"
+                      class="px-3 py-1.5 text-xs bg-green-700 hover:bg-green-600 text-white rounded"
+                    >
+                      Save
+                    </button>
+                    <button
+                      phx-click="cancel_edit_node"
+                      class="px-3 py-1.5 text-xs bg-zinc-700 hover:bg-zinc-600 text-zinc-200 rounded"
+                    >
+                      Cancel
+                    </button>
+                  <% else %>
+                    <button
+                      phx-click="start_edit_node"
+                      class="px-3 py-1.5 text-xs bg-blue-700 hover:bg-blue-600 text-white rounded"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      phx-click="delete_node"
+                      data-confirm="Delete this node and all its links?"
+                      class="px-3 py-1.5 text-xs bg-red-800 hover:bg-red-700 text-white rounded"
+                    >
+                      Delete
+                    </button>
+                  <% end %>
                 </div>
 
                 <%!-- Metadata --%>
@@ -443,14 +570,16 @@ defmodule ManfrodWeb.GraphLive do
     Calendar.strftime(dt, "%Y-%m-%d %H:%M")
   end
 
-  defp empty_stats do
-    %{
-      total_nodes: 0,
-      total_links: 0,
-      slipbox_count: 0,
-      orphan_count: 0,
-      weakly_connected_count: 0,
-      link_to_note_ratio: 0.0
-    }
+  defp load_access_levels do
+    external =
+      Repo.all(
+        from cm in ChannelMapping,
+          where: not is_nil(cm.client_id) and cm.status == "active",
+          select: cm.client_id,
+          distinct: true
+      )
+      |> Enum.map(&"external/#{&1}")
+
+    ["internal", "external/all"] ++ external
   end
 end

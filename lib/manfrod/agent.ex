@@ -24,6 +24,7 @@ defmodule Manfrod.Agent do
   """
 
   alias Manfrod.Agent.Server
+  alias Manfrod.Memory.Access
 
   @doc """
   Send a message to the agent for a specific session.
@@ -36,11 +37,38 @@ defmodule Manfrod.Agent do
   - `content` - the message text
   - `source` - origin atom (:slack, :proactive, :web, etc.)
   - `reply_to` - opaque reference for response routing (channel, thread_ts)
+
+  `slack_channel_id` is used to resolve write_access and readable_levels.
+  Defaults to DM-level access if not provided. Unmapped Slack channels use internal access.
   """
-  def send_message(user_id, session_key, message)
+  def send_message(user_id, session_key, message, slack_channel_id \\ nil)
       when is_binary(user_id) and is_binary(session_key) and is_map(message) do
-    ensure_started(user_id, session_key)
+    {:ok, write_access, readable_levels} = resolve_access(user_id, slack_channel_id)
+    ensure_started(user_id, session_key, write_access, readable_levels)
     GenServer.cast(Server.via(user_id, session_key), {:message, message})
+  end
+
+  defp resolve_access(_user_id, nil) do
+    {:ok, ["internal"], ["internal", "external/all"]}
+  end
+
+  defp resolve_access(user_id, channel_id) do
+    ensure_project_membership(user_id, channel_id)
+    {:ok, write} = Access.resolve_for_write(channel_id)
+    {:ok, readable} = Access.resolve_for_read(user_id, channel_id)
+    {:ok, write, readable}
+  end
+
+  # Talking on a project channel auto-enrolls the user as a project member,
+  # so their DM/company-channel reads include the project's external levels.
+  defp ensure_project_membership(user_id, channel_id) do
+    case Access.get_active_mapping(channel_id) do
+      %{project_id: project_id} when not is_nil(project_id) ->
+        Access.ensure_membership!(user_id, project_id)
+
+      _ ->
+        :ok
+    end
   end
 
   @doc """
@@ -57,7 +85,7 @@ defmodule Manfrod.Agent do
     end
   end
 
-  defp ensure_started(user_id, session_key) do
+  defp ensure_started(user_id, session_key, write_access, readable_levels) do
     case Registry.lookup(Manfrod.Agent.Registry, {user_id, session_key}) do
       [{_pid, _}] ->
         :ok
@@ -65,7 +93,7 @@ defmodule Manfrod.Agent do
       [] ->
         case DynamicSupervisor.start_child(
                Manfrod.Agent.DynamicSupervisor,
-               {Server, {user_id, session_key}}
+               {Server, {user_id, session_key, write_access, readable_levels}}
              ) do
           {:ok, _pid} -> :ok
           {:error, {:already_started, _pid}} -> :ok

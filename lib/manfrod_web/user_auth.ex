@@ -21,7 +21,7 @@ defmodule ManfrodWeb.UserAuth do
   alias Manfrod.Accounts
   alias Manfrod.Accounts.Scope
 
-  @admin_email "franek@alergeek.ventures"
+  defp admin_emails, do: Application.get_env(:manfrod, :admin_emails, [])
 
   # ---------------------------------------------------------------------------
   # Plug callbacks
@@ -56,14 +56,14 @@ defmodule ManfrodWeb.UserAuth do
   end
 
   @doc """
-  Requires the admin user (`franek@alergeek.ventures`).
+  Requires one of the configured admin users.
 
   Must be called after `require_authenticated_user`.
   """
   def require_admin(conn, _opts) do
     scope = conn.assigns[:current_scope]
 
-    if scope && scope.user.email == @admin_email do
+    if scope && scope.user.email in admin_emails() do
       conn
     else
       conn

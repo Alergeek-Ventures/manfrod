@@ -41,8 +41,8 @@ defmodule Manfrod.Memory.Extractor do
   Fire-and-forget extraction triggered on idle for a specific session.
   Fetches pending messages from DB, processes them, stores results.
   """
-  def extract_async(user_id, session_key) do
-    Task.start(fn -> extract_and_store(user_id, session_key) end)
+  def extract_async(user_id, session_key, write_access \\ ["internal"], slack_channel_id \\ nil) do
+    Task.start(fn -> extract_and_store(user_id, session_key, write_access, slack_channel_id) end)
     :ok
   end
 
@@ -50,7 +50,12 @@ defmodule Manfrod.Memory.Extractor do
   Synchronous extraction and storage for a specific session.
   Returns {:ok, conversation, node_ids} or {:error, reason}.
   """
-  def extract_and_store(user_id, session_key) do
+  def extract_and_store(
+        user_id,
+        session_key,
+        write_access \\ ["internal"],
+        slack_channel_id \\ nil
+      ) do
     messages = Memory.get_pending_messages(user_id, session_key)
 
     if messages == [] do
@@ -60,11 +65,11 @@ defmodule Manfrod.Memory.Extractor do
 
       {:ok, nil, []}
     else
-      do_extract_and_store(user_id, session_key, messages)
+      do_extract_and_store(user_id, session_key, write_access, slack_channel_id, messages)
     end
   end
 
-  defp do_extract_and_store(user_id, session_key, messages) do
+  defp do_extract_and_store(user_id, session_key, write_access, slack_channel_id, messages) do
     conversation_text = format_messages(messages)
 
     Events.broadcast(:extraction_started, %{
@@ -76,8 +81,13 @@ defmodule Manfrod.Memory.Extractor do
 
     with {:ok, summary} <- generate_summary(conversation_text),
          {:ok, conversation} <-
-           Memory.close_conversation(user_id, session_key, %{summary: summary}),
-         {:ok, node_ids} <- extract_and_create_nodes(user_id, conversation_text, conversation.id) do
+           Memory.close_conversation(user_id, session_key, %{
+             summary: summary,
+             access: write_access,
+             slack_channel_id: slack_channel_id
+           }),
+         {:ok, node_ids} <-
+           extract_and_create_nodes(user_id, write_access, conversation_text, conversation.id) do
       Logger.info(
         "Extracted conversation #{conversation.id} for user #{user_id}: #{length(node_ids)} nodes, summary: #{String.slice(summary, 0, 50)}..."
       )
@@ -141,7 +151,7 @@ defmodule Manfrod.Memory.Extractor do
     end
   end
 
-  defp extract_and_create_nodes(user_id, conversation_text, conversation_id) do
+  defp extract_and_create_nodes(user_id, write_access, conversation_text, conversation_id) do
     with {:ok, %{"nodes" => [_ | _] = texts, "links" => links}} <-
            extract_facts(conversation_text),
          {:ok, embeddings} <- Voyage.embed(texts) do
@@ -150,7 +160,7 @@ defmodule Manfrod.Memory.Extractor do
         |> Enum.zip(embeddings)
         |> Enum.map(fn {content, embedding} ->
           {:ok, node} =
-            Memory.create_node(user_id, %{
+            Memory.create_node(user_id, write_access, %{
               content: content,
               embedding: embedding,
               conversation_id: conversation_id
