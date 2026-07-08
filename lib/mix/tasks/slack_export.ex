@@ -98,7 +98,11 @@ defmodule Mix.Tasks.Slack.Export do
     info("Next steps:")
     info("  1. Open eval/slack_raw.json and review messages")
     info("  2. Copy interesting samples to eval/dataset.json (see eval/dataset_template.json)")
-    info("  3. Fill in labels: channel_kind, expected_action, target_scope, safety_class, fact_kind, requires_review, reason")
+
+    info(
+      "  3. Fill in labels: channel_kind, expected_action, target_scope, safety_class, fact_kind, requires_review, reason"
+    )
+
     info("  4. Run: mix eval.memory")
     info("")
     info("⚠️  Do NOT commit eval/slack_raw.json — it contains real Slack messages.")

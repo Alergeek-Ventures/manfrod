@@ -134,7 +134,11 @@ defmodule Mix.Tasks.Eval.Memory do
       end
 
     info("==> Memory Classification Eval")
-    info("    Dataset: #{length(samples)} samples#{if scope_filter, do: " (filter: #{scope_filter})", else: ""}")
+
+    info(
+      "    Dataset: #{length(samples)} samples#{if scope_filter, do: " (filter: #{scope_filter})", else: ""}"
+    )
+
     info("    Mode: #{if dry_run?, do: "dry-run (no LLM calls)", else: "live"}")
     info("")
 
@@ -162,7 +166,10 @@ defmodule Mix.Tasks.Eval.Memory do
       save_results(results)
     else
       info("")
-      info("Dry-run complete. #{length(results)} samples validated. Run without --dry-run to evaluate.")
+
+      info(
+        "Dry-run complete. #{length(results)} samples validated. Run without --dry-run to evaluate."
+      )
     end
   end
 
@@ -174,7 +181,10 @@ defmodule Mix.Tasks.Eval.Memory do
     {results, _history} =
       Enum.reduce(chunk, {[], [system_msg]}, fn sample, {results, history} ->
         global_idx = (chunk_idx - 1) * @chunk_size + length(results) + 1
-        info("  [#{global_idx}/#{total}] #{sample["id"]} — #{sample["channel_kind"]}: #{String.slice(sample["message_text"] || "", 0, 60)}...")
+
+        info(
+          "  [#{global_idx}/#{total}] #{sample["id"]} — #{sample["channel_kind"]}: #{String.slice(sample["message_text"] || "", 0, 60)}..."
+        )
 
         user_text = format_sample_message(sample)
         messages = history ++ [ReqLLM.Context.user(user_text)]
@@ -207,8 +217,12 @@ defmodule Mix.Tasks.Eval.Memory do
     """
   end
 
-  defp channel_type_description("project_internal"), do: "private project channel (team only — client cannot see this)"
-  defp channel_type_description("project_external"), do: "shared with client (external/<client_id>)"
+  defp channel_type_description("project_internal"),
+    do: "private project channel (team only — client cannot see this)"
+
+  defp channel_type_description("project_external"),
+    do: "shared with client (external/<client_id>)"
+
   defp channel_type_description("company_channel"), do: "internal company channel"
   defp channel_type_description("priv_channel"), do: "direct message / private channel (priv)"
   defp channel_type_description(_), do: "unknown"
@@ -228,14 +242,27 @@ defmodule Mix.Tasks.Eval.Memory do
 
         case parse_classifier_output(text) do
           {:ok, predicted} ->
-            %{sample: sample, predicted: predicted, correct: predicted["action"] == sample["expected_action"], error: nil}
+            %{
+              sample: sample,
+              predicted: predicted,
+              correct: predicted["action"] == sample["expected_action"],
+              error: nil
+            }
 
           {:error, reason} when retries_left > 0 ->
-            info("    ↻ parse error, retrying (#{retries_left} left): #{String.slice(reason, 0, 80)}")
+            info(
+              "    ↻ parse error, retrying (#{retries_left} left): #{String.slice(reason, 0, 80)}"
+            )
+
             call_with_parse_retry(messages, sample, retries_left - 1)
 
           {:error, reason} ->
-            %{sample: sample, predicted: nil, correct: false, error: "parse_error: #{reason} | raw: #{String.slice(text, 0, 200)}"}
+            %{
+              sample: sample,
+              predicted: nil,
+              correct: false,
+              error: "parse_error: #{reason} | raw: #{String.slice(text, 0, 200)}"
+            }
         end
 
       {:error, reason} ->
@@ -283,16 +310,37 @@ defmodule Mix.Tasks.Eval.Memory do
     info("")
 
     # Per-action metrics
-    all_actions = ["ignore", "create_memory", "create_absence", "create_meeting", "flag_sensitive", "ask_human"]
+    all_actions = [
+      "ignore",
+      "create_memory",
+      "create_absence",
+      "create_meeting",
+      "flag_sensitive",
+      "ask_human"
+    ]
 
     info("  Per-action metrics:")
     info("  #{pad("Action", 30)} #{pad("P", 8)} #{pad("R", 8)} #{pad("F1", 8)} TP  FP  FN")
     info("  #{String.duplicate("─", 72)}")
 
     Enum.each(all_actions, fn action ->
-      tp = Enum.count(evaluated, &(&1.sample["expected_action"] == action and prediction(&1) == action))
-      fp = Enum.count(evaluated, &(&1.sample["expected_action"] != action and prediction(&1) == action))
-      fn_ = Enum.count(evaluated, &(&1.sample["expected_action"] == action and prediction(&1) != action))
+      tp =
+        Enum.count(
+          evaluated,
+          &(&1.sample["expected_action"] == action and prediction(&1) == action)
+        )
+
+      fp =
+        Enum.count(
+          evaluated,
+          &(&1.sample["expected_action"] != action and prediction(&1) == action)
+        )
+
+      fn_ =
+        Enum.count(
+          evaluated,
+          &(&1.sample["expected_action"] == action and prediction(&1) != action)
+        )
 
       precision = if tp + fp > 0, do: Float.round(tp / (tp + fp) * 100, 1), else: nil
       recall = if tp + fn_ > 0, do: Float.round(tp / (tp + fn_) * 100, 1), else: nil
@@ -302,7 +350,9 @@ defmodule Mix.Tasks.Eval.Memory do
           Float.round(2 * precision * recall / (precision + recall), 1)
         end
 
-      info("  #{pad(action, 30)} #{pad(fmt_pct(precision), 8)} #{pad(fmt_pct(recall), 8)} #{pad(fmt_pct(f1), 8)} #{tp}   #{fp}   #{fn_}")
+      info(
+        "  #{pad(action, 30)} #{pad(fmt_pct(precision), 8)} #{pad(fmt_pct(recall), 8)} #{pad(fmt_pct(f1), 8)} #{tp}   #{fp}   #{fn_}"
+      )
     end)
 
     info("")
@@ -336,21 +386,30 @@ defmodule Mix.Tasks.Eval.Memory do
     if fp_public_client == [] do
       info("  ✓ False positives to external scope         : 0 — PASS")
     else
-      info("  ✗ False positives to external scope         : #{length(fp_public_client)} — BLOCKER")
+      info(
+        "  ✗ False positives to external scope         : #{length(fp_public_client)} — BLOCKER"
+      )
+
       Enum.each(fp_public_client, &print_failure/1)
     end
 
     if fp_sensitive_to_client == [] do
       info("  ✓ Sensitive data into client scope         : 0 — PASS")
     else
-      info("  ✗ Sensitive data into client scope         : #{length(fp_sensitive_to_client)} — BLOCKER")
+      info(
+        "  ✗ Sensitive data into client scope         : #{length(fp_sensitive_to_client)} — BLOCKER"
+      )
+
       Enum.each(fp_sensitive_to_client, &print_failure/1)
     end
 
     if fp_should_be_flagged == [] do
       info("  ✓ Auto-saved when should be flagged        : 0 — PASS")
     else
-      info("  ✗ Auto-saved when should be flagged        : #{length(fp_should_be_flagged)} — WARNING")
+      info(
+        "  ✗ Auto-saved when should be flagged        : #{length(fp_should_be_flagged)} — WARNING"
+      )
+
       Enum.each(fp_should_be_flagged, &print_failure/1)
     end
 
@@ -380,7 +439,11 @@ defmodule Mix.Tasks.Eval.Memory do
 
       Enum.each(failures, fn r ->
         info("")
-        info("    [#{r.sample["id"]}] #{r.sample["channel_kind"]} | expected: #{r.sample["expected_action"]} | predicted: #{prediction(r)}")
+
+        info(
+          "    [#{r.sample["id"]}] #{r.sample["channel_kind"]} | expected: #{r.sample["expected_action"]} | predicted: #{prediction(r)}"
+        )
+
         info("    Msg: #{String.slice(r.sample["message_text"] || "", 0, 100)}")
         info("    Reason: #{r.sample["reason"]}")
 
@@ -393,6 +456,7 @@ defmodule Mix.Tasks.Eval.Memory do
     if errors != [] do
       info("")
       info("  Errors (#{length(errors)}):")
+
       Enum.each(errors, fn r ->
         info("    [#{r.sample["id"]}] #{r.error}")
       end)

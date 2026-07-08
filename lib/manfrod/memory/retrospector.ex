@@ -22,7 +22,8 @@ defmodule Manfrod.Memory.Retrospector do
 
   require Logger
 
-  alias Manfrod.{Events, LLM, Memory, Voyage}
+  alias Manfrod.{Events, LLM, Memory, Repo, Voyage}
+  alias Manfrod.Accounts.User
 
   # Embed zettelkasten guide at compile time
   @external_resource Path.join(__DIR__, "zettelkasten.md")
@@ -100,7 +101,9 @@ defmodule Manfrod.Memory.Retrospector do
   """
 
   # Tool definitions — user_id is baked into closures for search/create
-  defp tools(user_id) do
+  defp tools(user_id, readable_levels, write_access) do
+    create_user_id = system_user_id()
+
     [
       ReqLLM.Tool.new!(
         name: "search",
@@ -110,7 +113,7 @@ defmodule Manfrod.Memory.Retrospector do
           query: [type: :string, required: true, doc: "Search query text"],
           limit: [type: :integer, doc: "Maximum results to return (default: 5)"]
         ],
-        callback: fn args -> tool_search(user_id, args) end
+        callback: fn args -> tool_search(user_id, readable_levels, args) end
       ),
       ReqLLM.Tool.new!(
         name: "get_node",
@@ -131,7 +134,7 @@ defmodule Manfrod.Memory.Retrospector do
             doc: "The atomic idea or fact (1-2 sentences)"
           ]
         ],
-        callback: fn args -> tool_create_node(user_id, args) end
+        callback: fn args -> tool_create_node(create_user_id, write_access, args) end
       ),
       ReqLLM.Tool.new!(
         name: "update_node",
@@ -220,11 +223,33 @@ defmodule Manfrod.Memory.Retrospector do
     ]
   end
 
+  defp system_user_id do
+    slack_id = "system:retrospector"
+
+    case Repo.get_by(User, slack_id: slack_id) do
+      nil ->
+        {:ok, user} =
+          %User{}
+          |> User.changeset(%{
+            slack_id: slack_id,
+            slack_dm_channel_id: "system:retrospector",
+            name: "Retrospector",
+            email: "retrospector@system.manfrod"
+          })
+          |> Repo.insert()
+
+        user.id
+
+      user ->
+        user.id
+    end
+  end
+
   # Tool callbacks
 
-  def tool_search(user_id, %{query: query} = args) do
+  def tool_search(user_id, readable_levels, %{query: query} = args) do
     limit = Map.get(args, :limit, 5)
-    {:ok, nodes} = Memory.search(user_id, query, limit: limit)
+    {:ok, nodes} = Memory.search(user_id, readable_levels, query, limit: limit)
 
     if Enum.empty?(nodes) do
       {:ok, "No matching nodes found."}
@@ -249,12 +274,12 @@ defmodule Manfrod.Memory.Retrospector do
     end
   end
 
-  def tool_create_node(user_id, %{content: content}) do
+  def tool_create_node(user_id, write_access, %{content: content}) do
     case Voyage.embed_query(content) do
       {:ok, embedding} ->
         now = DateTime.utc_now() |> DateTime.truncate(:second)
 
-        case Memory.create_node(user_id, %{
+        case Memory.create_node(user_id, write_access, %{
                content: content,
                embedding: embedding,
                processed_at: now
@@ -391,6 +416,9 @@ defmodule Manfrod.Memory.Retrospector do
     batch_size = Keyword.get(opts, :batch_size, 20)
     review_budget = Keyword.get(opts, :review_budget, 25)
 
+    readable_levels = ["internal", "external/all"]
+    write_access = ["internal"]
+
     slipbox = Memory.get_slipbox_nodes(user_id, limit: batch_size)
     review_sample = build_review_sample(user_id, review_budget)
 
@@ -402,7 +430,69 @@ defmodule Manfrod.Memory.Retrospector do
         "Retrospector: processing #{length(slipbox)} slipbox nodes, reviewing #{length(review_sample)} graph nodes for user #{user_id}"
       )
 
-      run_agent(user_id, slipbox, review_sample)
+      run_agent(user_id, readable_levels, write_access, slipbox, review_sample)
+    end
+  end
+
+  @doc """
+  Process all pending slipbox nodes, grouped by access bucket.
+  Each bucket gets its own agent run with appropriate readable_levels and write_access.
+  This is the preferred entry point for the RetrospectionWorker.
+  """
+  def process_all_buckets(opts \\ []) do
+    buckets = Memory.list_slipbox_access_buckets()
+
+    if buckets == [] do
+      Logger.debug("Retrospector: no pending nodes in any access bucket")
+      :ok
+    else
+      Logger.info("Retrospector: processing #{length(buckets)} access bucket(s)")
+
+      Enum.each(buckets, fn access_bucket ->
+        readable_levels = Enum.uniq(["internal" | access_bucket])
+        write_access = access_bucket
+        user_id = find_bucket_user_id(access_bucket)
+
+        if user_id do
+          process_bucket(user_id, readable_levels, write_access, opts)
+        else
+          Logger.warning(
+            "Retrospector: no user found for bucket #{inspect(access_bucket)}, skipping"
+          )
+        end
+      end)
+
+      :ok
+    end
+  end
+
+  defp find_bucket_user_id(access_bucket) do
+    import Ecto.Query
+
+    Manfrod.Repo.one(
+      from n in Manfrod.Memory.Node,
+        where: is_nil(n.processed_at) and n.access == ^access_bucket,
+        order_by: [desc: n.inserted_at],
+        select: n.user_id,
+        limit: 1
+    )
+  end
+
+  defp process_bucket(user_id, readable_levels, write_access, opts) do
+    batch_size = Keyword.get(opts, :batch_size, 20)
+    review_budget = Keyword.get(opts, :review_budget, 25)
+
+    slipbox = Memory.get_slipbox_nodes_by_access(write_access, limit: batch_size)
+    review_sample = build_review_sample(user_id, review_budget)
+
+    if slipbox == [] do
+      Logger.debug("Retrospector: empty slipbox for bucket #{inspect(write_access)}")
+    else
+      Logger.info(
+        "Retrospector: processing #{length(slipbox)} nodes for bucket #{inspect(write_access)}"
+      )
+
+      run_agent(user_id, readable_levels, write_access, slipbox, review_sample)
     end
   end
 
@@ -445,7 +535,7 @@ defmodule Manfrod.Memory.Retrospector do
 
   # Private
 
-  defp run_agent(user_id, slipbox, review_sample) do
+  defp run_agent(user_id, readable_levels, write_access, slipbox, review_sample) do
     slipbox_text = format_nodes(slipbox)
     review_text = format_nodes(review_sample)
 
@@ -462,7 +552,7 @@ defmodule Manfrod.Memory.Retrospector do
       ReqLLM.Context.user(user_message)
     ]
 
-    case call_with_tools(user_id, messages, 0, %{
+    case call_with_tools(user_id, readable_levels, write_access, messages, 0, %{
            nodes_processed: 0,
            nodes_updated: 0,
            links_created: 0,
@@ -533,13 +623,16 @@ defmodule Manfrod.Memory.Retrospector do
     slipbox_section <> review_section
   end
 
-  defp call_with_tools(user_id, messages, iteration, stats) do
+  defp call_with_tools(user_id, readable_levels, write_access, messages, iteration, stats) do
     if iteration > 150 do
       {:error, :max_iterations}
     else
       ctx = %{user_id: user_id, source: :retrospector}
 
-      case LLM.generate_text(messages, tools: tools(user_id), purpose: :retrospector) do
+      case LLM.generate_text(messages,
+             tools: tools(user_id, readable_levels, write_access),
+             purpose: :retrospector
+           ) do
         {:ok, response} ->
           case ReqLLM.Response.finish_reason(response) do
             :tool_calls ->
@@ -582,7 +675,8 @@ defmodule Manfrod.Memory.Retrospector do
                   )
 
                   # Execute and time the action
-                  {result, duration_ms, success} = timed_execute_tool(user_id, tool_call)
+                  {result, duration_ms, success} =
+                    timed_execute_tool(user_id, readable_levels, write_access, tool_call)
 
                   # Broadcast action completed
                   Events.broadcast(
@@ -605,7 +699,14 @@ defmodule Manfrod.Memory.Retrospector do
                 end)
 
               # Continue
-              call_with_tools(user_id, messages_with_results, iteration + 1, new_stats)
+              call_with_tools(
+                user_id,
+                readable_levels,
+                write_access,
+                messages_with_results,
+                iteration + 1,
+                new_stats
+              )
 
             _other ->
               text = ReqLLM.Response.text(response) || ""
@@ -636,22 +737,22 @@ defmodule Manfrod.Memory.Retrospector do
   defp update_stats(stats, "delete_link"), do: Map.update!(stats, :links_deleted, &(&1 + 1))
   defp update_stats(stats, _tool), do: stats
 
-  defp timed_execute_tool(user_id, tool_call) do
+  defp timed_execute_tool(user_id, readable_levels, write_access, tool_call) do
     start_time = System.monotonic_time(:millisecond)
-    {result, success} = execute_tool(user_id, tool_call)
+    {result, success} = execute_tool(user_id, readable_levels, write_access, tool_call)
     end_time = System.monotonic_time(:millisecond)
     duration_ms = end_time - start_time
 
     {result, duration_ms, success}
   end
 
-  defp execute_tool(user_id, tool_call) do
+  defp execute_tool(user_id, readable_levels, write_access, tool_call) do
     tool_name = tool_call.function.name
     args_json = tool_call.function.arguments
 
     case Jason.decode(args_json) do
       {:ok, args} ->
-        tool = Enum.find(tools(user_id), &(&1.name == tool_name))
+        tool = Enum.find(tools(user_id, readable_levels, write_access), &(&1.name == tool_name))
 
         if tool do
           case ReqLLM.Tool.execute(tool, args) do

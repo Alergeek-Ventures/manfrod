@@ -29,8 +29,6 @@ defmodule Manfrod.LLM do
       ReqLLM.Response.usage(response)
   """
 
-  require Logger
-
   alias Manfrod.Events
 
   # Centralized configuration - not configurable per-call

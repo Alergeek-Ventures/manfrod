@@ -18,6 +18,7 @@ defmodule Manfrod.Memory.Node do
     field :content, :string
     field :embedding, Pgvector.Ecto.Vector
     field :processed_at, :utc_datetime
+    field :access, {:array, :string}, default: ["internal"]
 
     belongs_to :user, User
     belongs_to :conversation, Conversation
@@ -27,7 +28,8 @@ defmodule Manfrod.Memory.Node do
 
   def changeset(node, attrs) do
     node
-    |> cast(attrs, [:content, :embedding, :conversation_id, :processed_at])
-    |> validate_required([:content])
+    |> cast(attrs, [:content, :embedding, :conversation_id, :processed_at, :access])
+    |> validate_required([:content, :access])
+    |> validate_length(:access, min: 1)
   end
 end

@@ -13,6 +13,7 @@ defmodule Manfrod.Application do
         # Event handlers (subscribe to global PubSub)
         Manfrod.Events.Persister,
         Manfrod.Memory.FlushHandler,
+        Manfrod.Memory.PendingConfirmations,
         # Per-user agent processes (DynamicSupervisor + Registry)
         Manfrod.Agent.Supervisor,
         ManfrodWeb.Endpoint

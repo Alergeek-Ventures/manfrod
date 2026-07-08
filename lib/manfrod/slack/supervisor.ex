@@ -46,6 +46,9 @@ defmodule Manfrod.Slack.Supervisor do
       {Registry, keys: :unique, name: Manfrod.Slack.MessageServerRegistry},
       {DynamicSupervisor, strategy: :one_for_one, name: Manfrod.Slack.DynamicSupervisor},
       {PartitionSupervisor, child_spec: Task.Supervisor, name: Manfrod.Slack.TaskSupervisors},
+      # Passive memory buffer infrastructure
+      {Registry, keys: :unique, name: Manfrod.Memory.BufferRegistry},
+      {DynamicSupervisor, strategy: :one_for_one, name: Manfrod.Memory.BufferSupervisor},
       # Outbound: PubSub → Slack delivery
       {ActivityHandler, bot_token},
       # Inbound: Slack → Agent

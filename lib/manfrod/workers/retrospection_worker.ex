@@ -2,8 +2,8 @@ defmodule Manfrod.Workers.RetrospectionWorker do
   @moduledoc """
   Oban worker that triggers retrospection every hour.
 
-  Iterates all users that have unprocessed slipbox nodes and runs
-  the Retrospector agent for each one independently.
+  Iterates all pending slipbox nodes grouped by access bucket and runs
+  the Retrospector agent for each bucket independently.
   """
   use Oban.Worker,
     queue: :retrospection,
@@ -11,39 +11,10 @@ defmodule Manfrod.Workers.RetrospectionWorker do
 
   require Logger
 
-  alias Manfrod.Accounts
-
   @impl Oban.Worker
   def perform(%Oban.Job{}) do
-    user_ids = Accounts.user_ids_with_slipbox_nodes()
-
-    if user_ids == [] do
-      Logger.debug("RetrospectionWorker: no users with slipbox nodes")
-      :ok
-    else
-      Logger.info("RetrospectionWorker: running retrospection for #{length(user_ids)} user(s)")
-
-      errors =
-        Enum.flat_map(user_ids, fn user_id ->
-          case Manfrod.Memory.Retrospector.process_slipbox(user_id) do
-            :ok ->
-              Logger.info("RetrospectionWorker: retrospection completed for user #{user_id}")
-              []
-
-            {:error, reason} ->
-              Logger.error(
-                "RetrospectionWorker: retrospection failed for user #{user_id}: #{inspect(reason)}"
-              )
-
-              [{user_id, reason}]
-          end
-        end)
-
-      if errors == [] do
-        :ok
-      else
-        {:error, "Failed for #{length(errors)} user(s): #{inspect(errors)}"}
-      end
-    end
+    :ok = Manfrod.Memory.Retrospector.process_all_buckets()
+    Logger.info("RetrospectionWorker: completed")
+    :ok
   end
 end
