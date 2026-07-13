@@ -22,7 +22,7 @@ defmodule Manfrod.Memory.Classifier do
   require Logger
 
   alias Manfrod.{Accounts, Events, Facts, LLM, Memory, Voyage}
-  alias Manfrod.Memory.{Access, ChannelDetector, PendingConfirmations}
+  alias Manfrod.Memory.{Access, ChannelDetector, PendingConfirmations, PendingOps}
   alias Manfrod.Slack.API
 
   @system_prompt """
@@ -198,10 +198,16 @@ defmodule Manfrod.Memory.Classifier do
             |> Enum.zip(messages)
             |> Enum.with_index()
             |> Enum.each(fn {{result, message}, idx} ->
-              action = Map.get(result, "action", "ignore")
+              # Drain any op the agent flagged for this exact message. A flag
+              # forces the action (agent already decided) and overrides the
+              # LLM's choice; graph ops are executed verbatim afterwards.
+              pending = PendingOps.take(channel_id, message["ts"])
+              {action, result} = apply_pending_flag(pending.flag, result)
               reasoning = Map.get(result, "reasoning", "")
-              Logger.info("Classifier [#{channel_id}] msg #{idx}: #{action} — #{reasoning}")
+              flagged = if pending.flag, do: " (agent-flagged)", else: ""
+              Logger.info("Classifier [#{channel_id}] msg #{idx}: #{action}#{flagged} — #{reasoning}")
               dispatch_action(action, result, message, channel_id, kind, write_access, bot_token)
+              run_ops(pending.ops)
             end)
 
           {:error, reason} ->
@@ -382,6 +388,48 @@ defmodule Manfrod.Memory.Classifier do
   defp dispatch_action(unknown, _result, _message, _channel_id, _kind, _write_access, _bot_token) do
     Logger.warning("Classifier unknown action: #{unknown}")
     :ok
+  end
+
+  # -- Agent-flagged ops -------------------------------------------------------
+
+  # No flag: use the LLM's own decision for this message.
+  defp apply_pending_flag(nil, result), do: {Map.get(result, "action", "ignore"), result}
+
+  # Flagged: force the agent's action and merge any resolved fields (dates for
+  # absences, authored content for notes). The LLM-generated note is kept for
+  # quality unless the agent supplied explicit content.
+  defp apply_pending_flag(flag, result) do
+    result =
+      result
+      |> maybe_override("note", Map.get(flag, :content))
+      |> maybe_override("start_date", Map.get(flag, :start_date))
+      |> maybe_override("end_date", Map.get(flag, :end_date))
+
+    {flag.action, result}
+  end
+
+  defp maybe_override(result, _key, nil), do: result
+  defp maybe_override(result, key, value), do: Map.put(result, key, value)
+
+  # Execute standalone graph ops flagged by the agent. These carry the caller's
+  # provenance/access so the batch stays the single execution point.
+  defp run_ops(ops) do
+    Enum.each(ops, fn
+      {:escalate, %{node_id: id, level: level, readable_levels: rl}} ->
+        Memory.escalate_note_access(id, level, rl)
+
+      {:delete, %{node_id: id, user_id: uid}} ->
+        Memory.delete_node(uid, id)
+
+      {:link, %{a: a, b: b, user_id: uid}} ->
+        Memory.create_link(uid, a, b)
+
+      {:unlink, %{a: a, b: b, user_id: uid}} ->
+        Memory.delete_link(uid, a, b)
+
+      other ->
+        Logger.warning("Classifier: unknown pending op #{inspect(other)}")
+    end)
   end
 
   # -- Result helpers ----------------------------------------------------------

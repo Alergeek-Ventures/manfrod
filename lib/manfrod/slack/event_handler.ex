@@ -51,38 +51,37 @@ defmodule Manfrod.Slack.EventHandler do
 
     if text_present?(text) and slack_user_id do
       user_name = resolve_user_name(bot.token, slack_user_id)
+      channel_name = resolve_channel_name(bot.token, channel)
 
-      if dm_channel?(channel) do
-        # DMs are an explicit conversation with the agent. Purpose-built tools
-        # handle structured writes here; passive memory is for ambient channels.
-        handle_dm_message(bot, event, text, slack_user_id, channel)
-      else
-        channel_name = resolve_channel_name(bot.token, channel)
+      # Passive memory is always active: every inbound message is buffered for
+      # the Classifier (the single writer). Direct interactions additionally flow
+      # to the agent, whose mutating tools only flag these buffered messages
+      # instead of writing themselves — so no duplicate writes/prompts.
+      Buffer.push(
+        channel,
+        event["thread_ts"],
+        channel_name,
+        %{
+          "user" => slack_user_id,
+          "user_name" => user_name,
+          "text" => text,
+          "ts" => event["ts"]
+        },
+        bot.token
+      )
 
-        if bot_mentioned?(text, bot.user_id) do
+      cond do
+        dm_channel?(channel) ->
+          handle_dm_message(bot, event, text, slack_user_id, channel)
+
+        bot_mentioned?(text, bot.user_id) ->
           thread_ts = event["thread_ts"] || event["ts"]
           handle_channel_mention(bot, event, text, slack_user_id, channel, thread_ts)
-        else
-          # Passive path: ambient channel messages only. Direct interactions with
-          # Manfrod are handled by the agent path to avoid duplicate writes/prompts.
-          unless active_agent_thread_reply?(event, slack_user_id, channel) do
-            Buffer.push(
-              channel,
-              event["thread_ts"],
-              channel_name,
-              %{
-                "user" => slack_user_id,
-                "user_name" => user_name,
-                "text" => text,
-                "ts" => event["ts"]
-              },
-              bot.token
-            )
-          end
 
-          # Agent path: thread replies in active sessions
+        true ->
+          # Agent path: thread replies in active sessions (top-level channel
+          # messages without @mention no-op here but are still buffered above).
           handle_channel_thread_reply(event, bot, text, slack_user_id, channel)
-        end
       end
     else
       Logger.debug("Slack EventHandler ignoring message with no text or no user")
@@ -163,7 +162,8 @@ defmodule Manfrod.Slack.EventHandler do
       %{
         content: text,
         source: :slack,
-        reply_to: %{channel: channel, thread_ts: thread_ts}
+        reply_to: %{channel: channel, thread_ts: thread_ts},
+        ts: event["ts"]
       },
       channel
     )
@@ -209,7 +209,8 @@ defmodule Manfrod.Slack.EventHandler do
             %{
               content: content_with_context,
               source: :slack,
-              reply_to: %{channel: channel, thread_ts: thread_ts}
+              reply_to: %{channel: channel, thread_ts: thread_ts},
+              ts: event["ts"]
             },
             access_channel_id
           )
@@ -256,7 +257,8 @@ defmodule Manfrod.Slack.EventHandler do
                 %{
                   content: cleaned_text,
                   source: :slack,
-                  reply_to: %{channel: channel, thread_ts: thread_ts}
+                  reply_to: %{channel: channel, thread_ts: thread_ts},
+                  ts: event["ts"]
                 },
                 access_channel_id
               )
@@ -274,16 +276,6 @@ defmodule Manfrod.Slack.EventHandler do
 
   defp session_exists?(user_id, session_key) do
     Registry.lookup(Manfrod.Agent.Registry, {user_id, session_key}) != []
-  end
-
-  defp active_agent_thread_reply?(event, slack_user_id, channel) do
-    case {event["thread_ts"], Accounts.get_user_by_slack_id(slack_user_id)} do
-      {thread_ts, %{id: user_id}} when is_binary(thread_ts) ->
-        session_exists?(user_id, "#{channel}:#{thread_ts}")
-
-      _ ->
-        false
-    end
   end
 
   defp bot_mentioned?(text, bot_user_id) when is_binary(text) and is_binary(bot_user_id) do

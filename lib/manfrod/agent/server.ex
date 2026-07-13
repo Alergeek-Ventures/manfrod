@@ -26,6 +26,7 @@ defmodule Manfrod.Agent.Server do
   alias Manfrod.Google
   alias Manfrod.LLM
   alias Manfrod.Memory
+  alias Manfrod.Memory.PendingOps
   alias Manfrod.Memory.Soul
   alias Manfrod.Repo
   alias Manfrod.Voyage
@@ -54,18 +55,18 @@ defmodule Manfrod.Agent.Server do
   - get_calendar_events: Fetch events from the user's Google Calendar for a date range
   - get_fact: Look up structured facts (vacations, absences, meetings) by key
   - list_facts: List structured facts by key prefix
-  - report_vacation: Record a planned absence visible to all clients
-  - escalate_note: Widen a note's visibility level (only with explicit user confirmation)
+  - report_vacation: Flag a planned absence for the background memory to record (memory decides on client visibility)
+  - escalate_note: Flag a note to have its visibility widened (applied by the background memory)
 
   ## MANDATORY tool usage rules (NEVER skip these)
 
   ### Vacations and absences
-  - User says they will be absent/on vacation/off/unavailable on any date → FIRST ask the user
-    to confirm: report_vacation makes the absence visible to ALL clients (external/all).
-    Only call report_vacation after the user explicitly agrees in this conversation.
-    If they decline, save it with create_note instead (stays at the current access level).
-  - Once the user confirms, call report_vacation in the same response — do NOT just say
-    "I noted it" or "I saved it" without the tool call, or nothing is saved.
+  - User says they will be absent/on vacation/off/unavailable on any date → call report_vacation
+    with the dates and confirm briefly (e.g. "Zanotowane"). Do NOT ask the user about visibility
+    for clients. The background memory records the absence and decides on its own whether to
+    propose sharing with all clients (external/all), showing standard Accept/Deny buttons.
+    report_vacation only flags the message — the actual write is done by the background memory,
+    so never claim it is already stored "for all clients".
   - User asks when they have vacation/leave/absence → call list_facts with prefix "absence:" FIRST, then reply based on the result.
     Do NOT say "I don't have that info" without calling the tool first.
 
@@ -90,8 +91,10 @@ defmodule Manfrod.Agent.Server do
   Note context is scoped to your current channel's access level — you only see notes you're allowed to see in this context.
   """
 
-  # Tool definitions are created at runtime with user_id baked into closures
-  defp tools(user_id, readable_levels, write_access) do
+  # Tool definitions are created at runtime with user_id baked into closures.
+  # `msg_ctx` (%{channel, ts}) identifies the inbound Slack message being handled
+  # so mutating tools can flag it for the passive memory batch instead of writing.
+  defp tools(user_id, readable_levels, write_access, msg_ctx) do
     [
       ReqLLM.Tool.new!(
         name: "set_reminder",
@@ -206,7 +209,7 @@ defmodule Manfrod.Agent.Server do
       ReqLLM.Tool.new!(
         name: "create_note",
         description:
-          "Create a new note in your slipbox. The note will be integrated into your zettelkasten during the next retrospection cycle. Use for facts worth remembering.",
+          "Flag content for the background memory to save as a note (the memory batch does the actual write, deduplicated with passive capture). Use for facts worth remembering.",
         parameter_schema: [
           content: [
             type: :string,
@@ -214,7 +217,7 @@ defmodule Manfrod.Agent.Server do
             doc: "The atomic idea or fact (1-2 sentences)"
           ]
         ],
-        callback: fn args -> tool_create_note(user_id, write_access, args) end
+        callback: fn args -> tool_create_note(user_id, write_access, msg_ctx, args) end
       ),
       ReqLLM.Tool.new!(
         name: "delete_note",
@@ -227,7 +230,7 @@ defmodule Manfrod.Agent.Server do
             doc: "UUID of the note to delete"
           ]
         ],
-        callback: fn args -> tool_delete_note(user_id, readable_levels, args) end
+        callback: fn args -> tool_delete_note(user_id, readable_levels, msg_ctx, args) end
       ),
       ReqLLM.Tool.new!(
         name: "link_notes",
@@ -237,7 +240,7 @@ defmodule Manfrod.Agent.Server do
           note_a_id: [type: :string, required: true, doc: "First note UUID"],
           note_b_id: [type: :string, required: true, doc: "Second note UUID"]
         ],
-        callback: fn args -> tool_link_notes(user_id, readable_levels, args) end
+        callback: fn args -> tool_link_notes(user_id, readable_levels, msg_ctx, args) end
       ),
       ReqLLM.Tool.new!(
         name: "unlink_notes",
@@ -246,7 +249,7 @@ defmodule Manfrod.Agent.Server do
           note_a_id: [type: :string, required: true, doc: "First note UUID"],
           note_b_id: [type: :string, required: true, doc: "Second note UUID"]
         ],
-        callback: fn args -> tool_unlink_notes(user_id, readable_levels, args) end
+        callback: fn args -> tool_unlink_notes(user_id, readable_levels, msg_ctx, args) end
       ),
       ReqLLM.Tool.new!(
         name: "web_search",
@@ -300,19 +303,20 @@ defmodule Manfrod.Agent.Server do
       ReqLLM.Tool.new!(
         name: "report_vacation",
         description:
-          "Record a planned absence/vacation, stored as visible to all clients (external/all). " <>
-            "Call ONLY after the user explicitly confirmed in this conversation that it may be shared with all clients.",
+          "Flag a planned absence/vacation for the background memory to record. " <>
+            "The memory saves it and decides on its own whether to propose sharing with all clients. " <>
+            "Call whenever the user mentions being absent — do NOT ask the user about client visibility.",
         parameter_schema: [
           start_date: [type: :string, required: true, doc: "Start date ISO8601 (YYYY-MM-DD)"],
           end_date: [type: :string, required: true, doc: "End date ISO8601 (YYYY-MM-DD)"],
           note: [type: :string, doc: "Optional note (e.g. 'on vacation', 'public holiday')"]
         ],
-        callback: fn args -> tool_report_vacation(user_id, args) end
+        callback: fn args -> tool_report_vacation(user_id, msg_ctx, args) end
       ),
       ReqLLM.Tool.new!(
         name: "escalate_note",
         description:
-          "Widen the visibility of an existing note (e.g. from internal to external/client). Use only when user explicitly confirms sharing.",
+          "Flag an existing note to have its visibility widened (e.g. internal → external/client); applied by the background memory. Use when the user explicitly asks to share it more widely.",
         parameter_schema: [
           node_id: [type: :string, required: true, doc: "Note UUID"],
           new_access_level: [
@@ -321,7 +325,7 @@ defmodule Manfrod.Agent.Server do
             doc: "New access level to add, e.g. 'external/10bps' or 'external/all'"
           ]
         ],
-        callback: fn args -> tool_escalate_note(readable_levels, args) end
+        callback: fn args -> tool_escalate_note(readable_levels, msg_ctx, args) end
       )
     ]
   end
@@ -452,7 +456,8 @@ defmodule Manfrod.Agent.Server do
         slack_channel_id: Map.get(reply_to || %{}, :channel)
       },
       source: source,
-      reply_to: reply_to
+      reply_to: reply_to,
+      slack_ts: Map.get(message, :ts)
     }
 
     # Queue message and trigger loop
@@ -544,7 +549,7 @@ defmodule Manfrod.Agent.Server do
       {:noreply, state}
     else
       case LLM.generate_text(state.messages,
-             tools: tools(state.user_id, state.readable_levels, state.write_access),
+             tools: tools(state.user_id, state.readable_levels, state.write_access, msg_ctx(ctx)),
              purpose: :agent
            ) do
         {:ok, response} ->
@@ -654,6 +659,7 @@ defmodule Manfrod.Agent.Server do
                 state.user_id,
                 state.readable_levels,
                 state.write_access,
+                ctx,
                 tool_call
               )
 
@@ -710,23 +716,27 @@ defmodule Manfrod.Agent.Server do
     end
   end
 
-  defp timed_execute_tool(user_id, readable_levels, write_access, tool_call) do
+  defp timed_execute_tool(user_id, readable_levels, write_access, ctx, tool_call) do
     start_time = System.monotonic_time(:millisecond)
-    {result, success} = execute_tool(user_id, readable_levels, write_access, tool_call)
+    {result, success} = execute_tool(user_id, readable_levels, write_access, ctx, tool_call)
     end_time = System.monotonic_time(:millisecond)
     duration_ms = end_time - start_time
 
     {result, duration_ms, success}
   end
 
-  defp execute_tool(user_id, readable_levels, write_access, tool_call) do
+  defp execute_tool(user_id, readable_levels, write_access, ctx, tool_call) do
     tool_name = tool_call.function.name
     args_json = tool_call.function.arguments
 
     case Jason.decode(args_json) do
       {:ok, args} ->
         # Find and execute the tool
-        tool = Enum.find(tools(user_id, readable_levels, write_access), &(&1.name == tool_name))
+        tool =
+          Enum.find(
+            tools(user_id, readable_levels, write_access, msg_ctx(ctx)),
+            &(&1.name == tool_name)
+          )
 
         if tool do
           case ReqLLM.Tool.execute(tool, args) do
@@ -774,6 +784,18 @@ defmodule Manfrod.Agent.Server do
 
     Memory.build_context(nodes)
   end
+
+  # Identify the inbound Slack message for memory flagging. Only Slack messages
+  # (map reply_to with a channel, plus a ts) are flaggable; other sources fall
+  # back to direct writes in the mutating tools.
+  defp msg_ctx(%{reply_to: %{channel: channel}} = ctx) when is_binary(channel) do
+    %{channel: channel, ts: Map.get(ctx, :slack_ts)}
+  end
+
+  defp msg_ctx(_ctx), do: %{channel: nil, ts: nil}
+
+  defp flaggable(%{channel: ch, ts: ts}) when is_binary(ch) and is_binary(ts), do: {:ok, ch, ts}
+  defp flaggable(_), do: :error
 
   # Tool callbacks
   # Tools that need user_id use closures; others are plain functions
@@ -959,7 +981,20 @@ defmodule Manfrod.Agent.Server do
     end
   end
 
-  defp tool_create_note(user_id, write_access, %{content: content}) do
+  # Flags the current message for the memory batch instead of writing directly,
+  # so the passive Classifier stays the single writer (named, deduplicated notes).
+  defp tool_create_note(user_id, write_access, msg_ctx, %{content: content}) do
+    case flaggable(msg_ctx) do
+      {:ok, channel_id, ts} ->
+        PendingOps.flag_message(channel_id, ts, "create_memory", %{content: content})
+        {:ok, "Zaznaczyłem do zapamiętania — pamięć w tle zapisze notatkę."}
+
+      :error ->
+        tool_create_note_direct(user_id, write_access, content)
+    end
+  end
+
+  defp tool_create_note_direct(user_id, write_access, content) do
     case Voyage.embed_query(content) do
       {:ok, embedding} ->
         case Memory.create_node(user_id, write_access, %{content: content, embedding: embedding}) do
@@ -975,7 +1010,18 @@ defmodule Manfrod.Agent.Server do
     end
   end
 
-  defp tool_delete_note(user_id, readable_levels, %{id: id}) do
+  defp tool_delete_note(user_id, readable_levels, msg_ctx, %{id: id}) do
+    with {:ok, channel_id, ts} <- flaggable(msg_ctx),
+         node when not is_nil(node) <- Memory.get_node_accessible(readable_levels, id) do
+      PendingOps.add_op(channel_id, ts, {:delete, %{node_id: id, user_id: user_id}})
+      {:ok, "Zaznaczyłem notatkę do usunięcia: #{id}"}
+    else
+      :error -> tool_delete_note_direct(user_id, readable_levels, id)
+      nil -> {:ok, "Note not found: #{id}"}
+    end
+  end
+
+  defp tool_delete_note_direct(user_id, readable_levels, id) do
     case Memory.get_node_accessible(readable_levels, id) do
       nil ->
         {:ok, "Note not found: #{id}"}
@@ -988,7 +1034,23 @@ defmodule Manfrod.Agent.Server do
     end
   end
 
-  defp tool_link_notes(user_id, readable_levels, %{note_a_id: a, note_b_id: b}) do
+  defp tool_link_notes(user_id, readable_levels, msg_ctx, %{note_a_id: a, note_b_id: b}) do
+    case flaggable(msg_ctx) do
+      {:ok, channel_id, ts} ->
+        if Memory.get_node_accessible(readable_levels, a) &&
+             Memory.get_node_accessible(readable_levels, b) do
+          PendingOps.add_op(channel_id, ts, {:link, %{a: a, b: b, user_id: user_id}})
+          {:ok, "Zaznaczyłem połączenie notatek: #{a} <-> #{b}"}
+        else
+          {:ok, "One or both notes not found or not accessible"}
+        end
+
+      :error ->
+        tool_link_notes_direct(user_id, readable_levels, a, b)
+    end
+  end
+
+  defp tool_link_notes_direct(user_id, readable_levels, a, b) do
     node_a = Memory.get_node_accessible(readable_levels, a)
     node_b = Memory.get_node_accessible(readable_levels, b)
 
@@ -1002,7 +1064,23 @@ defmodule Manfrod.Agent.Server do
     end
   end
 
-  defp tool_unlink_notes(user_id, readable_levels, %{note_a_id: a, note_b_id: b}) do
+  defp tool_unlink_notes(user_id, readable_levels, msg_ctx, %{note_a_id: a, note_b_id: b}) do
+    case flaggable(msg_ctx) do
+      {:ok, channel_id, ts} ->
+        if Memory.get_node_accessible(readable_levels, a) &&
+             Memory.get_node_accessible(readable_levels, b) do
+          PendingOps.add_op(channel_id, ts, {:unlink, %{a: a, b: b, user_id: user_id}})
+          {:ok, "Zaznaczyłem rozłączenie notatek: #{a} <-> #{b}"}
+        else
+          {:ok, "One or both notes not found or not accessible"}
+        end
+
+      :error ->
+        tool_unlink_notes_direct(user_id, readable_levels, a, b)
+    end
+  end
+
+  defp tool_unlink_notes_direct(user_id, readable_levels, a, b) do
     node_a = Memory.get_node_accessible(readable_levels, a)
     node_b = Memory.get_node_accessible(readable_levels, b)
 
@@ -1146,7 +1224,27 @@ defmodule Manfrod.Agent.Server do
     end
   end
 
-  defp tool_report_vacation(user_id, %{start_date: start_date, end_date: end_date} = args) do
+  # Flags the message as an absence for the memory batch. The Classifier writes
+  # a named node + fact at the channel's default access and, if warranted, posts
+  # the standard escalation buttons — the agent does NOT ask about external/all.
+  defp tool_report_vacation(user_id, msg_ctx, %{start_date: start_date, end_date: end_date} = args) do
+    case flaggable(msg_ctx) do
+      {:ok, channel_id, ts} ->
+        PendingOps.flag_message(channel_id, ts, "create_absence", %{
+          start_date: start_date,
+          end_date: end_date,
+          note: Map.get(args, :note)
+        })
+
+        {:ok,
+         "Zanotowane (#{start_date}..#{end_date}). Pamięć w tle zapisze nieobecność i w razie potrzeby zapyta o udostępnienie klientom."}
+
+      :error ->
+        tool_report_vacation_direct(user_id, args)
+    end
+  end
+
+  defp tool_report_vacation_direct(user_id, %{start_date: start_date, end_date: end_date} = args) do
     note = Map.get(args, :note, "urlop")
     key = "vacation:#{user_id}:#{start_date}"
     value = "#{start_date}..#{end_date} — #{note}"
@@ -1167,7 +1265,23 @@ defmodule Manfrod.Agent.Server do
     end
   end
 
-  defp tool_escalate_note(readable_levels, %{node_id: node_id, new_access_level: level}) do
+  defp tool_escalate_note(readable_levels, msg_ctx, %{node_id: node_id, new_access_level: level}) do
+    case flaggable(msg_ctx) do
+      {:ok, channel_id, ts} ->
+        PendingOps.add_op(
+          channel_id,
+          ts,
+          {:escalate, %{node_id: node_id, level: level, readable_levels: readable_levels}}
+        )
+
+        {:ok, "Zaznaczyłem do poszerzenia widoczności: #{node_id} → #{level}"}
+
+      :error ->
+        tool_escalate_note_direct(readable_levels, node_id, level)
+    end
+  end
+
+  defp tool_escalate_note_direct(readable_levels, node_id, level) do
     case Manfrod.Memory.escalate_note_access(node_id, level, readable_levels) do
       {:ok, _} -> {:ok, "Nota #{node_id} teraz widoczna jako: #{level}"}
       {:error, :not_found} -> {:ok, "Nota nie znaleziona: #{node_id}"}
