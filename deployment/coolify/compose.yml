@@ -10,7 +10,10 @@
 services:
   app:
     build:
-      context: ../..
+      # Coolify passes --project-directory pointing at the repo root, which
+      # makes Compose resolve build.context relative to *that* instead of
+      # this file's directory — so this must be "." (repo root), not "../..".
+      context: .
       dockerfile: Dockerfile
     restart: unless-stopped
     depends_on:
