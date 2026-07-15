@@ -39,6 +39,13 @@ config :manfrod, ManfrodWeb.Endpoint,
   # Allow websocket connections from Tailscale hosts
   check_origin: :conn
 
+if config_env() == :prod do
+  # `force_ssl` lives in config.exs (compile-time) — it shapes the Endpoint's
+  # plug pipeline, which Phoenix builds at compile time.
+  config :manfrod, ManfrodWeb.Endpoint,
+    url: [host: env!("PHX_HOST", :string, "localhost"), port: 443, scheme: "https"]
+end
+
 # Zen API (Kimi K2.5)
 config :manfrod, :zen_api_key, env!("ZEN_API_KEY", :string?)
 

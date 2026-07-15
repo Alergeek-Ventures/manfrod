@@ -1,0 +1,46 @@
+# Coolify deployment: import this repo as a "Docker Compose" resource in
+# Coolify, pointing the "Base Directory"/compose file path at
+# deployment/coolify/compose.yml (build context below is the repo root).
+#
+# ParadeDB (not vanilla postgres) is required: migrations enable the
+# `pg_search` extension alongside `vector`, which only ParadeDB ships.
+#
+# Configure the env vars below as secrets in Coolify's "Environment Variables"
+# tab for this resource — see .env.example in this directory for the full list.
+services:
+  app:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - postgres
+    environment:
+      DATABASE_URL: ecto://manfrod:${POSTGRES_PASSWORD}@postgres:5432/manfrod
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE}
+      PHX_HOST: ${PHX_HOST}
+      PORT: "35233"
+      ZEN_API_KEY: ${ZEN_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      VOYAGE_API_KEY: ${VOYAGE_API_KEY:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      BRAVE_SEARCH_API_KEY: ${BRAVE_SEARCH_API_KEY:-}
+      SLACK_APP_TOKEN: ${SLACK_APP_TOKEN:-}
+      SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+    expose:
+      - "35233"
+
+  postgres:
+    image: docker.io/paradedb/paradedb@sha256:17fbec03c8543eb12267edb06345779f239505654609c4376ade53b4ec4ad1e9
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: manfrod
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: manfrod
+    volumes:
+      - manfrod_data:/var/lib/postgresql
+
+volumes:
+  manfrod_data:

@@ -15,18 +15,34 @@ config :manfrod, ManfrodWeb.Endpoint,
   adapter: Bandit.PhoenixAdapter,
   pubsub_server: Manfrod.PubSub,
   live_view: [signing_salt: "5e3ieG0i"],
-  code_reloader: true,
-  render_errors: [formats: [html: ManfrodWeb.ErrorHTML], layout: false],
-  watchers: [
-    tailwind: {Tailwind, :install_and_run, [:manfrod, ~w(--watch)]}
-  ],
-  reloadable_compilers: [:elixir],
-  live_reload: [
-    patterns: [
-      ~r"priv/static/(?!uploads/).*(js|css|png|jpeg|jpg|gif|svg)$",
-      ~r"lib/manfrod_web/(controllers|live|components)/.*(ex|heex)$"
+  render_errors: [formats: [html: ManfrodWeb.ErrorHTML], layout: false]
+
+# Dev-only: code reloading, asset watcher, and live-reload patterns. These
+# must stay out of the base config above — the ~r// regex literals compile to
+# terms `mix release` refuses to serialize into the release's config.
+if config_env() == :dev do
+  config :manfrod, ManfrodWeb.Endpoint,
+    code_reloader: true,
+    watchers: [
+      tailwind: {Tailwind, :install_and_run, [:manfrod, ~w(--watch)]}
+    ],
+    reloadable_compilers: [:elixir],
+    live_reload: [
+      patterns: [
+        ~r"priv/static/(?!uploads/).*(js|css|png|jpeg|jpg|gif|svg)$",
+        ~r"lib/manfrod_web/(controllers|live|components)/.*(ex|heex)$"
+      ]
     ]
-  ]
+end
+
+if config_env() == :prod do
+  # Behind a TLS-terminating reverse proxy (e.g. Coolify/Traefik), trust the
+  # X-Forwarded-Proto header so generated URLs (e.g. Google OAuth's
+  # redirect_uri) come out as https instead of http. This has to live here
+  # (compile-time), not runtime.exs — Phoenix builds the Endpoint's plug
+  # pipeline, which force_ssl shapes, at compile time.
+  config :manfrod, ManfrodWeb.Endpoint, force_ssl: [rewrite_on: [:x_forwarded_proto]]
+end
 
 config :logger,
   handle_otp_reports: true,
