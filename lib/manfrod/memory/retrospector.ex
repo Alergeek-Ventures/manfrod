@@ -404,37 +404,6 @@ defmodule Manfrod.Memory.Retrospector do
   # Public API
 
   @doc """
-  Run the retrospection agent.
-
-  Processes the slipbox (unprocessed nodes) and reviews existing graph nodes
-  using a priority cascade: orphans first, then weakly connected, then stalest,
-  then random — filling up to the review budget.
-
-  Returns :ok or {:error, reason}.
-  """
-  def process_slipbox(user_id, opts \\ []) do
-    batch_size = Keyword.get(opts, :batch_size, 20)
-    review_budget = Keyword.get(opts, :review_budget, 25)
-
-    readable_levels = ["internal", "external/all"]
-    write_access = ["internal"]
-
-    slipbox = Memory.get_slipbox_nodes(user_id, limit: batch_size)
-    review_sample = build_review_sample(user_id, review_budget)
-
-    if slipbox == [] and review_sample == [] do
-      Logger.debug("Retrospector: nothing to process for user #{user_id} (empty graph)")
-      :ok
-    else
-      Logger.info(
-        "Retrospector: processing #{length(slipbox)} slipbox nodes, reviewing #{length(review_sample)} graph nodes for user #{user_id}"
-      )
-
-      run_agent(user_id, readable_levels, write_access, slipbox, review_sample)
-    end
-  end
-
-  @doc """
   Process all pending slipbox nodes, grouped by access bucket.
   Each bucket gets its own agent run with appropriate readable_levels and write_access.
   This is the preferred entry point for the RetrospectionWorker.

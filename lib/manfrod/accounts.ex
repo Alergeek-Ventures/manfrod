@@ -272,17 +272,4 @@ defmodule Manfrod.Accounts do
       end
     end)
   end
-
-  @doc """
-  List all user IDs that have unprocessed slipbox nodes.
-  Used by RetrospectionWorker to iterate per-user.
-  """
-  def user_ids_with_slipbox_nodes do
-    from(n in Manfrod.Memory.Node,
-      where: is_nil(n.processed_at),
-      distinct: n.user_id,
-      select: n.user_id
-    )
-    |> Repo.all()
-  end
 end

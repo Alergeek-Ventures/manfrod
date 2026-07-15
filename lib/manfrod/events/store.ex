@@ -56,19 +56,6 @@ defmodule Manfrod.Events.Store do
   end
 
   @doc """
-  List recent audit events, ordered by timestamp descending.
-
-  Returns a list of Activity structs for compatibility with AuditLive.
-  """
-  def list_recent(limit \\ 200) do
-    AuditEvent
-    |> order_by([e], desc: e.timestamp)
-    |> limit(^limit)
-    |> Repo.all()
-    |> Enum.map(&AuditEvent.to_activity/1)
-  end
-
-  @doc """
   List recent audit events, excluding debug/info logs by default.
   Pass `include_all_logs: true` to include all log levels.
 

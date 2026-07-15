@@ -39,8 +39,8 @@ defmodule Manfrod.LLM do
   # Fallback chain: try each model in order
   # Each tuple: {provider_key, model_id, tier}
   @fallback_chain [
-    {:openrouter, "moonshotai/kimi-k2.5", :paid}
-    # {:openrouter, "deepseek/deepseek-v4-flash", :paid}
+    # {:openrouter, "moonshotai/kimi-k2.5", :paid}
+    {:openrouter, "deepseek/deepseek-v4-flash", :paid}
   ]
 
   # Provider configuration
