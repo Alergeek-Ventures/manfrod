@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      MIX_ENV: test
+      # Same paradedb image as deployment/local/compose.yml — plain postgres
+      # lacks the pgvector/pg_search extensions the migrations require.
+      DATABASE_URL: ecto://manfrod:manfrod@localhost:5432/manfrod_test
+      SECRET_KEY_BASE: ci_only_secret_key_base_not_used_in_production_1234567890
+      # config/runtime.exs requires these vars to be *set* (env!/2 raises if
+      # absent) even though the app treats them as optional once present —
+      # empty strings satisfy that and are converted to nil by Dotenvy's
+      # nilable :string? type.
+      ZEN_API_KEY: ""
+      OPENROUTER_API_KEY: ""
+      VOYAGE_API_KEY: ""
+      GROQ_API_KEY: ""
+      BRAVE_SEARCH_API_KEY: ""
+      SLACK_APP_TOKEN: ""
+      SLACK_BOT_TOKEN: ""
+      GOOGLE_CLIENT_ID: ""
+      GOOGLE_CLIENT_SECRET: ""
+    services:
+      postgres:
+        image: docker.io/paradedb/paradedb@sha256:17fbec03c8543eb12267edb06345779f239505654609c4376ade53b4ec4ad1e9
+        env:
+          POSTGRES_USER: manfrod
+          POSTGRES_PASSWORD: manfrod
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U manfrod"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Elixir
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: "28"
+          elixir-version: "1.18"
+
+      - name: Cache deps and build
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: mix-${{ runner.os }}-otp28-elixir1.18-${{ hashFiles('mix.lock') }}
+          restore-keys: |
+            mix-${{ runner.os }}-otp28-elixir1.18-
+
+      - name: Install dependencies
+        run: mix deps.get
+
+      - name: Compile (warnings as errors)
+        run: mix compile --warnings-as-errors
+
+      - name: Check formatting
+        run: mix format --check-formatted
+
+      - name: Set up database
+        run: |
+          mix ecto.create
+          mix ecto.migrate
+
+      # external_api tests hit real third-party APIs (Groq, etc.) and need
+      # secrets we don't provision here; db/slow-tagged agent tests need a
+      # live LLM key end-to-end and are excluded to keep CI fast and stable.
+      - name: Run tests
+        run: mix test --exclude external_api --exclude db --exclude slow

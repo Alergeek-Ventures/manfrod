@@ -1004,7 +1004,6 @@ defmodule Manfrod.Memory do
     |> Repo.one()
   end
 
-
   @doc """
   Create a recurring reminder for a user.
 

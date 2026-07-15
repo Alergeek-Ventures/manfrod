@@ -140,5 +140,4 @@ defmodule Manfrod.Memory.Extractor do
         error
     end
   end
-
 end
