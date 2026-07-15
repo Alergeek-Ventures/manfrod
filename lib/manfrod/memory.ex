@@ -120,19 +120,6 @@ defmodule Manfrod.Memory do
     |> Repo.one()
   end
 
-  @doc """
-  Get conversations for a user from the last N hours with their messages preloaded.
-  """
-  def get_recent_conversations(user_id, hours \\ 24) do
-    cutoff = DateTime.utc_now() |> DateTime.add(-hours, :hour)
-
-    Conversation
-    |> where([c], c.user_id == ^user_id and c.ended_at >= ^cutoff)
-    |> order_by([c], desc: c.ended_at)
-    |> preload(:messages)
-    |> Repo.all()
-  end
-
   # --- Soul ---
 
   @doc """
@@ -1017,15 +1004,6 @@ defmodule Manfrod.Memory do
     |> Repo.one()
   end
 
-  @doc """
-  Get a recurring reminder by name with node preloaded, scoped to a user.
-  """
-  def get_recurring_reminder_by_name(user_id, name) do
-    RecurringReminder
-    |> where([r], r.user_id == ^user_id and r.name == ^name)
-    |> preload(:node)
-    |> Repo.one()
-  end
 
   @doc """
   Create a recurring reminder for a user.

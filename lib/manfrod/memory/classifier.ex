@@ -59,6 +59,15 @@ defmodule Manfrod.Memory.Classifier do
   ── CREATE_ABSENCE ──────────────────────────────────────────────────────
   - One-time planned absence: "I'll be off Friday", "on vacation 16–21 May", "public holiday Monday"
   - Person explicitly will NOT be working that day/period
+  - Require a LITERAL absence/unavailability signal in the message itself (e.g. "urlop", "wolne",
+    "nie będzie mnie", "off", "vacation", "out of office", "L4"). Do NOT infer absence from an
+    ambiguous verb alone — "biorę/wezmę [coś]" ("I'll take X") can just as easily mean picking up
+    a task, trip, or assignment as taking time off. Example: "biorę cały przyszły tydzień w Kenley"
+    is NOT an absence by itself (could be taking on a work assignment there) unless the same
+    message or an explicit reply says it's time off/vacation/unavailable.
+  - If genuinely ambiguous whether it's an absence, do NOT create_absence — use create_memory (if
+    otherwise noteworthy) or ignore. Never guess from context, tone, or thread history; the literal
+    wording must state the person won't be working.
   - ALWAYS use create_absence for absences, from every channel type — never ask_human. The system
     saves at the channel's default access and asks the humans about sharing to external/all itself.
   - NOT an absence: remote work, recurring unavailability, "I start gym on Wednesdays"
