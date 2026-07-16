@@ -6,9 +6,11 @@ defmodule Manfrod.Skills do
   `catalog_text/0`), while the full body is only loaded when the agent decides
   it's relevant (see `get_body/1`, wired to the `use_skill` tool).
 
-  Skills live under `lib/manfrod/skills/<skill-name>/SKILL.md` and are read
-  from disk on every call (not embedded at compile time), so hand-edited
-  skills take effect on the next new agent session without a recompile.
+  Skills live under `priv/skills/<skill-name>/SKILL.md` (priv/ so they ship
+  inside a compiled release — see Dockerfile/`mix release`, unlike lib/ which
+  is source-only) and are read from disk on every call (not embedded at
+  compile time), so hand-edited skills take effect on the next new agent
+  session without a recompile.
 
   Not every file under `skills/` is a discoverable skill — `read_prompt/1`
   reads a plain prompt file (no frontmatter, no relevance decision) for
@@ -16,7 +18,7 @@ defmodule Manfrod.Skills do
   full.
   """
 
-  @skills_dir Path.join(__DIR__, "skills")
+  @skills_dir Application.app_dir(:manfrod, "priv/skills")
 
   @doc """
   List all discoverable skills (folders containing a `SKILL.md`) as

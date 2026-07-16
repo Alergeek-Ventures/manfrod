@@ -25,7 +25,7 @@ defmodule Manfrod.Memory.Classifier do
   alias Manfrod.Memory.{Access, ChannelDetector, PendingConfirmations, PendingOps}
   alias Manfrod.Slack.API
 
-  # Prompt content lives in lib/manfrod/skills/memory/classifier.md, read at
+  # Prompt content lives in priv/skills/memory/classifier.md, read at
   # runtime via Manfrod.Skills.read_prompt/1 so it can be hand-edited without
   # a recompile. Not a discoverable skill (no frontmatter) — this prompt is
   # always used in full, there's no relevance decision to make.
