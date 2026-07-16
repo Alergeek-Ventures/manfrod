@@ -1,7 +1,7 @@
 defmodule Manfrod.Tools.Vacation do
   @moduledoc """
   Vacation/absence reporting tool for the live agent. Usage instructions live
-  in the `vacation-tracking` skill (lib/manfrod/skills/vacation-tracking/SKILL.md);
+  in the `vacation-tracking` skill (priv/skills/vacation-tracking/SKILL.md);
   this module only implements the tool itself.
   """
 
