@@ -18,14 +18,12 @@ defmodule Manfrod.Skills do
   full.
   """
 
-  @skills_dir Application.app_dir(:manfrod, "priv/skills")
-
   @doc """
   List all discoverable skills (folders containing a `SKILL.md`) as
   `%{name: name, description: description}` maps.
   """
   def list do
-    @skills_dir
+    skills_dir()
     |> File.ls()
     |> case do
       {:ok, entries} -> entries
@@ -82,12 +80,19 @@ defmodule Manfrod.Skills do
   like the memory classifier's.
   """
   def read_prompt(relative_path) do
-    @skills_dir
+    skills_dir()
     |> Path.join(relative_path)
     |> File.read!()
   end
 
   # Private
+
+  # Resolved at runtime, not compile time: this must NOT be a module
+  # attribute. Application.app_dir/2 depends on the current code path — under
+  # a compiled release, that differs between the Docker build stage (where a
+  # module attribute would bake in a _build/... path) and the actual running
+  # release, so it has to be called fresh on every use.
+  defp skills_dir, do: Application.app_dir(:manfrod, "priv/skills")
 
   defp load_skill(entry) do
     path = skill_path(entry)
@@ -101,7 +106,7 @@ defmodule Manfrod.Skills do
     end
   end
 
-  defp skill_path(name), do: Path.join([@skills_dir, name, "SKILL.md"])
+  defp skill_path(name), do: Path.join([skills_dir(), name, "SKILL.md"])
 
   defp parse(content) do
     case String.split(content, "---", parts: 3) do
