@@ -14,6 +14,12 @@ if config_env() == :test do
     pool: Ecto.Adapters.SQL.Sandbox,
     pool_size: System.schedulers_online() * 2
 
+  # Oban must not run live in tests: its queue/cron polling goes through the
+  # sandbox pool without an owner, crash-loops, and (via restart intensity)
+  # can take the whole app down mid-suite. :manual disables queues and
+  # plugins; jobs can still be asserted on / drained explicitly.
+  config :manfrod, Oban, testing: :manual
+
   config :logger, level: :none
 else
   config :manfrod, Manfrod.Repo,

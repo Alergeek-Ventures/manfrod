@@ -32,14 +32,7 @@ defmodule Manfrod.Events.Persister do
 
   @impl true
   def handle_info({:activity, %Activity{} = activity}, state) do
-    case Store.insert(activity) do
-      {:ok, _event} ->
-        :ok
-
-      {:error, changeset} ->
-        Logger.warning("Failed to persist activity: #{inspect(changeset.errors)}")
-    end
-
+    persist(activity)
     {:noreply, state}
   end
 
@@ -60,6 +53,27 @@ defmodule Manfrod.Events.Persister do
 
     schedule_cleanup()
     {:noreply, state}
+  end
+
+  # The audit log must never take down the event bus (or, via supervisor
+  # restart intensity, the whole app). A DB failure here just drops the
+  # event: connection loss, and — under the test sandbox — a checkout
+  # exiting because the owning test finished mid-insert (an exit signal,
+  # which `rescue` alone would not catch).
+  defp persist(activity) do
+    case Store.insert(activity) do
+      {:ok, _event} ->
+        :ok
+
+      {:error, changeset} ->
+        Logger.warning("Failed to persist activity: #{inspect(changeset.errors)}")
+    end
+  rescue
+    error in [DBConnection.OwnershipError, DBConnection.ConnectionError] ->
+      Logger.warning("Failed to persist activity: #{Exception.message(error)}")
+  catch
+    :exit, reason ->
+      Logger.warning("Failed to persist activity: #{inspect(reason)}")
   end
 
   defp schedule_cleanup do
