@@ -75,9 +75,12 @@ config :manfrod, Oban,
     {Oban.Plugins.Pruner, max_age: 60 * 60 * 24 * 7},
     {Oban.Plugins.Cron,
      crontab: [
-       # Every hour - retrospection
-       {"0 * * * *", Manfrod.Workers.RetrospectionWorker},
-       # Every hour - schedule triggers for next 48h
-       {"0 * * * *", Manfrod.Workers.SchedulerWorker}
+       # Weekly (Sunday midnight) - memory retrospection
+       {"0 0 * * 0", Manfrod.Workers.RetrospectionWorker},
+       # Every hour - schedule reminder triggers for next 48h
+       {"0 * * * *", Manfrod.Workers.SchedulerWorker},
+       # Every hour - schedule cron-skill triggers for next 48h (skills
+       # with a `cron:` frontmatter field; none exist yet)
+       {"0 * * * *", Manfrod.Workers.SkillSchedulerWorker}
      ]}
   ]

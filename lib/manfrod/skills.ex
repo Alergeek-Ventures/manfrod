@@ -16,11 +16,18 @@ defmodule Manfrod.Skills do
   reads a plain prompt file (no frontmatter, no relevance decision) for
   callers like `Manfrod.Memory.Classifier` that always use their prompt in
   full.
+
+  A skill's frontmatter may also declare a `cron` field (a standard 5-field
+  cron expression) alongside `name`/`description`. That's the signal that the
+  skill isn't just reactive material for `use_skill` — it's a recurring job:
+  `Manfrod.Workers.SkillSchedulerWorker` picks it up (see `list_cron_skills/0`)
+  and runs it proactively on schedule via a subagent, instead of waiting for
+  the live agent to decide it's relevant.
   """
 
   @doc """
   List all discoverable skills (folders containing a `SKILL.md`) as
-  `%{name: name, description: description}` maps.
+  `%{name: name, description: description, cron: cron_or_nil}` maps.
   """
   def list do
     skills_dir()
@@ -30,6 +37,15 @@ defmodule Manfrod.Skills do
       {:error, _} -> []
     end
     |> Enum.flat_map(&load_skill/1)
+  end
+
+  @doc """
+  List skills that declare a `cron` field — the ones
+  `Manfrod.Workers.SkillSchedulerWorker` runs proactively on schedule instead
+  of only loading reactively via `use_skill`.
+  """
+  def list_cron_skills do
+    list() |> Enum.filter(&(&1.cron not in [nil, ""]))
   end
 
   @doc """
@@ -92,7 +108,12 @@ defmodule Manfrod.Skills do
   # a compiled release, that differs between the Docker build stage (where a
   # module attribute would bake in a _build/... path) and the actual running
   # release, so it has to be called fresh on every use.
-  defp skills_dir, do: Application.app_dir(:manfrod, "priv/skills")
+  # Overridable via the :skills_dir app env, test-only (points at a fixture
+  # directory instead of priv/skills so frontmatter-parsing tests don't have
+  # to add fake entries to the real, agent-visible skill catalog).
+  defp skills_dir do
+    Application.get_env(:manfrod, :skills_dir) || Application.app_dir(:manfrod, "priv/skills")
+  end
 
   defp load_skill(entry) do
     path = skill_path(entry)
@@ -100,7 +121,13 @@ defmodule Manfrod.Skills do
     with true <- File.regular?(path),
          {:ok, content} <- File.read(path),
          {:ok, frontmatter, _body} <- parse(content) do
-      [%{name: frontmatter["name"] || entry, description: frontmatter["description"] || ""}]
+      [
+        %{
+          name: frontmatter["name"] || entry,
+          description: frontmatter["description"] || "",
+          cron: frontmatter["cron"]
+        }
+      ]
     else
       _ -> []
     end
@@ -123,9 +150,19 @@ defmodule Manfrod.Skills do
     |> String.split("\n")
     |> Enum.reduce(%{}, fn line, acc ->
       case String.split(line, ":", parts: 2) do
-        [key, value] -> Map.put(acc, String.trim(key), String.trim(value))
+        [key, value] -> Map.put(acc, String.trim(key), unquote_value(String.trim(value)))
         _ -> acc
       end
     end)
+  end
+
+  # YAML-style frontmatter values are often quoted (e.g. `cron: "0 0 * * 0"`)
+  # to protect characters like `*`; this parser is otherwise quote-agnostic,
+  # so strip a single matching pair of quotes if present.
+  defp unquote_value(value) do
+    case Regex.run(~r/^(["'])(.*)\1$/, value) do
+      [_, _, inner] -> inner
+      nil -> value
+    end
   end
 end
