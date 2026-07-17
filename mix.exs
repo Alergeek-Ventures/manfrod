@@ -7,7 +7,11 @@ defmodule Manfrod.MixProject do
       version: "0.1.0",
       elixir: "~> 1.15",
       elixirc_paths: elixirc_paths(Mix.env()),
-      start_permanent: true,
+      # Permanent only in prod: a crashed supervision tree should kill the
+      # container there, but in dev/test a permanent app halts the whole VM
+      # silently (exit 0) — in test that swallowed every test scheduled
+      # after the crash.
+      start_permanent: Mix.env() == :prod,
       aliases: aliases(),
       deps: deps(),
       listeners: [Phoenix.CodeReloader]
