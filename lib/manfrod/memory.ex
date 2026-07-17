@@ -824,6 +824,39 @@ defmodule Manfrod.Memory do
   end
 
   @doc """
+  Find the nodes most similar to a given node by embedding distance,
+  filtered by readable access levels. The workhorse for duplicate detection
+  and orphan link candidates: unlike `search/4` there's no query text — the
+  node's own embedding is the query.
+
+  Returns `[{node, cosine_distance}]` sorted by distance ascending, excluding
+  the node itself. Nodes without an embedding return `[]`.
+
+  ## Options
+
+    * `:limit` - Maximum results (default: 3)
+    * `:max_distance` - Only return nodes closer than this (default: 1.0)
+  """
+  def similar_nodes(node, readable_levels, opts \\ [])
+
+  def similar_nodes(%Node{embedding: nil}, _readable_levels, _opts), do: []
+
+  def similar_nodes(%Node{} = node, readable_levels, opts) do
+    limit = Keyword.get(opts, :limit, 3)
+    max_distance = Keyword.get(opts, :max_distance, 1.0)
+
+    from(n in Node,
+      where: n.id != ^node.id and not is_nil(n.embedding),
+      where: ^Access.dynamic_where(readable_levels),
+      where: cosine_distance(n.embedding, ^node.embedding) < ^max_distance,
+      select: {n, cosine_distance(n.embedding, ^node.embedding)},
+      order_by: cosine_distance(n.embedding, ^node.embedding),
+      limit: ^limit
+    )
+    |> Repo.all()
+  end
+
+  @doc """
   Search using only BM25 keyword matching, filtered by readable access levels.
   Returns list of nodes sorted by BM25 score descending.
   """

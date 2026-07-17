@@ -1,6 +1,19 @@
 defmodule Manfrod.Memory.Retrospector do
   @moduledoc """
-  Autonomous agent that builds the zettelkasten.
+  Autonomous agent that builds and maintains the zettelkasten. The whole
+  retrospection system lives here: the mechanical exact-duplicate merge, the
+  agent's system prompt (with the zettelkasten guide embedded from
+  `zettelkasten.md`), its graph tools, and the orchestration around them.
+
+  Runs weekly via `Manfrod.Workers.RetrospectionWorker`. Each run:
+
+  1. Merges exact 1:1 duplicate nodes mechanically (`merge_exact_duplicates/0`
+     — no LLM; verbatim copies are bookkeeping, not judgment).
+  2. Per access bucket, drains the slipbox in batches: each batch is an
+     agent run over the unprocessed nodes plus a prioritized review sample
+     (orphans → weakly connected → stalest → random). Every listed node is
+     annotated with its nearest embedding neighbors so the agent sees
+     duplicate suspects and link candidates without guessing search queries.
 
   Given unprocessed nodes (the slipbox) and tools to manipulate the graph,
   the agent decides how to integrate new knowledge. Structure emerges from
@@ -10,20 +23,26 @@ defmodule Manfrod.Memory.Retrospector do
 
   - `search` - semantic + keyword search over the graph
   - `get_node` - fetch a node by ID
+  - `find_similar` - nearest nodes by embedding (duplicate/link candidates)
   - `create_node` - create a new node (returns ID)
   - `update_node` - update a node's content (re-embeds, preserves links)
   - `create_link` - link two nodes by ID (with optional context)
   - `delete_node` - delete a node and its links (for deduplication)
   - `delete_link` - delete a link between nodes
-  - `list_links` - list all nodes linked to a given node (for graph exploration)
+  - `list_links` - list all nodes linked to a given node
   - `mark_processed` - mark a node as integrated into the graph
-  - `graph_stats` - get graph health statistics (orphans, link ratio, etc.)
+  - `graph_stats` - graph health statistics (orphans, link ratio, etc.)
+  - `web_search` - Brave web search for fact verification/enrichment
   """
+
+  import Ecto.Query
 
   require Logger
 
   alias Manfrod.{Events, LLM, Memory, Repo, Voyage}
   alias Manfrod.Accounts.User
+  alias Manfrod.Memory.{Link, Node}
+  alias Manfrod.Tools.WebSearch
 
   # Embed zettelkasten guide at compile time
   @external_resource Path.join(__DIR__, "zettelkasten.md")
@@ -35,10 +54,15 @@ defmodule Manfrod.Memory.Retrospector do
 
   You have access to:
   - Unprocessed notes from recent conversations (the slipbox)
-  - The existing knowledge graph (via search and list_links)
+  - The existing knowledge graph (via search, find_similar, and list_links)
   - Tools to create nodes, create links, delete nodes, delete links, and mark notes as processed
   - A graph_stats tool to check overall graph health
   - A web_search tool to look up current facts on the web when you need to verify or enrich notes
+
+  Every node listed in your input comes annotated with its nearest existing
+  nodes by embedding similarity (lines starting with "~", with a `sim` score).
+  These annotations are precomputed for you — they are your duplicate suspects
+  and link candidates. Use them; don't rediscover them with blind searches.
 
   ## First Step
 
@@ -48,10 +72,22 @@ defmodule Manfrod.Memory.Retrospector do
 
   ## Deduplication
 
-  There is a high chance you'll find duplicates in slipbox, both duplicates of
-  other slipbox items and duplicates of what's already in the graph. That's
-  because we extract all interesting facts from conversations without regard to
-  current contents. Your job is to keep it deduplicated.
+  Exact 1:1 text duplicates are merged mechanically before you run — what
+  reaches you are the judgment calls: near-duplicates and rewordings. Expect
+  many of them, both between slipbox items and against the existing graph.
+  That's because we extract all interesting facts from conversations without
+  regard to current contents. Your job is to keep the graph deduplicated.
+
+  The rule: **same fact, different wording → merge. Different facts about the
+  same topic → link, don't merge.**
+
+  - A "~" neighbor marked LIKELY DUPLICATE (sim ≥ 0.85): merge it unless the
+    two clearly state different facts.
+  - A "~" neighbor with sim 0.7–0.85: read both carefully — reworded
+    duplicates often score in this range. Use find_similar or get_node when
+    the one-line preview isn't enough to decide.
+  - Two slipbox items can duplicate each other too — resolve those before
+    integrating either.
 
   When consolidating duplicates, prefer update_node over delete+create:
   1. Pick the node with more links (it's better connected)
@@ -72,10 +108,15 @@ defmodule Manfrod.Memory.Retrospector do
   Don't just process the slipbox - tend to the garden. Each session, go deeper:
   - Follow links from nodes you touch to see what's connected
   - Look for clusters that could use structure notes
-  - Find orphans that deserve connections - these are your top priority
+  - Find orphans that deserve connections - these are your top priority. An
+    orphan's "~" neighbors are ready-made link candidates: if one genuinely
+    relates, create the link (with context) rather than leaving the orphan
+    unconnected. Only leave an orphan alone when none of its neighbors truly
+    relate — never because you didn't check.
   - Strengthen weakly connected nodes (1 link) with additional connections
   - Notice patterns emerging and create new linking opportunities
-  - Consolidate near-duplicates you discover while exploring
+  - Consolidate near-duplicates you discover while exploring (find_similar on
+    any node you touch is a cheap check)
   - Let structure emerge from your observations
 
   The graph is alive. You're not just adding to it - you're shaping it, pruning
@@ -100,315 +141,21 @@ defmodule Manfrod.Memory.Retrospector do
   #{@zettelkasten_guide}
   """
 
-  # Tool definitions — user_id is baked into closures for search/create
-  defp tools(user_id, readable_levels, write_access) do
-    create_user_id = system_user_id()
-
-    [
-      ReqLLM.Tool.new!(
-        name: "search",
-        description:
-          "Search the knowledge graph for related nodes. Uses semantic similarity and keyword matching.",
-        parameter_schema: [
-          query: [type: :string, required: true, doc: "Search query text"],
-          limit: [type: :integer, doc: "Maximum results to return (default: 5)"]
-        ],
-        callback: fn args -> tool_search(user_id, readable_levels, args) end
-      ),
-      ReqLLM.Tool.new!(
-        name: "get_node",
-        description: "Fetch a specific node by its ID to see its full content.",
-        parameter_schema: [
-          id: [type: :string, required: true, doc: "Node UUID"]
-        ],
-        callback: fn args -> tool_get_node(user_id, args) end
-      ),
-      ReqLLM.Tool.new!(
-        name: "create_node",
-        description:
-          "Create a new node in the knowledge graph. Returns the new node's ID. New nodes are created as already processed (they're derived insights, not raw observations).",
-        parameter_schema: [
-          content: [
-            type: :string,
-            required: true,
-            doc: "The atomic idea or fact (1-2 sentences)"
-          ]
-        ],
-        callback: fn args -> tool_create_node(create_user_id, write_access, args) end
-      ),
-      ReqLLM.Tool.new!(
-        name: "update_node",
-        description:
-          "Update a node's content. Use this to consolidate duplicates: merge info into one node and delete the other. Re-embeds automatically. Preserves the node's ID, links, and provenance.",
-        parameter_schema: [
-          id: [type: :string, required: true, doc: "Node UUID to update"],
-          content: [
-            type: :string,
-            required: true,
-            doc: "The new content for the node (1-2 sentences)"
-          ]
-        ],
-        callback: fn args -> tool_update_node(user_id, args) end
-      ),
-      ReqLLM.Tool.new!(
-        name: "create_link",
-        description:
-          "Create an undirected link between two nodes. Always provide context explaining why the link exists.",
-        parameter_schema: [
-          node_a_id: [type: :string, required: true, doc: "First node UUID"],
-          node_b_id: [type: :string, required: true, doc: "Second node UUID"],
-          context: [
-            type: :string,
-            doc: "Why this link exists - what should someone expect when following it?"
-          ]
-        ],
-        callback: fn args -> tool_create_link(user_id, args) end
-      ),
-      ReqLLM.Tool.new!(
-        name: "mark_processed",
-        description:
-          "Mark a slipbox node as processed (integrated into the graph). Call this when you're done working with a node.",
-        parameter_schema: [
-          id: [type: :string, required: true, doc: "Node UUID to mark as processed"]
-        ],
-        callback: fn args -> tool_mark_processed(user_id, args) end
-      ),
-      ReqLLM.Tool.new!(
-        name: "delete_node",
-        description:
-          "Delete a node from the knowledge graph. Use this to remove duplicates. All links to/from this node are automatically deleted.",
-        parameter_schema: [
-          id: [type: :string, required: true, doc: "Node UUID to delete"]
-        ],
-        callback: fn args -> tool_delete_node(user_id, args) end
-      ),
-      ReqLLM.Tool.new!(
-        name: "delete_link",
-        description: "Delete a link between two nodes.",
-        parameter_schema: [
-          node_a_id: [type: :string, required: true, doc: "First node UUID"],
-          node_b_id: [type: :string, required: true, doc: "Second node UUID"]
-        ],
-        callback: fn args -> tool_delete_link(user_id, args) end
-      ),
-      ReqLLM.Tool.new!(
-        name: "list_links",
-        description:
-          "List all nodes directly linked to a given node. Use this to explore the graph structure and follow connections.",
-        parameter_schema: [
-          id: [type: :string, required: true, doc: "Node UUID to get links for"]
-        ],
-        callback: fn args -> tool_list_links(user_id, args) end
-      ),
-      ReqLLM.Tool.new!(
-        name: "graph_stats",
-        description:
-          "Get graph health statistics: total nodes, total links, slipbox count, orphan count (0 links), weakly connected count (1 link), and link-to-note ratio. Call this at the start of each session to understand graph health and prioritize work.",
-        parameter_schema: [],
-        callback: fn args -> tool_graph_stats(user_id, args) end
-      ),
-      ReqLLM.Tool.new!(
-        name: "web_search",
-        description:
-          "Search the web for current factual information. Use this to verify or enrich notes when you need up-to-date data, confirm facts, or find additional context for graph nodes.",
-        parameter_schema: [
-          query: [
-            type: :string,
-            required: true,
-            doc: "Search query - what to look up on the web"
-          ]
-        ],
-        callback: &tool_web_search/1
-      )
-    ]
-  end
-
-  defp system_user_id do
-    slack_id = "system:retrospector"
-
-    case Repo.get_by(User, slack_id: slack_id) do
-      nil ->
-        {:ok, user} =
-          %User{}
-          |> User.changeset(%{
-            slack_id: slack_id,
-            slack_dm_channel_id: "system:retrospector",
-            name: "Retrospector",
-            email: "retrospector@system.manfrod"
-          })
-          |> Repo.insert()
-
-        user.id
-
-      user ->
-        user.id
-    end
-  end
-
-  # Tool callbacks
-
-  def tool_search(user_id, readable_levels, %{query: query} = args) do
-    limit = Map.get(args, :limit, 5)
-    {:ok, nodes} = Memory.search(user_id, readable_levels, query, limit: limit)
-
-    if Enum.empty?(nodes) do
-      {:ok, "No matching nodes found."}
-    else
-      result =
-        nodes
-        |> Enum.map(fn n -> "- [#{n.id}] #{n.content}" end)
-        |> Enum.join("\n")
-
-      {:ok, "Found #{length(nodes)} nodes:\n#{result}"}
-    end
-  end
-
-  def tool_get_node(user_id, %{id: id}) do
-    case Memory.get_node(user_id, id) do
-      nil ->
-        {:ok, "Node not found: #{id}"}
-
-      node ->
-        processed = if node.processed_at, do: "yes", else: "no (in slipbox)"
-        {:ok, "Node #{id}:\nContent: #{node.content}\nProcessed: #{processed}"}
-    end
-  end
-
-  def tool_create_node(user_id, write_access, %{content: content}) do
-    case Voyage.embed_query(content) do
-      {:ok, embedding} ->
-        now = DateTime.utc_now() |> DateTime.truncate(:second)
-
-        case Memory.create_node(user_id, write_access, %{
-               content: content,
-               embedding: embedding,
-               processed_at: now
-             }) do
-          {:ok, node} ->
-            {:ok, "Created node: #{node.id}"}
-
-          {:error, changeset} ->
-            {:ok, "Failed to create node: #{inspect(changeset.errors)}"}
-        end
-
-      {:error, reason} ->
-        {:ok, "Failed to generate embedding: #{inspect(reason)}"}
-    end
-  end
-
-  def tool_update_node(user_id, %{id: id, content: content}) do
-    case Voyage.embed_query(content) do
-      {:ok, embedding} ->
-        case Memory.update_node(user_id, id, %{content: content, embedding: embedding}) do
-          {:ok, _node} ->
-            {:ok, "Updated node: #{id}"}
-
-          {:error, :not_found} ->
-            {:ok, "Node not found: #{id}"}
-
-          {:error, changeset} ->
-            {:ok, "Failed to update node: #{inspect(changeset.errors)}"}
-        end
-
-      {:error, reason} ->
-        {:ok, "Failed to generate embedding: #{inspect(reason)}"}
-    end
-  end
-
-  def tool_create_link(user_id, %{node_a_id: a, node_b_id: b} = args) do
-    opts = if args[:context], do: [context: args[:context]], else: []
-
-    case Memory.create_link(user_id, a, b, opts) do
-      {:ok, _link} ->
-        {:ok, "Linked #{a} <-> #{b}"}
-
-      {:error, changeset} ->
-        {:ok, "Failed to create link: #{inspect(changeset.errors)}"}
-    end
-  end
-
-  def tool_mark_processed(user_id, %{id: id}) do
-    Memory.mark_processed(user_id, id)
-    {:ok, "Marked #{id} as processed"}
-  end
-
-  def tool_delete_node(user_id, %{id: id}) do
-    case Memory.delete_node(user_id, id) do
-      {:ok, _node} ->
-        {:ok, "Deleted node: #{id}"}
-
-      {:error, :not_found} ->
-        {:ok, "Node not found: #{id}"}
-    end
-  end
-
-  def tool_delete_link(user_id, %{node_a_id: a, node_b_id: b}) do
-    case Memory.delete_link(user_id, a, b) do
-      {:ok, _link} ->
-        {:ok, "Deleted link: #{a} <-> #{b}"}
-
-      {:error, :not_found} ->
-        {:ok, "Link not found: #{a} <-> #{b}"}
-    end
-  end
-
-  def tool_list_links(user_id, %{id: id}) do
-    linked = Memory.get_node_links_with_context(user_id, id)
-
-    if linked == [] do
-      {:ok, "Node #{id} has no links (orphan)."}
-    else
-      result =
-        linked
-        |> Enum.map(fn {n, context} ->
-          line = "- [#{n.id}] #{n.content}"
-          if context, do: "#{line}\n  Context: #{context}", else: line
-        end)
-        |> Enum.join("\n")
-
-      {:ok, "Node #{id} is linked to #{length(linked)} nodes:\n#{result}"}
-    end
-  end
-
-  def tool_graph_stats(user_id, _args) do
-    stats = Memory.graph_stats(user_id)
-
-    {:ok,
-     """
-     Graph Health:
-     - Total nodes: #{stats.total_nodes}
-     - Total links: #{stats.total_links}
-     - Slipbox (unprocessed): #{stats.slipbox_count}
-     - Orphans (0 links): #{stats.orphan_count}
-     - Weakly connected (1 link): #{stats.weakly_connected_count}
-     - Link-to-note ratio: #{stats.link_to_note_ratio}\
-     """}
-  end
-
-  def tool_web_search(%{query: query}) do
-    case Manfrod.BraveSearch.search(query) do
-      {:ok, results} ->
-        {:ok, results}
-
-      {:error, :api_key_not_configured} ->
-        {:ok, "Web search is not configured (missing API key)."}
-
-      {:error, :rate_limited} ->
-        {:ok, "Web search rate limited. Try again in a moment."}
-
-      {:error, reason} ->
-        {:ok, "Web search failed: #{inspect(reason)}"}
-    end
-  end
-
+  # ---------------------------------------------------------------------------
   # Public API
+  # ---------------------------------------------------------------------------
 
   @doc """
   Process all pending slipbox nodes, grouped by access bucket.
-  Each bucket gets its own agent run with appropriate readable_levels and write_access.
-  This is the preferred entry point for the RetrospectionWorker.
+  Each bucket gets its own agent run with appropriate readable_levels and
+  write_access. This is the entry point for `Manfrod.Workers.RetrospectionWorker`.
   """
   def process_all_buckets(opts \\ []) do
+    # Verbatim duplicates are bookkeeping, not judgment — merge them
+    # mechanically first so the agent's budget goes to near-duplicates,
+    # linking, and orphans.
+    merge_exact_duplicates()
+
     buckets = Memory.list_slipbox_access_buckets()
 
     if buckets == [] do
@@ -435,11 +182,125 @@ defmodule Manfrod.Memory.Retrospector do
     end
   end
 
-  defp find_bucket_user_id(access_bucket) do
-    import Ecto.Query
+  @doc """
+  Merge all groups of exact-duplicate nodes (same whitespace-trimmed content,
+  same access bucket) across the whole graph — mechanically, no LLM. The
+  extractor writes facts without checking what's already stored, so verbatim
+  duplicates accumulate; this keeps the agent's LLM budget for judgment
+  calls only.
 
-    Manfrod.Repo.one(
-      from n in Manfrod.Memory.Node,
+  Keeps the best copy of each group (most links → processed over slipbox →
+  oldest), repoints the others' links onto it, and deletes them.
+
+  Returns `%{groups: n, deleted: n}`.
+  """
+  def merge_exact_duplicates do
+    groups = duplicate_groups()
+
+    result =
+      Enum.reduce(groups, %{groups: 0, deleted: 0}, fn {content, access}, acc ->
+        case merge_group(content, access) do
+          {:ok, deleted_count} ->
+            %{acc | groups: acc.groups + 1, deleted: acc.deleted + deleted_count}
+
+          :noop ->
+            acc
+        end
+      end)
+
+    if result.groups > 0 do
+      Logger.info(
+        "Retrospector: merged #{result.groups} exact-duplicate group(s), " <>
+          "deleted #{result.deleted} node(s)"
+      )
+    end
+
+    result
+  end
+
+  # ---------------------------------------------------------------------------
+  # Mechanical exact-duplicate merge
+  # ---------------------------------------------------------------------------
+
+  defp duplicate_groups do
+    from(n in Node,
+      group_by: [fragment("btrim(?)", n.content), n.access],
+      having: count(n.id) > 1,
+      select: {fragment("btrim(?)", n.content), n.access}
+    )
+    |> Repo.all()
+  end
+
+  defp merge_group(content, access) do
+    nodes =
+      from(n in Node,
+        where: fragment("btrim(?)", n.content) == ^content and n.access == ^access
+      )
+      |> Repo.all()
+
+    if length(nodes) < 2 do
+      :noop
+    else
+      link_counts = link_counts(Enum.map(nodes, & &1.id))
+
+      [survivor | losers] =
+        Enum.sort_by(nodes, fn n ->
+          {-Map.get(link_counts, n.id, 0), if(n.processed_at, do: 0, else: 1), n.inserted_at}
+        end)
+
+      group_ids = MapSet.new(nodes, & &1.id)
+      Enum.each(losers, &absorb(survivor, &1, group_ids))
+      {:ok, length(losers)}
+    end
+  end
+
+  defp link_counts(node_ids) do
+    from(l in Link,
+      where: l.node_a_id in ^node_ids or l.node_b_id in ^node_ids,
+      select: {l.node_a_id, l.node_b_id}
+    )
+    |> Repo.all()
+    |> Enum.flat_map(fn {a, b} -> [a, b] end)
+    |> Enum.filter(&(&1 in node_ids))
+    |> Enum.frequencies()
+  end
+
+  # Repoint the loser's links onto the survivor (skipping intra-group links,
+  # which would become self-links), then delete the loser and its links.
+  defp absorb(survivor, loser, group_ids) do
+    links =
+      from(l in Link, where: l.node_a_id == ^loser.id or l.node_b_id == ^loser.id)
+      |> Repo.all()
+
+    for link <- links do
+      other = if link.node_a_id == loser.id, do: link.node_b_id, else: link.node_a_id
+
+      unless MapSet.member?(group_ids, other) do
+        %Link{}
+        |> Link.changeset(%{node_a_id: survivor.id, node_b_id: other, context: link.context})
+        |> Repo.insert(on_conflict: :nothing)
+      end
+    end
+
+    from(l in Link, where: l.node_a_id == ^loser.id or l.node_b_id == ^loser.id)
+    |> Repo.delete_all()
+
+    Repo.delete(loser)
+
+    Events.broadcast(:memory_node_deleted, %{
+      user_id: loser.user_id,
+      source: :memory,
+      meta: %{node_id: loser.id, reason: :exact_duplicate, merged_into: survivor.id}
+    })
+  end
+
+  # ---------------------------------------------------------------------------
+  # Bucket processing
+  # ---------------------------------------------------------------------------
+
+  defp find_bucket_user_id(access_bucket) do
+    Repo.one(
+      from n in Node,
         where: is_nil(n.processed_at) and n.access == ^access_bucket,
         order_by: [desc: n.inserted_at],
         select: n.user_id,
@@ -447,22 +308,64 @@ defmodule Manfrod.Memory.Retrospector do
     )
   end
 
-  defp process_bucket(user_id, readable_levels, write_access, opts) do
+  # Drain the bucket's slipbox in batches instead of processing a single
+  # batch per run — on a weekly schedule one batch of 20 can't keep up and
+  # the backlog itself breeds duplicates (the extractor doesn't check the
+  # graph, so the same fact re-extracted lands as a new slipbox node).
+  # Capped at max_batches; stops early on agent error or when a batch makes
+  # no slipbox progress (a lazy run would otherwise be re-fed the same
+  # nodes until the cap).
+  defp process_bucket(user_id, readable_levels, write_access, opts, batch_no \\ 1) do
     batch_size = Keyword.get(opts, :batch_size, 20)
     review_budget = Keyword.get(opts, :review_budget, 25)
+    max_batches = Keyword.get(opts, :max_batches, 5)
 
     slipbox = Memory.get_slipbox_nodes_by_access(write_access, limit: batch_size)
-    review_sample = build_review_sample(user_id, review_budget)
 
-    if slipbox == [] do
-      Logger.debug("Retrospector: empty slipbox for bucket #{inspect(write_access)}")
-    else
-      Logger.info(
-        "Retrospector: processing #{length(slipbox)} nodes for bucket #{inspect(write_access)}"
-      )
+    cond do
+      slipbox == [] ->
+        Logger.debug("Retrospector: slipbox empty for bucket #{inspect(write_access)}")
 
-      run_agent(user_id, readable_levels, write_access, slipbox, review_sample)
+      batch_no > max_batches ->
+        Logger.info(
+          "Retrospector: batch cap (#{max_batches}) reached for bucket " <>
+            "#{inspect(write_access)}, #{length(slipbox)}+ slipbox nodes left for next run"
+        )
+
+      true ->
+        Logger.info(
+          "Retrospector: batch #{batch_no}/#{max_batches} — #{length(slipbox)} slipbox " <>
+            "nodes for bucket #{inspect(write_access)}"
+        )
+
+        review_sample = build_review_sample(user_id, review_budget)
+        batch_ids = Enum.map(slipbox, & &1.id)
+
+        case run_agent(user_id, readable_levels, write_access, slipbox, review_sample) do
+          :ok ->
+            if unprocessed_count(batch_ids) < length(batch_ids) do
+              process_bucket(user_id, readable_levels, write_access, opts, batch_no + 1)
+            else
+              Logger.warning(
+                "Retrospector: batch #{batch_no} made no slipbox progress for bucket " <>
+                  "#{inspect(write_access)}, stopping"
+              )
+            end
+
+          {:error, _} ->
+            :ok
+        end
     end
+  end
+
+  # How many of the given batch nodes are still unprocessed and undeleted
+  # (i.e. the agent neither marked them processed nor merged them away).
+  defp unprocessed_count(node_ids) do
+    Repo.one(
+      from n in Node,
+        where: n.id in ^node_ids and is_nil(n.processed_at),
+        select: count(n.id)
+    )
   end
 
   # Build a review sample using priority cascade:
@@ -502,11 +405,13 @@ defmodule Manfrod.Memory.Retrospector do
     orphans ++ weak ++ stale ++ random
   end
 
-  # Private
+  # ---------------------------------------------------------------------------
+  # Agent run
+  # ---------------------------------------------------------------------------
 
   defp run_agent(user_id, readable_levels, write_access, slipbox, review_sample) do
-    slipbox_text = format_nodes(slipbox)
-    review_text = format_nodes(review_sample)
+    slipbox_text = format_nodes(slipbox, readable_levels)
+    review_text = format_nodes(review_sample, readable_levels)
 
     Events.broadcast(:retrospection_started, %{
       user_id: user_id,
@@ -553,9 +458,37 @@ defmodule Manfrod.Memory.Retrospector do
     end
   end
 
-  defp format_nodes(nodes) do
+  # Precomputed embedding neighbors ride along with every listed node so the
+  # agent doesn't have to guess search queries to find near-duplicates or
+  # link candidates — the main reason past runs left orphans unlinked and
+  # near-duplicates unmerged.
+  @neighbor_limit 3
+  @neighbor_max_distance 0.5
+  @likely_duplicate_distance 0.15
+
+  defp format_nodes(nodes, readable_levels) do
     nodes
-    |> Enum.map(fn n -> "- [#{n.id}] #{n.content}" end)
+    |> Enum.map(fn n ->
+      base = "- [#{n.id}] #{n.content}"
+
+      case Memory.similar_nodes(n, readable_levels,
+             limit: @neighbor_limit,
+             max_distance: @neighbor_max_distance
+           ) do
+        [] ->
+          base
+
+        neighbors ->
+          neighbor_lines =
+            Enum.map(neighbors, fn {m, distance} ->
+              similarity = Float.round(1.0 - distance, 2)
+              flag = if distance < @likely_duplicate_distance, do: " LIKELY DUPLICATE —", else: ""
+              "    ~ [#{m.id}] (sim #{similarity})#{flag} #{m.content}"
+            end)
+
+          Enum.join([base | neighbor_lines], "\n")
+      end
+    end)
     |> Enum.join("\n")
   end
 
@@ -567,9 +500,15 @@ defmodule Manfrod.Memory.Retrospector do
         """
         ## Slipbox (unprocessed notes)
 
+        Lines starting with "~" are the node's nearest existing nodes by
+        embedding similarity — your duplicate suspects and link candidates.
+        Treat "LIKELY DUPLICATE" as a merge unless the two clearly state
+        different facts.
+
         #{slipbox_text}
 
-        Process these: search for connections, deduplicate, link, and mark as processed.
+        Process these: resolve every duplicate suspect first (merge via
+        update_node + delete_node), then link, then mark as processed.
         """
       end
 
@@ -582,8 +521,10 @@ defmodule Manfrod.Memory.Retrospector do
         ## Graph Review (prioritized: orphans → weak → stale → random)
 
         These nodes need attention. Orphans and weakly connected nodes appear first.
-        Use list_links to explore their connections. Look for opportunities to improve
-        structure, find missing links, or consolidate related ideas:
+        Each comes with its nearest neighbors ("~" lines) — for an orphan those are
+        your ready-made link candidates: if one genuinely relates, create the link
+        (with context) instead of leaving the orphan unconnected. Use list_links to
+        explore further, and merge any duplicate suspects you confirm:
 
         #{review_text}
         """
@@ -746,4 +687,318 @@ defmodule Manfrod.Memory.Retrospector do
   end
 
   defp truncate_result(result), do: result
+
+  # ---------------------------------------------------------------------------
+  # Tools
+  # ---------------------------------------------------------------------------
+
+  # Tool definitions — user_id is baked into closures for search/create
+  defp tools(user_id, readable_levels, write_access) do
+    # New nodes are attributed to a dedicated system identity, not the
+    # bucket's representative user_id — the latter can shift between runs
+    # (see find_bucket_user_id/1), which would orphan a node's provenance
+    # from a future run's get_node/update_node (both scoped by exact
+    # user_id match).
+    create_user_id = system_user_id()
+
+    [
+      ReqLLM.Tool.new!(
+        name: "search",
+        description:
+          "Search the knowledge graph for related nodes. Uses semantic similarity and keyword matching.",
+        parameter_schema: [
+          query: [type: :string, required: true, doc: "Search query text"],
+          limit: [type: :integer, doc: "Maximum results to return (default: 5)"]
+        ],
+        callback: fn args -> tool_search(user_id, readable_levels, args) end
+      ),
+      ReqLLM.Tool.new!(
+        name: "get_node",
+        description: "Fetch a specific node by its ID to see its full content.",
+        parameter_schema: [
+          id: [type: :string, required: true, doc: "Node UUID"]
+        ],
+        callback: fn args -> tool_get_node(user_id, args) end
+      ),
+      ReqLLM.Tool.new!(
+        name: "find_similar",
+        description:
+          "Find the nodes most semantically similar to a given node (by embedding distance). The primary tool for spotting near-duplicates and link candidates — more precise than text search when you already have a node in hand.",
+        parameter_schema: [
+          id: [type: :string, required: true, doc: "Node UUID to find similar nodes for"],
+          limit: [type: :integer, doc: "Maximum results (default: 5)"]
+        ],
+        callback: fn args -> tool_find_similar(readable_levels, args) end
+      ),
+      ReqLLM.Tool.new!(
+        name: "create_node",
+        description:
+          "Create a new node in the knowledge graph. Returns the new node's ID. New nodes are created as already processed (they're derived insights, not raw observations).",
+        parameter_schema: [
+          content: [
+            type: :string,
+            required: true,
+            doc: "The atomic idea or fact (1-2 sentences)"
+          ]
+        ],
+        callback: fn args -> tool_create_node(create_user_id, write_access, args) end
+      ),
+      ReqLLM.Tool.new!(
+        name: "update_node",
+        description:
+          "Update a node's content. Use this to consolidate duplicates: merge info into one node and delete the other. Re-embeds automatically. Preserves the node's ID, links, and provenance.",
+        parameter_schema: [
+          id: [type: :string, required: true, doc: "Node UUID to update"],
+          content: [
+            type: :string,
+            required: true,
+            doc: "The new content for the node (1-2 sentences)"
+          ]
+        ],
+        callback: fn args -> tool_update_node(user_id, args) end
+      ),
+      ReqLLM.Tool.new!(
+        name: "create_link",
+        description:
+          "Create an undirected link between two nodes. Always provide context explaining why the link exists.",
+        parameter_schema: [
+          node_a_id: [type: :string, required: true, doc: "First node UUID"],
+          node_b_id: [type: :string, required: true, doc: "Second node UUID"],
+          context: [
+            type: :string,
+            doc: "Why this link exists - what should someone expect when following it?"
+          ]
+        ],
+        callback: fn args -> tool_create_link(user_id, args) end
+      ),
+      ReqLLM.Tool.new!(
+        name: "mark_processed",
+        description:
+          "Mark a slipbox node as processed (integrated into the graph). Call this when you're done working with a node.",
+        parameter_schema: [
+          id: [type: :string, required: true, doc: "Node UUID to mark as processed"]
+        ],
+        callback: fn args -> tool_mark_processed(user_id, args) end
+      ),
+      ReqLLM.Tool.new!(
+        name: "delete_node",
+        description:
+          "Delete a node from the knowledge graph. Use this to remove duplicates. All links to/from this node are automatically deleted.",
+        parameter_schema: [
+          id: [type: :string, required: true, doc: "Node UUID to delete"]
+        ],
+        callback: fn args -> tool_delete_node(user_id, args) end
+      ),
+      ReqLLM.Tool.new!(
+        name: "delete_link",
+        description: "Delete a link between two nodes.",
+        parameter_schema: [
+          node_a_id: [type: :string, required: true, doc: "First node UUID"],
+          node_b_id: [type: :string, required: true, doc: "Second node UUID"]
+        ],
+        callback: fn args -> tool_delete_link(user_id, args) end
+      ),
+      ReqLLM.Tool.new!(
+        name: "list_links",
+        description:
+          "List all nodes directly linked to a given node. Use this to explore the graph structure and follow connections.",
+        parameter_schema: [
+          id: [type: :string, required: true, doc: "Node UUID to get links for"]
+        ],
+        callback: fn args -> tool_list_links(user_id, args) end
+      ),
+      ReqLLM.Tool.new!(
+        name: "graph_stats",
+        description:
+          "Get graph health statistics: total nodes, total links, slipbox count, orphan count (0 links), weakly connected count (1 link), and link-to-note ratio. Call this at the start of each session to understand graph health and prioritize work.",
+        parameter_schema: [],
+        callback: fn args -> tool_graph_stats(user_id, args) end
+      )
+    ] ++ WebSearch.definitions()
+  end
+
+  defp system_user_id do
+    slack_id = "system:retrospector"
+
+    case Repo.get_by(User, slack_id: slack_id) do
+      nil ->
+        {:ok, user} =
+          %User{}
+          |> User.changeset(%{
+            slack_id: slack_id,
+            slack_dm_channel_id: slack_id,
+            name: "Retrospector",
+            email: "retrospector@system.manfrod"
+          })
+          |> Repo.insert()
+
+        user.id
+
+      user ->
+        user.id
+    end
+  end
+
+  # Tool callbacks
+
+  defp tool_search(user_id, readable_levels, %{query: query} = args) do
+    limit = Map.get(args, :limit, 5)
+    {:ok, nodes} = Memory.search(user_id, readable_levels, query, limit: limit)
+
+    if Enum.empty?(nodes) do
+      {:ok, "No matching nodes found."}
+    else
+      result =
+        nodes
+        |> Enum.map(fn n -> "- [#{n.id}] #{n.content}" end)
+        |> Enum.join("\n")
+
+      {:ok, "Found #{length(nodes)} nodes:\n#{result}"}
+    end
+  end
+
+  defp tool_get_node(user_id, %{id: id}) do
+    case Memory.get_node(user_id, id) do
+      nil ->
+        {:ok, "Node not found: #{id}"}
+
+      node ->
+        processed = if node.processed_at, do: "yes", else: "no (in slipbox)"
+        {:ok, "Node #{id}:\nContent: #{node.content}\nProcessed: #{processed}"}
+    end
+  end
+
+  defp tool_find_similar(readable_levels, %{id: id} = args) do
+    limit = Map.get(args, :limit, 5)
+
+    case Memory.get_node_accessible(readable_levels, id) do
+      nil ->
+        {:ok, "Node not found: #{id}"}
+
+      node ->
+        case Memory.similar_nodes(node, readable_levels, limit: limit) do
+          [] ->
+            {:ok, "No similar nodes found for #{id}."}
+
+          results ->
+            lines =
+              Enum.map(results, fn {n, distance} ->
+                "- [#{n.id}] (similarity #{Float.round(1.0 - distance, 2)}) #{n.content}"
+              end)
+
+            {:ok, "Nodes most similar to [#{id}]:\n#{Enum.join(lines, "\n")}"}
+        end
+    end
+  end
+
+  defp tool_create_node(user_id, write_access, %{content: content}) do
+    case Voyage.embed_query(content) do
+      {:ok, embedding} ->
+        now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+        case Memory.create_node(user_id, write_access, %{
+               content: content,
+               embedding: embedding,
+               processed_at: now
+             }) do
+          {:ok, node} ->
+            {:ok, "Created node: #{node.id}"}
+
+          {:error, changeset} ->
+            {:ok, "Failed to create node: #{inspect(changeset.errors)}"}
+        end
+
+      {:error, reason} ->
+        {:ok, "Failed to generate embedding: #{inspect(reason)}"}
+    end
+  end
+
+  defp tool_update_node(user_id, %{id: id, content: content}) do
+    case Voyage.embed_query(content) do
+      {:ok, embedding} ->
+        case Memory.update_node(user_id, id, %{content: content, embedding: embedding}) do
+          {:ok, _node} ->
+            {:ok, "Updated node: #{id}"}
+
+          {:error, :not_found} ->
+            {:ok, "Node not found: #{id}"}
+
+          {:error, changeset} ->
+            {:ok, "Failed to update node: #{inspect(changeset.errors)}"}
+        end
+
+      {:error, reason} ->
+        {:ok, "Failed to generate embedding: #{inspect(reason)}"}
+    end
+  end
+
+  defp tool_create_link(user_id, %{node_a_id: a, node_b_id: b} = args) do
+    opts = if args[:context], do: [context: args[:context]], else: []
+
+    case Memory.create_link(user_id, a, b, opts) do
+      {:ok, _link} ->
+        {:ok, "Linked #{a} <-> #{b}"}
+
+      {:error, changeset} ->
+        {:ok, "Failed to create link: #{inspect(changeset.errors)}"}
+    end
+  end
+
+  defp tool_mark_processed(user_id, %{id: id}) do
+    Memory.mark_processed(user_id, id)
+    {:ok, "Marked #{id} as processed"}
+  end
+
+  defp tool_delete_node(user_id, %{id: id}) do
+    case Memory.delete_node(user_id, id) do
+      {:ok, _node} ->
+        {:ok, "Deleted node: #{id}"}
+
+      {:error, :not_found} ->
+        {:ok, "Node not found: #{id}"}
+    end
+  end
+
+  defp tool_delete_link(user_id, %{node_a_id: a, node_b_id: b}) do
+    case Memory.delete_link(user_id, a, b) do
+      {:ok, _link} ->
+        {:ok, "Deleted link: #{a} <-> #{b}"}
+
+      {:error, :not_found} ->
+        {:ok, "Link not found: #{a} <-> #{b}"}
+    end
+  end
+
+  defp tool_list_links(user_id, %{id: id}) do
+    linked = Memory.get_node_links_with_context(user_id, id)
+
+    if linked == [] do
+      {:ok, "Node #{id} has no links (orphan)."}
+    else
+      result =
+        linked
+        |> Enum.map(fn {n, context} ->
+          line = "- [#{n.id}] #{n.content}"
+          if context, do: "#{line}\n  Context: #{context}", else: line
+        end)
+        |> Enum.join("\n")
+
+      {:ok, "Node #{id} is linked to #{length(linked)} nodes:\n#{result}"}
+    end
+  end
+
+  defp tool_graph_stats(user_id, _args) do
+    stats = Memory.graph_stats(user_id)
+
+    {:ok,
+     """
+     Graph Health:
+     - Total nodes: #{stats.total_nodes}
+     - Total links: #{stats.total_links}
+     - Slipbox (unprocessed): #{stats.slipbox_count}
+     - Orphans (0 links): #{stats.orphan_count}
+     - Weakly connected (1 link): #{stats.weakly_connected_count}
+     - Link-to-note ratio: #{stats.link_to_note_ratio}\
+     """}
+  end
 end

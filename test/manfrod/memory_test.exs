@@ -122,13 +122,14 @@ defmodule Manfrod.MemoryTest do
   end
 
   describe "nodes" do
-    test "create_node/2 creates a node" do
+    test "create_node/3 creates a node" do
       user_id = test_user_id()
       attrs = node_attrs(%{content: "Test fact"})
-      assert {:ok, node} = Memory.create_node(user_id, attrs)
+      assert {:ok, node} = Memory.create_node(user_id, ["internal"], attrs)
       assert node.content == "Test fact"
       assert is_nil(node.processed_at)
       assert node.user_id == user_id
+      assert node.access == ["internal"]
     end
 
     test "list_nodes/2 returns nodes ordered by inserted_at desc" do
@@ -193,6 +194,36 @@ defmodule Manfrod.MemoryTest do
     end
   end
 
+  describe "similar_nodes/3" do
+    test "returns nearest nodes by embedding, excluding the node itself" do
+      seed = "shared-seed-#{System.unique_integer([:positive])}"
+      base = insert_node!(%{embedding: fake_embedding(seed)})
+      twin = insert_node!(%{embedding: fake_embedding(seed)})
+
+      results = Memory.similar_nodes(base, ["internal"], limit: 2)
+
+      assert [{first, distance} | _] = results
+      assert first.id == twin.id
+      assert_in_delta distance, 0.0, 1.0e-6
+      refute Enum.any?(results, fn {n, _} -> n.id == base.id end)
+    end
+
+    test "respects max_distance" do
+      base = insert_node!(%{embedding: fake_embedding("alpha")})
+      far = insert_node!(%{embedding: fake_embedding("beta")})
+
+      results = Memory.similar_nodes(base, ["internal"], max_distance: 0.1, limit: 50)
+
+      refute Enum.any?(results, fn {n, _} -> n.id == far.id end)
+    end
+
+    test "returns [] for a node without an embedding" do
+      node = %Manfrod.Memory.Node{id: Ecto.UUID.generate(), embedding: nil}
+
+      assert Memory.similar_nodes(node, ["internal"]) == []
+    end
+  end
+
   describe "links" do
     test "create_link/3 creates a link between nodes" do
       user_id = test_user_id()
@@ -226,8 +257,18 @@ defmodule Manfrod.MemoryTest do
       {:ok, _} = Memory.create_link(user_id, n1.id, n2.id)
       {:ok, _} = Memory.create_link(user_id, n2.id, n1.id)
 
-      # Should only have one link
-      count = Repo.aggregate(Manfrod.Memory.Link, :count, :id)
+      # Should only have one link between this pair. Scoped to the pair, not
+      # a global count — the test sandbox runs on top of the local dev
+      # database, so unrelated links may already exist.
+      count =
+        Repo.aggregate(
+          from(l in Manfrod.Memory.Link,
+            where: l.node_a_id in ^[n1.id, n2.id] and l.node_b_id in ^[n1.id, n2.id]
+          ),
+          :count,
+          :id
+        )
+
       assert count == 1
     end
   end

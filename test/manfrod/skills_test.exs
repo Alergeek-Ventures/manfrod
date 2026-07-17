@@ -16,6 +16,34 @@ defmodule Manfrod.SkillsTest do
         assert skill.description != ""
       end
     end
+
+    test "leaves cron nil for skills without a cron field" do
+      skill = Skills.list() |> Enum.find(&(&1.name == "vacation-tracking"))
+
+      assert skill.cron == nil
+    end
+  end
+
+  describe "cron skills (fixture dir)" do
+    setup do
+      fixture_dir = Path.expand("../support/fixtures/skills", __DIR__)
+      Application.put_env(:manfrod, :skills_dir, fixture_dir)
+      on_exit(fn -> Application.delete_env(:manfrod, :skills_dir) end)
+      :ok
+    end
+
+    test "captures a skill's cron field with surrounding quotes stripped" do
+      skill = Skills.list() |> Enum.find(&(&1.name == "cron-sample"))
+
+      assert skill.cron == "0 0 * * 0"
+    end
+
+    test "list_cron_skills/0 includes only skills with a cron field" do
+      names = Skills.list_cron_skills() |> Enum.map(& &1.name)
+
+      assert "cron-sample" in names
+      refute "plain-sample" in names
+    end
   end
 
   describe "catalog_text/0" do
