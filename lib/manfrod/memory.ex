@@ -212,6 +212,20 @@ defmodule Manfrod.Memory do
   end
 
   @doc """
+  Return distinct access buckets that have at least one processed (integrated)
+  node. Used by Retrospector's daily deep review, which revisits already
+  integrated nodes independently of slipbox state.
+  """
+  def list_processed_access_buckets do
+    from(n in Node,
+      where: not is_nil(n.processed_at),
+      select: n.access,
+      distinct: true
+    )
+    |> Repo.all()
+  end
+
+  @doc """
   Get a node by ID, scoped to a user (provenance check only).
   """
   def get_node(user_id, id) do

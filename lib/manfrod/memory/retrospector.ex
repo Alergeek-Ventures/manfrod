@@ -5,15 +5,24 @@ defmodule Manfrod.Memory.Retrospector do
   agent's system prompt (with the zettelkasten guide embedded from
   `zettelkasten.md`), its graph tools, and the orchestration around them.
 
-  Runs weekly via `Manfrod.Workers.RetrospectionWorker`. Each run:
+  Runs on two schedules:
 
-  1. Merges exact 1:1 duplicate nodes mechanically (`merge_exact_duplicates/0`
-     — no LLM; verbatim copies are bookkeeping, not judgment).
-  2. Per access bucket, drains the slipbox in batches: each batch is an
-     agent run over the unprocessed nodes plus a prioritized review sample
-     (orphans → weakly connected → stalest → random). Every listed node is
-     annotated with its nearest embedding neighbors so the agent sees
-     duplicate suspects and link candidates without guessing search queries.
+  - Weekly, via `Manfrod.Workers.RetrospectionWorker` (`process_all_buckets/1`):
+    merges exact 1:1 duplicates mechanically (`merge_exact_duplicates/0` — no
+    LLM; verbatim copies are bookkeeping, not judgment), then per access
+    bucket drains the slipbox in batches — each batch is an agent run over
+    the unprocessed nodes plus a prioritized review sample (orphans →
+    weakly connected → stalest → random).
+  - Every 2 days, via `Manfrod.Workers.GraphReviewWorker` (`review_processed_graph/1`):
+    a slipbox-independent deep review. The weekly run only reviews existing
+    nodes as a side effect of a bucket having new slipbox content, so a fully
+    processed bucket never gets revisited otherwise and near-duplicates/orphans
+    accumulate. This runs the same agent over a review sample of every
+    processed bucket regardless of slipbox state.
+
+  Every listed node (slipbox or review sample) is annotated with its nearest
+  embedding neighbors so the agent sees duplicate suspects and link candidates
+  without guessing search queries.
 
   Given unprocessed nodes (the slipbox) and tools to manipulate the graph,
   the agent decides how to integrate new knowledge. Structure emerges from
@@ -218,6 +227,56 @@ defmodule Manfrod.Memory.Retrospector do
     result
   end
 
+  @doc """
+  Deep review of the already-integrated graph, independent of slipbox
+  state. The weekly slipbox drain only reviews existing nodes opportunistically
+  (as context for buckets that happen to have new slipbox content) — a bucket
+  that's fully processed never gets revisited otherwise, so old near-duplicates
+  and orphans accumulate. This closes that gap: it runs the same agent, with
+  the same tools, over a prioritized sample (orphans → weak → stale → random)
+  of every processed bucket, whether or not there's anything new to process.
+
+  Runs every 2 days via `Manfrod.Workers.GraphReviewWorker`.
+
+  ## Options
+
+    * `:review_budget` - max nodes sampled per bucket (default 100)
+  """
+  def review_processed_graph(opts \\ []) do
+    merge_exact_duplicates()
+
+    budget = Keyword.get(opts, :review_budget, 100)
+    buckets = Memory.list_processed_access_buckets()
+
+    if buckets == [] do
+      Logger.debug("Retrospector: no processed nodes in any access bucket")
+      :ok
+    else
+      Logger.info("Retrospector: deep-reviewing #{length(buckets)} access bucket(s)")
+
+      Enum.each(buckets, fn access_bucket ->
+        readable_levels = Enum.uniq(["internal" | access_bucket])
+        user_id = find_bucket_user_id(access_bucket)
+        review_sample = user_id && build_review_sample(user_id, budget)
+
+        cond do
+          is_nil(user_id) ->
+            Logger.warning(
+              "Retrospector: no user found for bucket #{inspect(access_bucket)}, skipping"
+            )
+
+          review_sample == [] ->
+            :ok
+
+          true ->
+            run_agent(user_id, readable_levels, access_bucket, [], review_sample)
+        end
+      end)
+
+      :ok
+    end
+  end
+
   # ---------------------------------------------------------------------------
   # Mechanical exact-duplicate merge
   # ---------------------------------------------------------------------------
@@ -301,7 +360,7 @@ defmodule Manfrod.Memory.Retrospector do
   defp find_bucket_user_id(access_bucket) do
     Repo.one(
       from n in Node,
-        where: is_nil(n.processed_at) and n.access == ^access_bucket,
+        where: n.access == ^access_bucket,
         order_by: [desc: n.inserted_at],
         select: n.user_id,
         limit: 1

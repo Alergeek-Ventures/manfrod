@@ -194,6 +194,26 @@ defmodule Manfrod.MemoryTest do
     end
   end
 
+  describe "list_processed_access_buckets/0" do
+    test "includes an access bucket that has a processed node" do
+      access = ["internal", "test-#{System.unique_integer([:positive])}"]
+
+      insert_node!(%{
+        access: access,
+        processed_at: DateTime.utc_now() |> DateTime.truncate(:second)
+      })
+
+      assert access in Memory.list_processed_access_buckets()
+    end
+
+    test "excludes buckets that only have unprocessed nodes" do
+      access = ["internal", "test-#{System.unique_integer([:positive])}"]
+      insert_node!(%{access: access})
+
+      refute access in Memory.list_processed_access_buckets()
+    end
+  end
+
   describe "similar_nodes/3" do
     test "returns nearest nodes by embedding, excluding the node itself" do
       seed = "shared-seed-#{System.unique_integer([:positive])}"
