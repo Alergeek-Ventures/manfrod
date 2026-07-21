@@ -15,6 +15,7 @@ defmodule Manfrod.Events.Activity do
   - `:thinking` - message received, starting LLM call
   - `:narrating` - agent explaining what it's doing (text between tool calls)
   - `:responding` - final response ready
+  - `:reacted` - agent chose to react with an emoji instead of a full reply
   - `:interrupted` - new message arrived, restarting with fresh context
   - `:idle` - conversation timed out
 
@@ -70,6 +71,7 @@ defmodule Manfrod.Events.Activity do
           | :thinking
           | :narrating
           | :responding
+          | :reacted
           | :interrupted
           | :idle
           # Logs
