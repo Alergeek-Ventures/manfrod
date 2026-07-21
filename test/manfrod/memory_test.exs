@@ -55,6 +55,59 @@ defmodule Manfrod.MemoryTest do
       assert length(pending_a) == 1
       assert length(pending_b) == 1
     end
+
+    test "get_pending_messages/2 does not leak across authors sharing a session_key" do
+      user_a = insert_user!()
+      user_b = insert_user!()
+      session_key = "C0001:1700000000.000001"
+
+      {:ok, _} =
+        Memory.create_message(user_a.id, %{
+          role: "user",
+          content: "From A",
+          session_key: session_key,
+          received_at: ~U[2024-01-01 10:00:00Z]
+        })
+
+      {:ok, _} =
+        Memory.create_message(user_b.id, %{
+          role: "user",
+          content: "From B",
+          session_key: session_key,
+          received_at: ~U[2024-01-01 10:00:01Z]
+        })
+
+      pending_a = Memory.get_pending_messages(user_a.id, session_key)
+      pending_b = Memory.get_pending_messages(user_b.id, session_key)
+
+      assert Enum.map(pending_a, & &1.content) == ["From A"]
+      assert Enum.map(pending_b, & &1.content) == ["From B"]
+    end
+
+    test "get_pending_messages_for_session/1 returns every author's pending messages" do
+      user_a = insert_user!()
+      user_b = insert_user!()
+      session_key = "C0002:1700000000.000001"
+
+      {:ok, _} =
+        Memory.create_message(user_a.id, %{
+          role: "user",
+          content: "From A",
+          session_key: session_key,
+          received_at: ~U[2024-01-01 10:00:00Z]
+        })
+
+      {:ok, _} =
+        Memory.create_message(user_b.id, %{
+          role: "user",
+          content: "From B",
+          session_key: session_key,
+          received_at: ~U[2024-01-01 10:00:01Z]
+        })
+
+      pending = Memory.get_pending_messages_for_session(session_key)
+      assert Enum.map(pending, & &1.content) == ["From A", "From B"]
+    end
   end
 
   describe "conversations" do

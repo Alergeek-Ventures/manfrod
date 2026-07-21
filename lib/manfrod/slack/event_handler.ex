@@ -163,7 +163,9 @@ defmodule Manfrod.Slack.EventHandler do
         content: text,
         source: :slack,
         reply_to: %{channel: channel, thread_ts: thread_ts},
-        ts: event["ts"]
+        ts: event["ts"],
+        # A DM is unambiguous direct address — always respond.
+        requires_gate: false
       },
       channel
     )
@@ -210,7 +212,9 @@ defmodule Manfrod.Slack.EventHandler do
               content: content_with_context,
               source: :slack,
               reply_to: %{channel: channel, thread_ts: thread_ts},
-              ts: event["ts"]
+              ts: event["ts"],
+              # An explicit @mention is unambiguous direct address — always respond.
+              requires_gate: false
             },
             access_channel_id
           )
@@ -236,8 +240,10 @@ defmodule Manfrod.Slack.EventHandler do
 
         user ->
           # Only forward if an Agent session already exists for this thread
-          # (i.e. the bot was @mentioned in this thread before)
-          if session_exists?(user.id, session_key) do
+          # (i.e. the bot was @mentioned in this thread before, by anyone —
+          # not only by this specific user), so the bot doesn't barge into
+          # threads it was never invited into.
+          if session_exists?(session_key) do
             # Strip bot mention if present (user might @mention again in the thread)
             cleaned_text =
               text
@@ -251,14 +257,19 @@ defmodule Manfrod.Slack.EventHandler do
               access_channel_id =
                 resolve_agent_channel(event, channel, channel_name, channel_info)
 
+              tagged_text = tag_author(cleaned_text, user.name, slack_user_id)
+
               Agent.send_message(
                 user.id,
                 session_key,
                 %{
-                  content: cleaned_text,
+                  content: tagged_text,
                   source: :slack,
                   reply_to: %{channel: channel, thread_ts: thread_ts},
-                  ts: event["ts"]
+                  ts: event["ts"],
+                  # Plain thread reply, no @mention — goes through the
+                  # response gate instead of always triggering a reply.
+                  requires_gate: true
                 },
                 access_channel_id
               )
@@ -274,9 +285,18 @@ defmodule Manfrod.Slack.EventHandler do
     end
   end
 
-  defp session_exists?(user_id, session_key) do
-    Registry.lookup(Manfrod.Agent.Registry, {user_id, session_key}) != []
+  defp session_exists?(session_key) do
+    Registry.lookup(Manfrod.Agent.Registry, session_key) != []
   end
+
+  defp tag_author(text, author_name, slack_user_id) do
+    "[from: #{format_author(author_name, slack_user_id)}]\n#{text}"
+  end
+
+  # Full name + Slack ID, not just the name — two people can share a first
+  # name (or even a full name), but the Slack ID is always unique.
+  defp format_author(nil, slack_user_id), do: slack_user_id
+  defp format_author(author_name, slack_user_id), do: "#{author_name} <#{slack_user_id}>"
 
   defp bot_mentioned?(text, bot_user_id) when is_binary(text) and is_binary(bot_user_id) do
     String.contains?(text, "<@#{bot_user_id}>")
@@ -294,8 +314,10 @@ defmodule Manfrod.Slack.EventHandler do
   defp build_channel_context(channel_name, token, slack_user_id) do
     user_name = resolve_user_name(token, slack_user_id)
 
-    parts =
-      ["Slack channel: ##{channel_name}" | if(user_name, do: ["from: #{user_name}"], else: [])]
+    parts = [
+      "Slack channel: ##{channel_name}",
+      "from: #{format_author(user_name, slack_user_id)}"
+    ]
 
     Enum.join(parts, ", ")
   end

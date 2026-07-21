@@ -63,6 +63,18 @@ defmodule Manfrod.Memory do
     |> Repo.all()
   end
 
+  @doc """
+  Get all pending messages for a session across every author (not scoped to
+  one user). Used to restore full conversation state for shared multi-author
+  sessions (a Slack thread with several distinct speakers).
+  """
+  def get_pending_messages_for_session(session_key) do
+    Message
+    |> where([m], m.session_key == ^session_key and is_nil(m.conversation_id))
+    |> order_by([m], asc: m.received_at)
+    |> Repo.all()
+  end
+
   # --- Conversations ---
 
   @doc """

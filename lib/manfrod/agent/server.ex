@@ -2,16 +2,20 @@ defmodule Manfrod.Agent.Server do
   @moduledoc """
   Per-session Agent GenServer.
 
-  Each session (user + thread) gets its own Agent process with isolated
-  conversation history, inbox, and flush timer. Processes are started on
-  demand and terminate after an idle timeout (60 minutes), triggering
-  memory extraction for that session.
+  Each session (Slack thread) gets its own Agent process with a shared
+  conversation history, inbox, and flush timer — every participant in that
+  thread is handled by the same process, not one process per author. Each
+  inbound message still carries its own author's identity (`user_id`,
+  `readable_levels`) via its event context, so tool calls and personal data
+  act on behalf of whoever actually sent the triggering message. Processes
+  are started on demand and terminate after an idle timeout, triggering
+  memory extraction for every participant who spoke in the session.
 
   ## Lifecycle
 
   1. Started by `Agent.send_message/3` via DynamicSupervisor
   2. Processes messages, calls LLM, broadcasts events on per-user topic
-  3. On idle timeout: broadcasts `:idle` (with session_key), terminates normally
+  3. On idle timeout: broadcasts `:idle` per participant, terminates normally
   4. Next message for the same session starts a fresh process
   """
 
@@ -21,6 +25,7 @@ defmodule Manfrod.Agent.Server do
 
   alias Manfrod.Accounts
   alias Manfrod.Agent.Init
+  alias Manfrod.Agent.ResponseGate
   alias Manfrod.Agent.TypingRefresher
   alias Manfrod.Events
   alias Manfrod.LLM
@@ -56,6 +61,16 @@ defmodule Manfrod.Agent.Server do
   - report_vacation: Flag a planned absence for the background memory to record (memory decides on client visibility)
   - escalate_note: Flag a note to have its visibility widened (applied by the background memory)
   - use_skill: Load the full instructions for one of your Available Skills (see below) when it's relevant to the current message
+
+  ## Communication style
+  - Default to 1-3 short sentences. No preamble, no restating the request, no
+    summarizing what you're about to do — just do it and report the outcome.
+  - Don't narrate tool calls ("Let me check...", "I'll search for..."); use
+    the tool and report only the result.
+  - Expand only when the user explicitly asks for detail, or the answer is
+    inherently a list/steps/code that can't be shortened.
+  - One question at a time if you need to ask something — don't front-load
+    a checklist of clarifying questions.
 
   ## MANDATORY tool usage rules (NEVER skip these)
 
@@ -100,15 +115,19 @@ defmodule Manfrod.Agent.Server do
 
   def start_link({user_id, session_key, write_access, readable_levels}) do
     GenServer.start_link(__MODULE__, {user_id, session_key, write_access, readable_levels},
-      name: via(user_id, session_key)
+      name: via(session_key)
     )
   end
 
   @doc """
   Registry-based name for per-session Agent processes.
+
+  Keyed by `session_key` alone (not by user) so that every participant in a
+  Slack thread shares the same process/conversation — multiple authors in one
+  thread are handled as one shared session, not one isolated session each.
   """
-  def via(user_id, session_key) do
-    {:via, Registry, {Manfrod.Agent.Registry, {user_id, session_key}}}
+  def via(session_key) do
+    {:via, Registry, {Manfrod.Agent.Registry, session_key}}
   end
 
   # Server Callbacks
@@ -116,16 +135,33 @@ defmodule Manfrod.Agent.Server do
   # 1 minute debounce for testing (change back to 60 for production)
   @flush_delay :timer.minutes(1)
 
+  # How many recent transcript lines the response gate gets to see.
+  @transcript_window 12
+
+  # Plain (gated) thread replies wait for a short pause before the response
+  # gate evaluates the batch — so someone splitting a thought across several
+  # messages doesn't get judged mid-sentence. DMs and @mentions skip this
+  # entirely and are processed immediately.
+  @gate_debounce_delay :timer.seconds(6)
+
   @impl true
   def init({user_id, session_key, write_access, readable_levels}) do
-    system_message = ReqLLM.Context.system(build_system_prompt(user_id))
+    system_message = ReqLLM.Context.system(build_system_prompt(user_id, session_key))
 
     # Subscribe to own PubSub topic for FlushHandler-like behavior
     Events.subscribe(user_id)
 
-    # Restore any pending messages from DB (survives crashes/restarts)
-    pending = Memory.get_pending_messages(user_id, session_key)
+    # Restore any pending messages from DB (survives crashes/restarts). Scoped
+    # to the session_key alone (not one user) so a shared multi-author thread
+    # restores everyone's pending messages, not just the seed author's.
+    pending = Memory.get_pending_messages_for_session(session_key)
     restored_messages = Enum.map(pending, &message_to_context/1)
+
+    participants =
+      pending
+      |> Enum.map(& &1.user_id)
+      |> MapSet.new()
+      |> MapSet.put(user_id)
 
     # If we restored messages, add a system notice so agent knows it restarted
     messages =
@@ -142,7 +178,7 @@ defmodule Manfrod.Agent.Server do
         [system_message]
       end
 
-    Logger.info("Agent.Server started for user #{user_id}, session #{session_key}")
+    Logger.info("Agent.Server started for session #{session_key} (seed user #{user_id})")
 
     {:ok,
      %{
@@ -150,13 +186,16 @@ defmodule Manfrod.Agent.Server do
        session_key: session_key,
        write_access: write_access,
        readable_levels: readable_levels,
+       participants: participants,
        messages: messages,
+       transcript: [],
        inbox: [],
-       flush_timer: nil
+       flush_timer: nil,
+       gate_debounce_timer: nil
      }}
   end
 
-  defp build_system_prompt(user_id) do
+  defp build_system_prompt(user_id, session_key) do
     unless Repo.healthy?() do
       @system_prompt <> Soul.base_prompt()
     else
@@ -169,7 +208,7 @@ defmodule Manfrod.Agent.Server do
 
       soul = Memory.get_soul(user_id)
       user = Accounts.get_user!(user_id)
-      current_context = build_current_context(user)
+      current_context = build_current_context(user, session_key)
 
       base =
         if soul do
@@ -191,7 +230,7 @@ defmodule Manfrod.Agent.Server do
 
   @timezone "Europe/Warsaw"
 
-  defp build_current_context(user) do
+  defp build_current_context(user, session_key) do
     now = DateTime.utc_now() |> DateTime.shift_zone!(@timezone)
     day_name = Calendar.strftime(now, "%A")
 
@@ -202,10 +241,20 @@ defmodule Manfrod.Agent.Server do
     offset_sign = if utc_offset_hours >= 0, do: "+", else: "-"
 
     user_line =
-      if user.name && user.name != "" do
-        "\nUser: #{user.name}"
-      else
-        ""
+      cond do
+        not dm_session?(session_key) ->
+          "\nThis is a shared channel thread — multiple people participate. " <>
+            "Each user message is prefixed with its author " <>
+            "(\"[from: Full Name <slack_id>]\" — the <slack_id> is a unique " <>
+            "identifier, not part of the name; use it to tell apart people " <>
+            "who share a name). Address the right person; don't assume " <>
+            "there is a single \"the user\"."
+
+        user.name && user.name != "" ->
+          "\nUser: #{user.name}"
+
+        true ->
+          ""
       end
 
     """
@@ -217,12 +266,26 @@ defmodule Manfrod.Agent.Server do
     |> String.trim()
   end
 
+  # A DM channel ("D...") is inherently single-user, so it never has the
+  # multi-author ambiguity that channel/group threads do.
+  defp dm_session?(session_key) do
+    case String.split(session_key, ":", parts: 2) do
+      ["D" <> _ | _] -> true
+      _ -> false
+    end
+  end
+
   @impl true
   def handle_cast({:message, message}, state) do
     %{content: content, source: source, reply_to: reply_to} = message
+    author_user_id = Map.get(message, :user_id, state.user_id)
+    readable_levels = Map.get(message, :readable_levels, state.readable_levels)
+    requires_gate = Map.get(message, :requires_gate, false)
 
     event_ctx = %{
-      user_id: state.user_id,
+      user_id: author_user_id,
+      readable_levels: readable_levels,
+      requires_gate: requires_gate,
       session_key: state.session_key,
       meta: %{
         write_access: state.write_access,
@@ -233,20 +296,39 @@ defmodule Manfrod.Agent.Server do
       slack_ts: Map.get(message, :ts)
     }
 
-    # Queue message and trigger loop
-    state = %{state | inbox: state.inbox ++ [{content, event_ctx}]}
-    send(self(), :loop)
+    # Queue message
+    state = %{
+      state
+      | inbox: state.inbox ++ [{content, event_ctx}],
+        participants: MapSet.put(state.participants, author_user_id)
+    }
+
+    state =
+      if requires_gate do
+        # Plain thread reply: debounce so a burst of messages from someone
+        # mid-thought gets judged as one batch once they pause, not per message.
+        schedule_gate_debounce(state)
+      else
+        # DM or explicit @mention: unambiguous direct address, process now —
+        # this also immediately drains any gated messages still waiting.
+        state = cancel_gate_debounce(state)
+        send(self(), :loop)
+        state
+      end
+
     {:noreply, state}
   end
 
   def handle_cast({:trigger_idle, event_ctx}, state) do
-    Logger.info("Manual idle triggered for user #{state.user_id}, session #{state.session_key}")
+    Logger.info("Manual idle triggered for session #{state.session_key}")
 
     # Cancel any pending flush timer
     if state.flush_timer, do: Process.cancel_timer(state.flush_timer)
 
-    # Broadcast idle event - triggers extraction
-    Events.broadcast(:idle, event_ctx)
+    # Broadcast one idle event per participant so every author's pending
+    # messages get extracted, not just whoever's context happened to trigger
+    # the trigger_idle call.
+    broadcast_idle_for_participants(state, event_ctx)
 
     # Terminate - will be restarted on next message
     {:stop, :normal, state}
@@ -255,10 +337,10 @@ defmodule Manfrod.Agent.Server do
   # Handle idle from FlushHandler-like behavior (self-subscribes to own topic)
   @impl true
   def handle_info({:flush, event_ctx}, state) do
-    Logger.info("Session idle timeout for user #{state.user_id}, session #{state.session_key}")
+    Logger.info("Session idle timeout for session #{state.session_key}")
 
-    # Broadcast idle event
-    Events.broadcast(:idle, event_ctx)
+    # Broadcast one idle event per participant (see trigger_idle for why).
+    broadcast_idle_for_participants(state, event_ctx)
 
     # Terminate - will be restarted on next message
     {:stop, :normal, state}
@@ -270,12 +352,20 @@ defmodule Manfrod.Agent.Server do
     {:noreply, state}
   end
 
+  # Gate debounce window elapsed with no further gated messages — process
+  # whatever's queued now. (If something else already drained the inbox in
+  # the meantime, this is a harmless no-op via the empty-inbox :loop clause.)
+  def handle_info(:gate_debounce_elapsed, state) do
+    send(self(), :loop)
+    {:noreply, %{state | gate_debounce_timer: nil}}
+  end
+
   # Loop: nothing to do
   def handle_info(:loop, %{inbox: []} = state) do
     {:noreply, state}
   end
 
-  # Loop: drain inbox, start LLM call
+  # Loop: drain inbox, decide whether to respond, start LLM call
   def handle_info(:loop, state) do
     # Check DB health before processing
     unless Repo.healthy?() do
@@ -292,21 +382,41 @@ defmodule Manfrod.Agent.Server do
 
       {:noreply, %{state | inbox: []}}
     else
+      # The gate only applies when every message in this batch is a plain,
+      # ungated thread reply — a DM or explicit @mention in the same batch
+      # always gets a response.
+      gate_applies? = Enum.all?(state.inbox, fn {_content, ctx} -> ctx.requires_gate end)
+      prior_transcript = state.transcript
+      new_contents = Enum.map(state.inbox, fn {content, _ctx} -> content end)
+
+      # Messages are always persisted + folded into shared history, whether
+      # or not the agent decides to actually reply — so the timer resets and
+      # future turns have full context either way.
       {messages, event_ctx, state} = drain_inbox(state)
-      Events.broadcast(:thinking, event_ctx)
+      state = reset_flush_timer(state, event_ctx)
 
-      # Start typing refresher
-      {:ok, refresher_pid} = TypingRefresher.start(state.user_id, event_ctx)
+      if gate_applies? and not ResponseGate.should_respond?(prior_transcript, new_contents) do
+        Logger.debug(
+          "Agent.Server: response gate declined to reply for session #{state.session_key}"
+        )
 
-      send(self(), {:call_llm, event_ctx, 0, refresher_pid})
-      {:noreply, %{state | messages: messages}}
+        {:noreply, %{state | messages: messages}}
+      else
+        Events.broadcast(:thinking, event_ctx)
+
+        # Start typing refresher on the triggering author's own topic
+        {:ok, refresher_pid} = TypingRefresher.start(event_ctx.user_id, event_ctx)
+
+        send(self(), {:call_llm, event_ctx, 0, refresher_pid})
+        {:noreply, %{state | messages: messages}}
+      end
     end
   end
 
   # LLM call: iteration limit
   def handle_info({:call_llm, _ctx, iter, refresher_pid}, state) when iter >= 50 do
     TypingRefresher.stop(refresher_pid)
-    Logger.error("Agent.Server: max tool iterations reached for user #{state.user_id}")
+    Logger.error("Agent.Server: max tool iterations reached for session #{state.session_key}")
     send(self(), :loop)
     {:noreply, state}
   end
@@ -316,13 +426,13 @@ defmodule Manfrod.Agent.Server do
     if state.inbox != [] do
       # Interrupted by new messages
       TypingRefresher.stop(refresher_pid)
-      Logger.info("Agent.Server: interrupted by new message(s) for user #{state.user_id}")
+      Logger.info("Agent.Server: interrupted by new message(s) for session #{state.session_key}")
       Events.broadcast(:interrupted, ctx)
       send(self(), :loop)
       {:noreply, state}
     else
       case LLM.generate_text(state.messages,
-             tools: tools(state.user_id, state.readable_levels, state.write_access, msg_ctx(ctx)),
+             tools: tools(ctx.user_id, ctx.readable_levels, state.write_access, msg_ctx(ctx)),
              purpose: :agent
            ) do
         {:ok, response} ->
@@ -354,20 +464,23 @@ defmodule Manfrod.Agent.Server do
   defp drain_inbox(state) do
     now = DateTime.utc_now() |> DateTime.truncate(:second)
 
-    # Build user messages with note context, persist each to DB
+    # Build user messages with note context, persist each to DB under its
+    # own author (not a fixed session owner) — a shared thread has messages
+    # from several distinct users landing in the same inbox.
     {user_messages, _} =
       Enum.map_reduce(state.inbox, nil, fn {content, event_ctx}, _acc ->
-        # Persist user message to DB
         {:ok, _user_msg} =
-          Memory.create_message(state.user_id, %{
+          Memory.create_message(event_ctx.user_id, %{
             role: "user",
             content: content,
             session_key: state.session_key,
             received_at: now
           })
 
-        # Retrieve relevant note context
-        note_context = get_note_context(state.user_id, state.readable_levels, content)
+        # Retrieve relevant note context (the note graph is a single shared
+        # graph gated by access level, not by user, so this is safe to scope
+        # to whichever author sent this particular message)
+        note_context = get_note_context(event_ctx.user_id, event_ctx.readable_levels, content)
 
         # Build user message with note context prepended for LLM
         user_content =
@@ -383,8 +496,51 @@ defmodule Manfrod.Agent.Server do
     # Get the last event_ctx for responses
     {_content, last_ctx} = List.last(state.inbox)
 
+    new_contents = Enum.map(state.inbox, fn {content, _ctx} -> content end)
+    transcript = Enum.take(state.transcript ++ new_contents, -@transcript_window)
+
     messages = state.messages ++ user_messages
-    {messages, last_ctx, %{state | inbox: []}}
+    state = cancel_gate_debounce(%{state | inbox: [], transcript: transcript})
+    {messages, last_ctx, state}
+  end
+
+  # Schedule (or restart) the gate debounce timer — fires :gate_debounce_elapsed
+  # once no further gated message has arrived for @gate_debounce_delay.
+  defp schedule_gate_debounce(state) do
+    if state.gate_debounce_timer, do: Process.cancel_timer(state.gate_debounce_timer)
+    timer_ref = Process.send_after(self(), :gate_debounce_elapsed, @gate_debounce_delay)
+    %{state | gate_debounce_timer: timer_ref}
+  end
+
+  defp cancel_gate_debounce(%{gate_debounce_timer: nil} = state), do: state
+
+  defp cancel_gate_debounce(state) do
+    Process.cancel_timer(state.gate_debounce_timer)
+    %{state | gate_debounce_timer: nil}
+  end
+
+  # Reset the idle/flush debounce timer. Called after every processed batch
+  # (whether or not the agent actually replied), so a busy multi-author
+  # thread where the agent is mostly silently absorbing messages doesn't get
+  # torn down mid-conversation.
+  defp reset_flush_timer(state, ctx) do
+    if state.flush_timer, do: Process.cancel_timer(state.flush_timer)
+    timer_ref = Process.send_after(self(), {:flush, ctx}, @flush_delay)
+    %{state | flush_timer: timer_ref}
+  end
+
+  defp record_transcript(state, line) do
+    %{state | transcript: Enum.take(state.transcript ++ [line], -@transcript_window)}
+  end
+
+  # Extraction (Manfrod.Memory.Extractor, via FlushHandler) is scoped to a
+  # single (user_id, session_key) pair, so a shared multi-author session needs
+  # one :idle broadcast per participant to get everyone's pending messages
+  # closed out — not just whoever's message happened to be "last".
+  defp broadcast_idle_for_participants(state, event_ctx) do
+    Enum.each(state.participants, fn participant_id ->
+      Events.broadcast(:idle, Map.put(event_ctx, :user_id, participant_id))
+    end)
   end
 
   # Handle LLM response - either tool calls or final response
@@ -395,7 +551,7 @@ defmodule Manfrod.Agent.Server do
         tool_calls = ReqLLM.Response.tool_calls(response)
 
         Logger.info(
-          "Agent.Server executing #{length(tool_calls)} tool(s) for user #{state.user_id}"
+          "Agent.Server executing #{length(tool_calls)} tool(s) for user #{ctx.user_id}"
         )
 
         # Extract any narrative text the LLM sent alongside tool calls
@@ -426,11 +582,12 @@ defmodule Manfrod.Agent.Server do
               })
             )
 
-            # Execute and time the action
+            # Execute and time the action, on behalf of this turn's actual
+            # triggering author (not a fixed session owner)
             {result, duration_ms, success} =
               timed_execute_tool(
-                state.user_id,
-                state.readable_levels,
+                ctx.user_id,
+                ctx.readable_levels,
                 state.write_access,
                 ctx,
                 tool_call
@@ -462,9 +619,11 @@ defmodule Manfrod.Agent.Server do
 
         response_text = ReqLLM.Response.text(response) || ""
 
-        # Persist assistant response to DB
+        # Persist assistant response to DB, attributed to this turn's
+        # triggering author (known v1 limitation: in a shared thread, other
+        # participants' own extracted conversation won't include this reply)
         {:ok, _assistant_msg} =
-          Memory.create_message(state.user_id, %{
+          Memory.create_message(ctx.user_id, %{
             role: "assistant",
             content: response_text,
             session_key: state.session_key,
@@ -474,18 +633,17 @@ defmodule Manfrod.Agent.Server do
         # Add to conversation history
         assistant_msg = ReqLLM.Context.assistant(response_text)
         messages = state.messages ++ [assistant_msg]
+        state = record_transcript(state, "Manfrod: #{response_text}")
 
         # Broadcast response
         Events.broadcast(:responding, Map.put(ctx, :meta, %{content: response_text}))
-        Logger.info("Agent.Server broadcast response for user #{state.user_id} (#{ctx.source})")
+        Logger.info("Agent.Server broadcast response for user #{ctx.user_id} (#{ctx.source})")
 
-        # Debounce flush timer
-        if state.flush_timer, do: Process.cancel_timer(state.flush_timer)
-        timer_ref = Process.send_after(self(), {:flush, ctx}, @flush_delay)
+        state = reset_flush_timer(state, ctx)
 
         # Check for more work
         send(self(), :loop)
-        {:noreply, %{state | messages: messages, flush_timer: timer_ref}}
+        {:noreply, %{state | messages: messages}}
     end
   end
 

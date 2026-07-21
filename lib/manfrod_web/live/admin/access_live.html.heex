@@ -227,8 +227,7 @@
           <tr class="border-b border-gray-700 text-gray-400 text-xs uppercase tracking-wider">
             <th class="pb-3 pr-4">Użytkownik</th>
             <th class="pb-3 pr-4">Slack ID</th>
-            <th class="pb-3 pr-4">Projekt</th>
-            <th class="pb-3">Źródło</th>
+            <th class="pb-3">Projekty</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-gray-800">
@@ -236,8 +235,9 @@
             <tr class="text-gray-300">
               <td class="py-3 pr-4"><%= m.user_name || "—" %></td>
               <td class="py-3 pr-4 font-mono text-xs text-gray-500"><%= m.user_slack_id %></td>
-              <td class="py-3 pr-4"><%= m.project_name %> <span class="text-gray-500 text-xs">(#{m.project_slug})</span></td>
-              <td class="py-3 text-xs text-gray-400"><%= m.source %></td>
+              <td class="py-3 text-xs text-gray-400">
+                <%= Enum.map_join(m.memberships, ", ", fn ms -> "#{ms.project_name} (#{ms.project_slug})" end) %>
+              </td>
             </tr>
           <% end %>
         </tbody>
