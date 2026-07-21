@@ -395,20 +395,37 @@ defmodule Manfrod.Agent.Server do
       {messages, event_ctx, state} = drain_inbox(state)
       state = reset_flush_timer(state, event_ctx)
 
-      if gate_applies? and not ResponseGate.should_respond?(prior_transcript, new_contents) do
-        Logger.debug(
-          "Agent.Server: response gate declined to reply for session #{state.session_key}"
-        )
+      decision =
+        if gate_applies?, do: ResponseGate.decide(prior_transcript, new_contents), else: :respond
 
-        {:noreply, %{state | messages: messages}}
-      else
-        Events.broadcast(:thinking, event_ctx)
+      case decision do
+        :respond ->
+          Events.broadcast(:thinking, event_ctx)
 
-        # Start typing refresher on the triggering author's own topic
-        {:ok, refresher_pid} = TypingRefresher.start(event_ctx.user_id, event_ctx)
+          # Start typing refresher on the triggering author's own topic
+          {:ok, refresher_pid} = TypingRefresher.start(event_ctx.user_id, event_ctx)
 
-        send(self(), {:call_llm, event_ctx, 0, refresher_pid})
-        {:noreply, %{state | messages: messages}}
+          send(self(), {:call_llm, event_ctx, 0, refresher_pid})
+          {:noreply, %{state | messages: messages}}
+
+        {:react, emoji} ->
+          Logger.debug(
+            "Agent.Server: response gate chose to react (:#{emoji}:) for session #{state.session_key}"
+          )
+
+          Events.broadcast(
+            :reacted,
+            Map.put(event_ctx, :meta, %{emoji: emoji, ts: event_ctx.slack_ts})
+          )
+
+          {:noreply, %{state | messages: messages}}
+
+        :ignore ->
+          Logger.debug(
+            "Agent.Server: response gate declined to reply for session #{state.session_key}"
+          )
+
+          {:noreply, %{state | messages: messages}}
       end
     end
   end

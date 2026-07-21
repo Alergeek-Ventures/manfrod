@@ -35,8 +35,14 @@ defmodule Manfrod.Slack.EventHandler do
       plain `message` events instead of `app_mention`; those are forwarded to
       the Agent.
     - **Channel thread replies**: Only forwarded if the user is known AND an
-      Agent session already exists for that thread (bot was previously
-      @mentioned). Top-level channel messages without @mention are ignored.
+      Agent session already exists for that thread (started by any
+      participant's earlier @mention, not necessarily this user's own).
+      Top-level channel messages without @mention are ignored by the Agent
+      path (they're still buffered for passive memory).
+    - Any channel message that name-drops "manfrod" without an actual
+      `<@bot_id>` @mention gets an `:eyes` reaction, independent of the
+      routing above — a lightweight "I noticed" without starting a
+      conversation.
   - `"app_mention"` — Channel @mentions. Requires user to already exist
     (must have DMed the bot first). Strips the bot mention prefix and
     includes channel context (name + user) before forwarding.
@@ -69,6 +75,14 @@ defmodule Manfrod.Slack.EventHandler do
         },
         bot.token
       )
+
+      # Name-dropped without an actual @mention ("manfrod, could you...") —
+      # acknowledge with an eyes reaction without starting a full
+      # conversation. Independent of the routing below, and of session state.
+      if not dm_channel?(channel) and not bot_mentioned?(text, bot.user_id) and
+           name_dropped?(text) do
+        API.add_reaction(bot.token, channel, event["ts"], "eyes")
+      end
 
       cond do
         dm_channel?(channel) ->
@@ -303,6 +317,11 @@ defmodule Manfrod.Slack.EventHandler do
   end
 
   defp bot_mentioned?(_text, _bot_user_id), do: false
+
+  @bot_name_pattern ~r/\bmanfrod\b/i
+
+  defp name_dropped?(text) when is_binary(text), do: Regex.match?(@bot_name_pattern, text)
+  defp name_dropped?(_text), do: false
 
   defp dm_channel?("D" <> _), do: true
   defp dm_channel?(_), do: false

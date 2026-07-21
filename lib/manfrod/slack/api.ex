@@ -129,6 +129,20 @@ defmodule Manfrod.Slack.API do
     end
   end
 
+  @doc """
+  Add an emoji reaction to a message.
+
+  `emoji` is the Slack emoji name without colons (e.g. `"eyes"`, `"thumbsup"`).
+  Returns `{:ok, body}` or `{:error, reason}` — `"already_reacted"` is a
+  common, harmless error when the same reaction is already present (e.g.
+  duplicate event delivery), safe to ignore.
+  """
+  @spec add_reaction(String.t(), String.t(), String.t(), String.t()) ::
+          {:ok, map()} | {:error, term()}
+  def add_reaction(token, channel, ts, emoji) do
+    post("reactions.add", token, %{channel: channel, timestamp: ts, name: emoji})
+  end
+
   defp parse_retry_after(nil), do: 1
   defp parse_retry_after(value) when is_binary(value), do: String.to_integer(value)
 end

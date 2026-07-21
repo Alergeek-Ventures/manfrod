@@ -226,6 +226,36 @@ defmodule Manfrod.Slack.ActivityHandler do
     {:noreply, state}
   end
 
+  # -- :reacted (emoji reaction instead of a full reply) -----------------------
+
+  def handle_info(
+        {:activity,
+         %Activity{
+           type: :reacted,
+           reply_to: %{channel: channel},
+           meta: %{emoji: emoji, ts: ts}
+         }},
+        state
+      )
+      when is_binary(emoji) and is_binary(ts) do
+    case API.add_reaction(state.bot_token, channel, ts, emoji) do
+      {:ok, _} ->
+        :ok
+
+      {:error, "already_reacted"} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(
+          "Slack ActivityHandler failed to add reaction :#{emoji}: in #{channel}: #{inspect(reason)}"
+        )
+    end
+
+    {:noreply, state}
+  end
+
+  def handle_info({:activity, %Activity{type: :reacted}}, state), do: {:noreply, state}
+
   # -- :idle (conversation wrap-up) --------------------------------------------
 
   def handle_info(
