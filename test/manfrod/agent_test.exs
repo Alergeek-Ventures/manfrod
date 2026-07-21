@@ -111,7 +111,8 @@ defmodule Manfrod.AgentTest do
       {:ok, pid} =
         DynamicSupervisor.start_child(
           Manfrod.Agent.DynamicSupervisor,
-          {Manfrod.Agent.Server, {user_id, @test_session_key}}
+          {Manfrod.Agent.Server,
+           {user_id, @test_session_key, ["internal"], ["internal", "external/all"]}}
         )
 
       # Send :loop - should be safe even during work
@@ -129,7 +130,8 @@ defmodule Manfrod.AgentTest do
       {:ok, pid} =
         DynamicSupervisor.start_child(
           Manfrod.Agent.DynamicSupervisor,
-          {Manfrod.Agent.Server, {user_id, @test_session_key}}
+          {Manfrod.Agent.Server,
+           {user_id, @test_session_key, ["internal"], ["internal", "external/all"]}}
         )
 
       # Send multiple :loop messages rapidly
@@ -139,6 +141,83 @@ defmodule Manfrod.AgentTest do
 
       ref = Process.monitor(pid)
       refute_receive {:DOWN, ^ref, :process, ^pid, _}, 200
+    end
+  end
+
+  describe "multi-author sessions" do
+    # Channel-style session_key (not a DM) — DMs are inherently single-user
+    # already, so the multi-author merge only matters for channel threads.
+    @channel_session_key "C0001:1700000000.000001"
+
+    test "two different authors in one thread share a single Agent process" do
+      user_a = insert_user!(%{slack_id: "U_MULTI_A", name: "Alice"})
+      user_b = insert_user!(%{slack_id: "U_MULTI_B", name: "Bob"})
+
+      Events.subscribe(user_a.id)
+      Events.subscribe(user_b.id)
+
+      Agent.send_message(user_a.id, @channel_session_key, %{
+        content: "Hello from Alice #{System.unique_integer()}",
+        source: :test,
+        reply_to: self(),
+        requires_gate: false
+      })
+
+      assert_receive {:activity, %{type: :thinking, source: :test}}, 60_000
+      assert_receive {:activity, %{type: :responding}}, 120_000
+
+      Agent.send_message(user_b.id, @channel_session_key, %{
+        content: "Hello from Bob #{System.unique_integer()}",
+        source: :test,
+        reply_to: self(),
+        requires_gate: false
+      })
+
+      assert_receive {:activity, %{type: :thinking, source: :test}}, 60_000
+      assert_receive {:activity, %{type: :responding}}, 120_000
+
+      # Exactly one Agent process registered for this session, despite two
+      # distinct authors having sent messages into it.
+      assert [{_pid, _}] = Registry.lookup(Manfrod.Agent.Registry, @channel_session_key)
+    end
+
+    test "idle broadcasts to every participant, not just the seed author" do
+      user_a = insert_user!(%{slack_id: "U_MULTI_C", name: "Carol"})
+      user_b = insert_user!(%{slack_id: "U_MULTI_D", name: "Dave"})
+
+      Events.subscribe(user_a.id)
+      Events.subscribe(user_b.id)
+
+      Agent.send_message(user_a.id, @channel_session_key <> ".idle", %{
+        content: "First #{System.unique_integer()}",
+        source: :test,
+        reply_to: self(),
+        requires_gate: false
+      })
+
+      assert_receive {:activity, %{type: :responding}}, 120_000
+
+      Agent.send_message(user_b.id, @channel_session_key <> ".idle", %{
+        content: "Second #{System.unique_integer()}",
+        source: :test,
+        reply_to: self(),
+        requires_gate: false
+      })
+
+      assert_receive {:activity, %{type: :responding}}, 120_000
+
+      Agent.trigger_idle(@channel_session_key <> ".idle", %{
+        user_id: user_a.id,
+        session_key: @channel_session_key <> ".idle",
+        source: :test,
+        reply_to: nil
+      })
+
+      assert_receive {:activity, %{type: :idle, user_id: id}} when id in [user_a.id, user_b.id],
+                     10_000
+
+      assert_receive {:activity, %{type: :idle, user_id: id}} when id in [user_a.id, user_b.id],
+                     10_000
     end
   end
 

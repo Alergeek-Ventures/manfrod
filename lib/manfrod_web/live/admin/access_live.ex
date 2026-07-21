@@ -237,15 +237,23 @@ defmodule ManfrodWeb.Admin.AccessLive do
           join: p in Project,
           on: p.id == pm.project_id,
           select: %{
-            id: pm.id,
             user_name: u.name,
             user_slack_id: u.slack_id,
             project_name: p.name,
             project_slug: p.slug,
             source: pm.source
           },
-          order_by: [p.slug, u.name]
+          order_by: [u.name, p.slug]
       )
+      |> Enum.group_by(& &1.user_slack_id)
+      |> Enum.map(fn {slack_id, rows} ->
+        %{
+          user_slack_id: slack_id,
+          user_name: List.first(rows).user_name,
+          memberships: Enum.map(rows, &Map.take(&1, [:project_name, :project_slug, :source]))
+        }
+      end)
+      |> Enum.sort_by(& &1.user_name)
 
     users = Accounts.list_users()
 

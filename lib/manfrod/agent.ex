@@ -45,7 +45,9 @@ defmodule Manfrod.Agent do
       when is_binary(user_id) and is_binary(session_key) and is_map(message) do
     {:ok, write_access, readable_levels} = resolve_access(user_id, slack_channel_id)
     ensure_started(user_id, session_key, write_access, readable_levels)
-    GenServer.cast(Server.via(user_id, session_key), {:message, message})
+
+    message = Map.merge(message, %{user_id: user_id, readable_levels: readable_levels})
+    GenServer.cast(Server.via(session_key), {:message, message})
   end
 
   defp resolve_access(_user_id, nil) do
@@ -74,11 +76,10 @@ defmodule Manfrod.Agent do
   @doc """
   Manually trigger idle state for a session (close conversation and extract memories).
   """
-  def trigger_idle(user_id, session_key, event_ctx)
-      when is_binary(user_id) and is_binary(session_key) do
-    case Registry.lookup(Manfrod.Agent.Registry, {user_id, session_key}) do
+  def trigger_idle(session_key, event_ctx) when is_binary(session_key) do
+    case Registry.lookup(Manfrod.Agent.Registry, session_key) do
       [{_pid, _}] ->
-        GenServer.cast(Server.via(user_id, session_key), {:trigger_idle, event_ctx})
+        GenServer.cast(Server.via(session_key), {:trigger_idle, event_ctx})
 
       [] ->
         :ok
@@ -86,7 +87,7 @@ defmodule Manfrod.Agent do
   end
 
   defp ensure_started(user_id, session_key, write_access, readable_levels) do
-    case Registry.lookup(Manfrod.Agent.Registry, {user_id, session_key}) do
+    case Registry.lookup(Manfrod.Agent.Registry, session_key) do
       [{_pid, _}] ->
         :ok
 
