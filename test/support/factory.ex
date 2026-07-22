@@ -3,6 +3,7 @@ defmodule Manfrod.Factory do
   Test factories for Manfrod schemas.
   """
 
+  alias Manfrod.Desks.{Desk, DeskReservation}
   alias Manfrod.Repo
   alias Manfrod.Accounts.User
   alias Manfrod.Memory.{Conversation, Message, Node, Link}
@@ -112,6 +113,32 @@ defmodule Manfrod.Factory do
   def insert_link!(node_a, node_b) do
     %Link{}
     |> Link.changeset(%{node_a_id: node_a.id, node_b_id: node_b.id})
+    |> Repo.insert!()
+  end
+
+  # Desks
+
+  def desk_attrs(attrs \\ %{}) do
+    Map.merge(%{label: "Desk-#{System.unique_integer([:positive])}", equipment: []}, attrs)
+  end
+
+  def insert_desk!(attrs \\ %{}) do
+    %Desk{}
+    |> Desk.changeset(desk_attrs(attrs))
+    |> Repo.insert!()
+  end
+
+  def insert_desk_reservation!(attrs \\ %{}) do
+    desk = Map.get(attrs, :desk) || insert_desk!()
+
+    defaults = %{
+      desk_id: desk.id,
+      user_id: test_user_id(),
+      date: Date.utc_today()
+    }
+
+    %DeskReservation{}
+    |> DeskReservation.changeset(Map.merge(defaults, Map.drop(attrs, [:desk])))
     |> Repo.insert!()
   end
 end
