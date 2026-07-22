@@ -49,9 +49,19 @@ RUN mix release
 
 FROM ${RUNNER_IMAGE} AS final
 
+# fontconfig + a font are needed for Manfrod.DeskMap's text rendering
+# (Image.Text.text, via libvips/Pango) — without them every glyph falls
+# back to a "notdef" tofu box, even for plain ASCII. DejaVu Sans covers
+# Polish diacritics too.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends libstdc++6 openssl libncurses6 locales ca-certificates \
+  && apt-get install -y --no-install-recommends libstdc++6 openssl libncurses6 locales ca-certificates fontconfig fonts-dejavu-core \
   && rm -rf /var/lib/apt/lists/*
+
+# Pre-build the fontconfig cache as root — the release runs as `nobody`,
+# which can't write a cache of its own, so without this every text render
+# re-scans fonts from scratch (and fontconfig logs a "no writable cache
+# directories" warning on every call).
+RUN fc-cache -f
 
 RUN sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen \
   && locale-gen
@@ -59,6 +69,11 @@ RUN sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen \
 ENV LANG=en_US.UTF-8
 ENV LANGUAGE=en_US:en
 ENV LC_ALL=en_US.UTF-8
+
+# fontconfig also wants a per-user cache dir; `nobody` has no home
+# directory, so point it at /tmp (world-writable) instead of silently
+# failing to write on every text render.
+ENV XDG_CACHE_HOME=/tmp
 
 WORKDIR "/app"
 RUN chown nobody /app
