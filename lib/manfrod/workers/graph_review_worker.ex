@@ -1,7 +1,7 @@
 defmodule Manfrod.Workers.GraphReviewWorker do
   @moduledoc """
   Oban worker that triggers a deep review of the already-integrated graph
-  every 2 days (see the cron entry in `config/config.exs`), independent of
+  daily at 2:10am (see the cron entry in `config/config.exs`), independent of
   the weekly slipbox-drain done by `Manfrod.Workers.RetrospectionWorker`.
   """
   use Oban.Worker,

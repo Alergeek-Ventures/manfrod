@@ -77,9 +77,9 @@ config :manfrod, Oban,
      crontab: [
        # Weekly (Sunday midnight) - memory retrospection (slipbox drain)
        {"0 0 * * 0", Manfrod.Workers.RetrospectionWorker},
-       # Every 2 days at 2:10am - deep review of the already-integrated graph
+       # Daily at 2:10am - deep review of the already-integrated graph
        # (duplicates/orphans independent of slipbox state)
-       {"10 2 */2 * *", Manfrod.Workers.GraphReviewWorker},
+       {"10 2 * * *", Manfrod.Workers.GraphReviewWorker},
        # Every hour - schedule reminder triggers for next 48h
        {"0 * * * *", Manfrod.Workers.SchedulerWorker},
        # Every hour - schedule cron-skill triggers for next 48h (skills
