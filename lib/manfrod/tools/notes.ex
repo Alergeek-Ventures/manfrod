@@ -9,7 +9,12 @@ defmodule Manfrod.Tools.Notes do
   alias Manfrod.Tools.Support
   alias Manfrod.Voyage
 
-  def definitions(user_id, readable_levels, write_access, msg_ctx) do
+  def definitions(%{
+        user_id: user_id,
+        readable_levels: readable_levels,
+        write_access: write_access,
+        msg_ctx: msg_ctx
+      }) do
     [
       ReqLLM.Tool.new!(
         name: "search_notes",

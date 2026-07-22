@@ -6,7 +6,7 @@ defmodule Manfrod.Tools.Escalation do
   alias Manfrod.Memory.PendingOps
   alias Manfrod.Tools.Support
 
-  def definitions(readable_levels, msg_ctx) do
+  def definitions(%{readable_levels: readable_levels, msg_ctx: msg_ctx}) do
     [
       ReqLLM.Tool.new!(
         name: "escalate_note",

@@ -6,7 +6,7 @@ defmodule Manfrod.Tools.SkillLoader do
 
   alias Manfrod.Skills
 
-  def definitions do
+  def definitions(_ctx) do
     [
       ReqLLM.Tool.new!(
         name: "use_skill",

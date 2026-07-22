@@ -873,7 +873,7 @@ defmodule Manfrod.Memory.Retrospector do
         parameter_schema: [],
         callback: fn args -> tool_graph_stats(user_id, args) end
       )
-    ] ++ WebSearch.definitions()
+    ] ++ WebSearch.definitions(%{})
   end
 
   defp system_user_id do

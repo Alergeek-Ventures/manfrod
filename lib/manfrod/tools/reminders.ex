@@ -6,7 +6,7 @@ defmodule Manfrod.Tools.Reminders do
   alias Manfrod.Memory
   alias Manfrod.Workers.TriggerWorker
 
-  def definitions(user_id) do
+  def definitions(%{user_id: user_id}) do
     [
       ReqLLM.Tool.new!(
         name: "set_reminder",

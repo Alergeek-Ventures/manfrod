@@ -33,35 +33,18 @@ defmodule Manfrod.Agent.Server do
   alias Manfrod.Memory.Soul
   alias Manfrod.Repo
   alias Manfrod.Skills
-  alias Manfrod.Tools.{Escalation, Facts, Notes, Reminders, SkillLoader, Vacation, WebSearch}
 
-  @system_prompt """
+  @system_prompt_intro """
   Current date, time, and timezone are provided in the [Current Context] section.
   Use them for scheduling reminders and interpreting relative time references like
   "tomorrow", "next Monday", etc. All reminder times should be in UTC (ISO8601).
+  """
 
-  ## Your Capabilities
-  - set_reminder: Schedule a one-time reminder for yourself at a specific time
-  - list_reminders: See all pending one-time reminders you have scheduled
-  - cancel_reminder: Cancel a pending one-time reminder by its job ID
-  - create_recurring_reminder: Create a recurring reminder on a cron schedule, linked to a note
-  - list_recurring_reminders: See all recurring reminders with their schedules
-  - update_recurring_reminder: Modify a recurring reminder's schedule, note, or enabled status
-  - delete_recurring_reminder: Remove a recurring reminder and cancel its pending jobs
-  - search_notes: Search your zettelkasten for relevant notes
-  - get_note: Fetch a specific note by UUID, including linked notes
-  - create_note: Add a new note to your slipbox (integrated during retrospection)
-  - delete_note: Remove a note and all its links
-  - link_notes: Connect two related notes
-  - unlink_notes: Disconnect two notes
-  - web_search: Search the web for current information using Brave Search
-  - get_calendar_events: Fetch events from the user's Google Calendar for a date range
-  - get_fact: Look up structured facts (vacations, absences, meetings) by key
-  - list_facts: List structured facts by key prefix
-  - report_vacation: Flag a planned absence for the background memory to record (memory decides on client visibility)
-  - escalate_note: Flag a note to have its visibility widened (applied by the background memory)
-  - use_skill: Load the full instructions for one of your Available Skills (see below) when it's relevant to the current message
-
+  # "Your Capabilities" is generated from every discovered tool's own
+  # name/description (Manfrod.Tools.capabilities_text/1) instead of a
+  # hand-maintained list here — dropping a new module in lib/manfrod/tools/
+  # is enough to make the agent aware of it, nothing to edit in this file.
+  @system_prompt_rest """
   ## Communication style
   - Default to 1-3 short sentences. No preamble, no restating the request, no
     summarizing what you're about to do — just do it and report the outcome.
@@ -95,20 +78,19 @@ defmodule Manfrod.Agent.Server do
   Note context is scoped to your current channel's access level — you only see notes you're allowed to see in this context.
   """
 
-  # Tool definitions live under lib/manfrod/tools/ (one module per domain),
-  # each exposing a definitions/N function. user_id/readable_levels/write_access
-  # are baked into closures at call time; `msg_ctx` (%{channel, ts}) identifies
-  # the inbound Slack message so mutating tools can flag it for the passive
-  # memory batch instead of writing directly.
-  defp tools(user_id, readable_levels, write_access, msg_ctx) do
-    Reminders.definitions(user_id) ++
-      Notes.definitions(user_id, readable_levels, write_access, msg_ctx) ++
-      WebSearch.definitions() ++
-      Manfrod.Tools.Calendar.definitions(user_id) ++
-      Facts.definitions(readable_levels) ++
-      Vacation.definitions(user_id, msg_ctx) ++
-      Escalation.definitions(readable_levels, msg_ctx) ++
-      SkillLoader.definitions()
+  # Tool definitions live under lib/manfrod/tools/ (one module per domain,
+  # auto-discovered by Manfrod.Tools — see its moduledoc). user_id/
+  # readable_levels/write_access are baked into closures at call time;
+  # `msg_ctx` (%{channel, ts}) identifies the inbound Slack message so
+  # mutating tools can flag it for the passive memory batch instead of
+  # writing directly.
+  defp tool_context(user_id, readable_levels, write_access, msg_ctx) do
+    %{
+      user_id: user_id,
+      readable_levels: readable_levels,
+      write_access: write_access,
+      msg_ctx: msg_ctx
+    }
   end
 
   # Client API
@@ -197,7 +179,7 @@ defmodule Manfrod.Agent.Server do
 
   defp build_system_prompt(user_id, session_key) do
     unless Repo.healthy?() do
-      @system_prompt <> Soul.base_prompt()
+      full_system_prompt(user_id) <> Soul.base_prompt()
     else
       context =
         Init.build_system_prompt(user_id,
@@ -212,13 +194,26 @@ defmodule Manfrod.Agent.Server do
 
       base =
         if soul do
-          context <> "\n\n" <> @system_prompt
+          context <> "\n\n" <> full_system_prompt(user_id)
         else
-          context <> "\n\n" <> @system_prompt <> Soul.base_prompt()
+          context <> "\n\n" <> full_system_prompt(user_id) <> Soul.base_prompt()
         end
 
       base <> "\n\n" <> current_context <> skills_catalog()
     end
+  end
+
+  # Capabilities are generated from every discovered tool's own
+  # name/description (see Manfrod.Tools) rather than hand-listed here. Real
+  # per-message values (readable_levels/write_access/msg_ctx) aren't known
+  # yet at prompt-build time, and don't need to be — they only feed tool
+  # *callbacks*, never a tool's name/description, so placeholders are safe.
+  defp full_system_prompt(user_id) do
+    ctx = tool_context(user_id, nil, nil, %{channel: nil, ts: nil})
+    capabilities = Manfrod.Tools.capabilities_text(ctx)
+
+    @system_prompt_intro <>
+      "\n## Your Capabilities\n" <> capabilities <> "\n\n" <> @system_prompt_rest
   end
 
   defp skills_catalog do
@@ -449,7 +444,10 @@ defmodule Manfrod.Agent.Server do
       {:noreply, state}
     else
       case LLM.generate_text(state.messages,
-             tools: tools(ctx.user_id, ctx.readable_levels, state.write_access, msg_ctx(ctx)),
+             tools:
+               Manfrod.Tools.definitions(
+                 tool_context(ctx.user_id, ctx.readable_levels, state.write_access, msg_ctx(ctx))
+               ),
              purpose: :agent
            ) do
         {:ok, response} ->
@@ -682,7 +680,9 @@ defmodule Manfrod.Agent.Server do
         # Find and execute the tool
         tool =
           Enum.find(
-            tools(user_id, readable_levels, write_access, msg_ctx(ctx)),
+            Manfrod.Tools.definitions(
+              tool_context(user_id, readable_levels, write_access, msg_ctx(ctx))
+            ),
             &(&1.name == tool_name)
           )
 
