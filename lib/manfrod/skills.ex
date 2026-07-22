@@ -21,8 +21,12 @@ defmodule Manfrod.Skills do
   cron expression) alongside `name`/`description`. That's the signal that the
   skill isn't just reactive material for `use_skill` — it's a recurring job:
   `Manfrod.Workers.SkillSchedulerWorker` picks it up (see `list_cron_skills/0`)
-  and runs it proactively on schedule via a subagent, instead of waiting for
-  the live agent to decide it's relevant.
+  and `Manfrod.SkillRunner` runs it proactively on schedule — the skill's
+  body becomes the instructions for a full autonomous agent turn (same
+  tools as the live agent), exactly as if a user had typed them. A cron
+  skill also needs a `channel` field (Slack channel ID) — that's where the
+  agent's tool calls and final reply land, since there's no live message to
+  reply to.
   """
 
   @doc """
@@ -91,6 +95,28 @@ defmodule Manfrod.Skills do
   end
 
   @doc """
+  Fetch a skill's full metadata (name/description/cron/channel) plus body in
+  one call — what `Manfrod.SkillRunner` needs to run a cron-skill.
+  """
+  def get(name) do
+    path = skill_path(name)
+
+    with {:ok, content} <- File.read(path),
+         {:ok, frontmatter, body} <- parse(content) do
+      {:ok,
+       %{
+         name: frontmatter["name"] || name,
+         description: frontmatter["description"] || "",
+         cron: frontmatter["cron"],
+         channel: frontmatter["channel"],
+         body: body
+       }}
+    else
+      _ -> {:error, :not_found}
+    end
+  end
+
+  @doc """
   Read a plain prompt file (relative to the skills directory) with no
   frontmatter parsing. Used for prompts that are always loaded in full,
   like the memory classifier's.
@@ -125,7 +151,8 @@ defmodule Manfrod.Skills do
         %{
           name: frontmatter["name"] || entry,
           description: frontmatter["description"] || "",
-          cron: frontmatter["cron"]
+          cron: frontmatter["cron"],
+          channel: frontmatter["channel"]
         }
       ]
     else
