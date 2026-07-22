@@ -19,6 +19,11 @@ If `reserve_desk` reports the desk is already booked or permanently assigned
 to someone, say so plainly and suggest checking `list_desks` for
 alternatives — don't retry with the same desk.
 
+A user can only hold one desk per date. If someone already has a desk booked
+on a date and asks to change it (a different desk, same day), just call
+`reserve_desk` again with the new desk — their old reservation for that date
+is automatically dropped, so don't call `cancel_desk_reservation` first.
+
 ## Cancelling
 User asks to cancel/free up their desk → call `cancel_desk_reservation` with
 the desk label and date. Only their own reservations can be cancelled.
