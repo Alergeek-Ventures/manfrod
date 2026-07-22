@@ -13,7 +13,7 @@ ARG RUNNER_IMAGE="docker.io/debian:${DEBIAN_VERSION}-slim"
 FROM ${BUILDER_IMAGE} AS builder
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends build-essential git \
+  && apt-get install -y --no-install-recommends build-essential git libvips-dev \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

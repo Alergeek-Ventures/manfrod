@@ -143,6 +143,75 @@ defmodule Manfrod.Slack.API do
     post("reactions.add", token, %{channel: channel, timestamp: ts, name: emoji})
   end
 
+  @doc """
+  Upload a binary as a file to Slack and share it into `channel`, via the
+  current (non-deprecated) external-upload flow: `files.getUploadURLExternal`
+  → raw POST of the bytes → `files.completeUploadExternal`. Requires the
+  `files:write` bot token scope.
+
+  Returns `{:ok, body}` (the `completeUploadExternal` response) or
+  `{:error, reason}`.
+  """
+  @spec upload_file(String.t(), String.t(), String.t(), binary(), keyword()) ::
+          {:ok, map()} | {:error, term()}
+  def upload_file(token, channel, filename, binary, opts \\ []) do
+    with {:ok, %{"upload_url" => upload_url, "file_id" => file_id}} <-
+           get_upload_url(token, filename, byte_size(binary)),
+         :ok <- put_file(upload_url, filename, binary) do
+      complete_upload(token, channel, file_id, Keyword.get(opts, :title, filename))
+    end
+  end
+
+  defp get_upload_url(token, filename, length) do
+    case Req.post(client(token),
+           url: "files.getUploadURLExternal",
+           form: [filename: filename, length: length]
+         ) do
+      {:ok, %Req.Response{status: 200, body: %{"ok" => true} = body}} ->
+        {:ok, body}
+
+      {:ok, %Req.Response{status: 200, body: %{"ok" => false, "error" => error}}} ->
+        Logger.error("Slack API error on files.getUploadURLExternal: #{error}")
+        {:error, error}
+
+      {:ok, %Req.Response{status: status, body: body}} ->
+        Logger.error(
+          "Slack API unexpected response on files.getUploadURLExternal: HTTP #{status}"
+        )
+
+        {:error, {:unexpected_status, status, body}}
+
+      {:error, reason} ->
+        Logger.error(
+          "Slack API transport error on files.getUploadURLExternal: #{inspect(reason)}"
+        )
+
+        {:error, reason}
+    end
+  end
+
+  defp put_file(upload_url, filename, binary) do
+    case Req.post(url: upload_url, form_multipart: [file: {binary, filename: filename}]) do
+      {:ok, %Req.Response{status: 200}} ->
+        :ok
+
+      {:ok, %Req.Response{status: status, body: body}} ->
+        Logger.error("Slack file upload PUT failed: HTTP #{status}")
+        {:error, {:unexpected_status, status, body}}
+
+      {:error, reason} ->
+        Logger.error("Slack file upload transport error: #{inspect(reason)}")
+        {:error, reason}
+    end
+  end
+
+  defp complete_upload(token, channel, file_id, title) do
+    post("files.completeUploadExternal", token, %{
+      channel_id: channel,
+      files: [%{id: file_id, title: title}]
+    })
+  end
+
   defp parse_retry_after(nil), do: 1
   defp parse_retry_after(value) when is_binary(value), do: String.to_integer(value)
 end
