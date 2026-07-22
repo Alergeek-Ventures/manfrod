@@ -11,16 +11,17 @@ defmodule Manfrod.Events.AgentRun do
   - `started_at` - when the run began
   - `ended_at` - when the run ended (nil if still running)
   - `duration_ms` - computed duration in milliseconds (nil if still running)
-  - `outcome` - `:success`, `:failure`, or `:running`
+  - `outcome` - `:success`, `:failure`, `:running`, or `:interrupted`
   - `intent` - what the agent intended to do (summary)
   - `stats` - outcome statistics from completed event meta
-  - `kind` - which schedule triggered the run: `:slipbox_drain` (weekly,
-    `RetrospectionWorker`) or `:graph_review` (daily, `GraphReviewWorker`).
-    `nil` for runs recorded before this field existed.
+  - `kind` - which schedule triggered the run: `:slipbox_drain` or
+    `:graph_review` (`nil` for runs recorded before this field existed)
   """
 
-  @type outcome :: :success | :failure | :running
+  @type outcome :: :success | :failure | :running | :interrupted
   @type kind :: :slipbox_drain | :graph_review | nil
+
+  @stale_after_seconds 30 * 60
 
   @type t :: %__MODULE__{
           agent: :retrospector,
@@ -58,12 +59,19 @@ defmodule Manfrod.Events.AgentRun do
     review_count = start.meta["review_count"] || 0
     kind = parse_kind(start.meta["kind"])
 
+    outcome =
+      if DateTime.diff(DateTime.utc_now(), start.timestamp, :second) > @stale_after_seconds do
+        :interrupted
+      else
+        :running
+      end
+
     %__MODULE__{
       agent: :retrospector,
       started_at: start.timestamp,
       ended_at: nil,
       duration_ms: nil,
-      outcome: :running,
+      outcome: outcome,
       intent: intent_text(kind, slipbox_count, review_count),
       stats: %{},
       kind: kind
