@@ -6,7 +6,7 @@ defmodule Manfrod.Tools.Calendar do
   alias Manfrod.Accounts
   alias Manfrod.Google
 
-  def definitions(user_id) do
+  def definitions(%{user_id: user_id}) do
     [
       ReqLLM.Tool.new!(
         name: "get_calendar_events",

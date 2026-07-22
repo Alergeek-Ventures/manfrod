@@ -3,7 +3,7 @@ defmodule Manfrod.Tools.WebSearch do
   Web search tool (Brave Search) for the live agent.
   """
 
-  def definitions do
+  def definitions(_ctx) do
     [
       ReqLLM.Tool.new!(
         name: "web_search",

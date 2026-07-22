@@ -3,7 +3,7 @@ defmodule Manfrod.Tools.Facts do
   Structured fact lookup tools (vacations, absences, meetings) for the live agent.
   """
 
-  def definitions(readable_levels) do
+  def definitions(%{readable_levels: readable_levels}) do
     [
       ReqLLM.Tool.new!(
         name: "get_fact",

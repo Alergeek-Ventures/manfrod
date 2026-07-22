@@ -10,7 +10,7 @@ defmodule Manfrod.Tools.Vacation do
   alias Manfrod.Tools.Support
   alias Manfrod.Voyage
 
-  def definitions(user_id, msg_ctx) do
+  def definitions(%{user_id: user_id, msg_ctx: msg_ctx}) do
     [
       ReqLLM.Tool.new!(
         name: "report_vacation",
