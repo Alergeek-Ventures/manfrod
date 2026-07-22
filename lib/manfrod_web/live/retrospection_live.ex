@@ -315,6 +315,9 @@ defmodule ManfrodWeb.RetrospectionLive do
         </span>
         <.outcome_badge outcome={@run.outcome} duration_ms={@run.duration_ms} />
       </div>
+      <div class="mt-1">
+        <.kind_badge kind={@run.kind} />
+      </div>
       <div class="mt-1 text-zinc-500 text-xs truncate">
         <%= @run.intent %>
       </div>
@@ -326,6 +329,23 @@ defmodule ManfrodWeb.RetrospectionLive do
         </div>
       <% end %>
     </.link>
+    """
+  end
+
+  defp kind_badge(assigns) do
+    {text, class} =
+      case assigns.kind do
+        :slipbox_drain -> {"Slipbox drain", "text-blue-400 bg-blue-900/20 border-blue-800"}
+        :graph_review -> {"Graph review", "text-purple-400 bg-purple-900/20 border-purple-800"}
+        nil -> {"Unknown", "text-zinc-500 bg-zinc-800/40 border-zinc-700"}
+      end
+
+    assigns = assign(assigns, text: text, class: class)
+
+    ~H"""
+    <span class={"inline-block text-[10px] px-1.5 py-0.5 rounded border #{@class}"}>
+      <%= @text %>
+    </span>
     """
   end
 
@@ -363,6 +383,7 @@ defmodule ManfrodWeb.RetrospectionLive do
           <span class="text-teal-400 text-xs font-semibold px-2 py-0.5 rounded bg-teal-900/30 border border-teal-800">
             Retrospector
           </span>
+          <.kind_badge kind={@run.kind} />
           <span class="text-zinc-400 text-xs">
             <%= format_run_datetime(@run.started_at) %>
           </span>

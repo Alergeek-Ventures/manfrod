@@ -13,7 +13,7 @@ defmodule Manfrod.Memory.Retrospector do
     bucket drains the slipbox in batches — each batch is an agent run over
     the unprocessed nodes plus a prioritized review sample (orphans →
     weakly connected → stalest → random).
-  - Every 2 days, via `Manfrod.Workers.GraphReviewWorker` (`review_processed_graph/1`):
+  - Daily, via `Manfrod.Workers.GraphReviewWorker` (`review_processed_graph/1`):
     a slipbox-independent deep review. The weekly run only reviews existing
     nodes as a side effect of a bucket having new slipbox content, so a fully
     processed bucket never gets revisited otherwise and near-duplicates/orphans
@@ -236,7 +236,7 @@ defmodule Manfrod.Memory.Retrospector do
   the same tools, over a prioritized sample (orphans → weak → stale → random)
   of every processed bucket, whether or not there's anything new to process.
 
-  Runs every 2 days via `Manfrod.Workers.GraphReviewWorker`.
+  Runs daily via `Manfrod.Workers.GraphReviewWorker`.
 
   ## Options
 
@@ -269,7 +269,7 @@ defmodule Manfrod.Memory.Retrospector do
             :ok
 
           true ->
-            run_agent(user_id, readable_levels, access_bucket, [], review_sample)
+            run_agent(user_id, readable_levels, access_bucket, [], review_sample, :graph_review)
         end
       end)
 
@@ -400,7 +400,14 @@ defmodule Manfrod.Memory.Retrospector do
         review_sample = build_review_sample(user_id, review_budget)
         batch_ids = Enum.map(slipbox, & &1.id)
 
-        case run_agent(user_id, readable_levels, write_access, slipbox, review_sample) do
+        case run_agent(
+               user_id,
+               readable_levels,
+               write_access,
+               slipbox,
+               review_sample,
+               :slipbox_drain
+             ) do
           :ok ->
             if unprocessed_count(batch_ids) < length(batch_ids) do
               process_bucket(user_id, readable_levels, write_access, opts, batch_no + 1)
@@ -468,14 +475,14 @@ defmodule Manfrod.Memory.Retrospector do
   # Agent run
   # ---------------------------------------------------------------------------
 
-  defp run_agent(user_id, readable_levels, write_access, slipbox, review_sample) do
+  defp run_agent(user_id, readable_levels, write_access, slipbox, review_sample, kind) do
     slipbox_text = format_nodes(slipbox, readable_levels)
     review_text = format_nodes(review_sample, readable_levels)
 
     Events.broadcast(:retrospection_started, %{
       user_id: user_id,
       source: :retrospector,
-      meta: %{slipbox_count: length(slipbox), review_count: length(review_sample)}
+      meta: %{slipbox_count: length(slipbox), review_count: length(review_sample), kind: kind}
     })
 
     user_message = build_user_message(slipbox_text, review_text)
