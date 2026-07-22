@@ -50,6 +50,7 @@ defmodule Manfrod.MixProject do
       {:tailwind, "~> 0.3", runtime: Mix.env() == :dev},
       {:websockex, "~> 0.5.1"},
       {:assent, "~> 0.3.1"},
+      {:image, "~> 0.72"},
       {:mox, "~> 1.0", only: :test}
     ]
   end
