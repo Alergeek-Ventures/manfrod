@@ -75,8 +75,8 @@ config :manfrod, Oban,
     {Oban.Plugins.Pruner, max_age: 60 * 60 * 24 * 7},
     {Oban.Plugins.Cron,
      crontab: [
-       # Weekly (Sunday midnight) - memory retrospection (slipbox drain)
-       {"0 0 * * 0", Manfrod.Workers.RetrospectionWorker},
+       # Every hour - memory retrospection (slipbox drain)
+       {"0 * * * *", Manfrod.Workers.RetrospectionWorker},
        # Daily at 2:10am - deep review of the already-integrated graph
        # (duplicates/orphans independent of slipbox state)
        {"10 2 * * *", Manfrod.Workers.GraphReviewWorker},
