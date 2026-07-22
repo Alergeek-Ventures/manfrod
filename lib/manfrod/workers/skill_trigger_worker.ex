@@ -1,30 +1,25 @@
 defmodule Manfrod.Workers.SkillTriggerWorker do
   @moduledoc """
-  Executes a scheduled (cron) skill run, dispatching by skill name to its
-  runner module. Scheduled by `Manfrod.Workers.SkillSchedulerWorker` for any
-  skill declaring a `cron` field in its frontmatter.
-
-  No cron-skills exist yet — this is the extension point for future
-  scheduled skills: add a `perform/1` clause matching the skill's name (or a
-  generic agent runner) and give the skill a `cron:` frontmatter field.
+  Executes a scheduled (cron) skill run. Scheduled by
+  `Manfrod.Workers.SkillSchedulerWorker` for any skill declaring a `cron`
+  field in its frontmatter, for any skill name — there's no per-skill code
+  here. `Manfrod.SkillRunner` loads the skill's SKILL.md body and lets the
+  normal agent tool set act on it autonomously, the same as if a user had
+  typed those instructions.
 
   Unlike `Manfrod.Workers.TriggerWorker` (recurring reminders, which always
-  DM a specific user), a cron-skill has no owning user — each runner decides
-  for itself what "running the skill" means.
+  DM a specific user), a cron-skill has no owning user — its `channel`
+  frontmatter field says where the run's tool calls and final reply land.
 
   ## Job args
-  - `skill_name` - name of the cron-skill to run (matches a `priv/skills/<name>/`
-    folder and a case clause below)
+  - `skill_name` - name of the cron-skill to run (matches a `priv/skills/<name>/` folder)
   """
   use Oban.Worker,
     queue: :default,
     max_attempts: 3
 
-  require Logger
-
   @impl Oban.Worker
   def perform(%Oban.Job{args: %{"skill_name" => skill_name}}) do
-    Logger.warning("SkillTriggerWorker: no runner registered for skill '#{skill_name}', skipping")
-    :ok
+    Manfrod.SkillRunner.run(skill_name)
   end
 end
