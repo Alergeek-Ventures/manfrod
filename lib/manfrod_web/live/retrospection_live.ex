@@ -360,6 +360,9 @@ defmodule ManfrodWeb.RetrospectionLive do
 
         :running ->
           {"⟳", "Running...", "text-amber-400 animate-pulse"}
+
+        :interrupted ->
+          {"⚠", "Interrupted", "text-orange-400"}
       end
 
     assigns = assign(assigns, symbol: symbol, text: text, class: class)
@@ -409,6 +412,12 @@ defmodule ManfrodWeb.RetrospectionLive do
       <%= if @run.outcome == :failure do %>
         <div class="mt-6 p-4 bg-red-950/30 border border-red-800 rounded-lg text-red-400 text-xs">
           Run failed.
+        </div>
+      <% end %>
+
+      <%= if @run.outcome == :interrupted do %>
+        <div class="mt-6 p-4 bg-orange-950/30 border border-orange-800 rounded-lg text-orange-400 text-xs">
+          Run interrupted (no completion event arrived).
         </div>
       <% end %>
     </div>

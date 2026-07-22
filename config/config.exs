@@ -73,6 +73,7 @@ config :manfrod, Oban,
   plugins: [
     Oban.Met,
     {Oban.Plugins.Pruner, max_age: 60 * 60 * 24 * 7},
+    {Oban.Plugins.Lifeline, rescue_after: :timer.hours(4)},
     {Oban.Plugins.Cron,
      crontab: [
        # Every hour - memory retrospection (slipbox drain)
