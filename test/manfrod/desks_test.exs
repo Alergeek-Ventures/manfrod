@@ -69,6 +69,34 @@ defmodule Manfrod.DesksTest do
 
       assert {:error, :past_date} = Desks.reserve_desk(desk.label, test_user_id(), yesterday)
     end
+
+    test "replaces the user's existing reservation on the same date instead of adding a second one" do
+      desk_a = insert_desk!(%{label: "A1"})
+      desk_b = insert_desk!(%{label: "A2"})
+      date = Date.utc_today()
+      user_id = test_user_id()
+
+      {:ok, _} = Desks.reserve_desk(desk_a.label, user_id, date)
+      assert {:ok, reservation} = Desks.reserve_desk(desk_b.label, user_id, date)
+
+      assert reservation.desk.id == desk_b.id
+
+      dates_reservations = Desks.list_reservations_for_date(date)
+      assert length(dates_reservations) == 1
+      assert hd(dates_reservations).desk.id == desk_b.id
+    end
+
+    test "re-reserving the same desk on the same date just updates it (no duplicate)" do
+      desk = insert_desk!(%{label: "A1"})
+      date = Date.utc_today()
+      user_id = test_user_id()
+
+      {:ok, _} = Desks.reserve_desk(desk.label, user_id, date, "first note")
+      assert {:ok, reservation} = Desks.reserve_desk(desk.label, user_id, date, "second note")
+
+      assert reservation.note == "second note"
+      assert length(Desks.list_reservations_for_date(date)) == 1
+    end
   end
 
   describe "cancel_reservation/3" do

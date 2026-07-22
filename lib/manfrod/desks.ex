@@ -61,22 +61,31 @@ defmodule Manfrod.Desks do
 
   Fails if the desk doesn't exist or is inactive, is permanently assigned to
   someone, the date is in the past, or the desk is already booked that day.
+
+  A user can only hold one desk per date: any other reservation of theirs on
+  the same date is replaced (deleted) rather than left dangling alongside the
+  new one.
   """
   def reserve_desk(desk_label, user_id, %Date{} = date, note \\ nil) do
     with {:ok, desk} <- fetch_bookable_desk(desk_label),
          :ok <- validate_not_past(date) do
-      %DeskReservation{}
-      |> DeskReservation.changeset(%{
-        desk_id: desk.id,
-        user_id: user_id,
-        date: date,
-        note: note
-      })
-      |> Repo.insert()
-      |> case do
-        {:ok, reservation} -> {:ok, Repo.preload(reservation, [:desk, :user])}
-        {:error, changeset} -> {:error, changeset}
-      end
+      Repo.transaction(fn ->
+        from(r in DeskReservation, where: r.user_id == ^user_id and r.date == ^date)
+        |> Repo.delete_all()
+
+        %DeskReservation{}
+        |> DeskReservation.changeset(%{
+          desk_id: desk.id,
+          user_id: user_id,
+          date: date,
+          note: note
+        })
+        |> Repo.insert()
+        |> case do
+          {:ok, reservation} -> Repo.preload(reservation, [:desk, :user])
+          {:error, changeset} -> Repo.rollback(changeset)
+        end
+      end)
     end
   end
 
