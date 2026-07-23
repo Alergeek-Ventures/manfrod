@@ -1,7 +1,7 @@
 defmodule Manfrod.Workers.RetrospectionWorker do
   @moduledoc """
-  Oban worker that triggers retrospection every hour (see the cron entry in
-  `config/config.exs`).
+  Oban worker that triggers retrospection every 3 hours (see the cron entry
+  in `config/config.exs`).
 
   Iterates all pending slipbox nodes grouped by access bucket and runs
   the Retrospector agent for each bucket independently.

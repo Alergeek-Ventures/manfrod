@@ -7,14 +7,14 @@ defmodule Manfrod.Memory.Retrospector do
 
   Runs on two schedules:
 
-  - Every hour, via `Manfrod.Workers.RetrospectionWorker` (`process_all_buckets/1`):
+  - Every 3 hours, via `Manfrod.Workers.RetrospectionWorker` (`process_all_buckets/1`):
     merges exact 1:1 duplicates mechanically (`merge_exact_duplicates/0` — no
     LLM; verbatim copies are bookkeeping, not judgment), then per access
     bucket drains the slipbox in batches — each batch is an agent run over
     the unprocessed nodes plus a prioritized review sample (orphans →
     weakly connected → stalest → random).
   - Daily, via `Manfrod.Workers.GraphReviewWorker` (`review_processed_graph/1`):
-    a slipbox-independent deep review. The hourly run only reviews existing
+    a slipbox-independent deep review. The 3-hourly run only reviews existing
     nodes as a side effect of a bucket having new slipbox content, so a fully
     processed bucket never gets revisited otherwise and near-duplicates/orphans
     accumulate. This runs the same agent over a review sample of every
@@ -229,7 +229,7 @@ defmodule Manfrod.Memory.Retrospector do
 
   @doc """
   Deep review of the already-integrated graph, independent of slipbox
-  state. The hourly slipbox drain only reviews existing nodes opportunistically
+  state. The 3-hourly slipbox drain only reviews existing nodes opportunistically
   (as context for buckets that happen to have new slipbox content) — a bucket
   that's fully processed never gets revisited otherwise, so old near-duplicates
   and orphans accumulate. This closes that gap: it runs the same agent, with
@@ -368,7 +368,7 @@ defmodule Manfrod.Memory.Retrospector do
   end
 
   # Drain the bucket's slipbox in batches instead of processing a single
-  # batch per run — if a burst of conversations outpaces one hourly batch of
+  # batch per run — if a burst of conversations outpaces one 3-hourly batch of
   # 20, the backlog itself breeds duplicates (the extractor doesn't check
   # the graph, so the same fact re-extracted lands as a new slipbox node).
   # Capped at max_batches; stops early on agent error or when a batch makes
