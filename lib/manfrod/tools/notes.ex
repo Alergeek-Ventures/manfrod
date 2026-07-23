@@ -39,12 +39,14 @@ defmodule Manfrod.Tools.Notes do
           since: [
             type: :string,
             required: false,
-            doc: "Only notes on/after this date (YYYY-MM-DD, Europe/Warsaw calendar day). Omit for no lower bound."
+            doc:
+              "Only notes on/after this date (YYYY-MM-DD, Europe/Warsaw calendar day). Omit for no lower bound."
           ],
           until: [
             type: :string,
             required: false,
-            doc: "Only notes on/before this date (YYYY-MM-DD, Europe/Warsaw calendar day). Omit for no upper bound."
+            doc:
+              "Only notes on/before this date (YYYY-MM-DD, Europe/Warsaw calendar day). Omit for no upper bound."
           ],
           limit: [type: :integer, required: false, doc: "Max notes to return (default 50)"],
           order: [
@@ -158,7 +160,10 @@ defmodule Manfrod.Tools.Notes do
         {:ok, "No notes found in that range."}
       else
         order_label = if order == :asc, do: "oldest first", else: "newest first"
-        lines = Enum.map(nodes, fn node -> "- #{note_date(node)} [#{node.id}] #{node.content}" end)
+
+        lines =
+          Enum.map(nodes, fn node -> "- #{note_date(node)} [#{node.id}] #{node.content}" end)
+
         {:ok, "Found #{length(nodes)} notes (#{order_label}):\n#{Enum.join(lines, "\n")}"}
       end
     else
