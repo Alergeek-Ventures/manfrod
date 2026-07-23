@@ -247,6 +247,56 @@ defmodule Manfrod.MemoryTest do
     end
   end
 
+  describe "list_nodes_by_date/2" do
+    defp insert_node_at!(content, %DateTime{} = dt, access \\ ["internal"]) do
+      naive = dt |> DateTime.to_naive() |> NaiveDateTime.truncate(:second)
+
+      Repo.insert!(%Manfrod.Memory.Node{
+        user_id: test_user_id(),
+        content: content,
+        access: access,
+        inserted_at: naive,
+        updated_at: naive
+      })
+    end
+
+    test "orders newest first by default, oldest first with order: :asc" do
+      old = insert_node_at!("old", ~U[2026-01-01 10:00:00Z])
+      new = insert_node_at!("new", ~U[2026-01-10 10:00:00Z])
+
+      assert Enum.map(Memory.list_nodes_by_date(["internal"]), & &1.id) == [new.id, old.id]
+
+      assert Enum.map(Memory.list_nodes_by_date(["internal"], order: :asc), & &1.id) ==
+               [old.id, new.id]
+    end
+
+    test "filters by since/until bounds" do
+      _too_old = insert_node_at!("too old", ~U[2026-01-01 10:00:00Z])
+      in_range = insert_node_at!("in range", ~U[2026-01-05 10:00:00Z])
+      _too_new = insert_node_at!("too new", ~U[2026-01-10 10:00:00Z])
+
+      nodes =
+        Memory.list_nodes_by_date(["internal"],
+          since: ~N[2026-01-03 00:00:00],
+          until: ~N[2026-01-07 00:00:00]
+        )
+
+      assert Enum.map(nodes, & &1.id) == [in_range.id]
+    end
+
+    test "filters by readable access levels" do
+      visible = insert_node_at!("visible", ~U[2026-01-01 10:00:00Z], ["internal"])
+      _hidden = insert_node_at!("hidden", ~U[2026-01-01 10:00:00Z], ["external/other"])
+
+      assert Enum.map(Memory.list_nodes_by_date(["internal"]), & &1.id) == [visible.id]
+    end
+
+    test "respects limit" do
+      for _ <- 1..5, do: insert_node!()
+      assert length(Memory.list_nodes_by_date(["internal"], limit: 3)) == 3
+    end
+  end
+
   describe "list_processed_access_buckets/0" do
     test "includes an access bucket that has a processed node" do
       access = ["internal", "test-#{System.unique_integer([:positive])}"]
