@@ -76,8 +76,8 @@ config :manfrod, Oban,
     {Oban.Plugins.Lifeline, rescue_after: :timer.hours(4)},
     {Oban.Plugins.Cron,
      crontab: [
-       # Every 3 hours - memory retrospection (slipbox drain)
-       {"0 */3 * * *", Manfrod.Workers.RetrospectionWorker},
+       # Every 2 hours - memory retrospection (slipbox drain)
+       {"0 */2 * * *", Manfrod.Workers.RetrospectionWorker},
        # Daily at 2:10am - deep review of the already-integrated graph
        # (duplicates/orphans independent of slipbox state)
        {"10 2 * * *", Manfrod.Workers.GraphReviewWorker},
