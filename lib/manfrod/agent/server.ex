@@ -632,18 +632,42 @@ defmodule Manfrod.Agent.Server do
         # Final response - stop typing, persist, broadcast
         TypingRefresher.stop(refresher_pid)
 
-        response_text = ReqLLM.Response.text(response) || ""
+        response_text =
+          case ReqLLM.Response.text(response) do
+            text when is_binary(text) and text != "" ->
+              text
+
+            _ ->
+              Logger.warning(
+                "Agent.Server got a blank final response for user #{ctx.user_id} " <>
+                  "(session #{state.session_key}) after #{iter} iteration(s); " <>
+                  "the model ended its turn with tool calls but no closing text"
+              )
+
+              "Done ✅"
+          end
 
         # Persist assistant response to DB, attributed to this turn's
         # triggering author (known v1 limitation: in a shared thread, other
-        # participants' own extracted conversation won't include this reply)
-        {:ok, _assistant_msg} =
-          Memory.create_message(ctx.user_id, %{
-            role: "assistant",
-            content: response_text,
-            session_key: state.session_key,
-            received_at: DateTime.utc_now() |> DateTime.truncate(:second)
-          })
+        # participants' own extracted conversation won't include this reply).
+        # Never let a persistence failure take down the whole session (and
+        # with it, any reply to the user) — log and carry on with the
+        # in-memory response instead.
+        case Memory.create_message(ctx.user_id, %{
+               role: "assistant",
+               content: response_text,
+               session_key: state.session_key,
+               received_at: DateTime.utc_now() |> DateTime.truncate(:second)
+             }) do
+          {:ok, _assistant_msg} ->
+            :ok
+
+          {:error, changeset} ->
+            Logger.error(
+              "Agent.Server failed to persist assistant message for user #{ctx.user_id}: " <>
+                inspect(changeset.errors)
+            )
+        end
 
         # Add to conversation history
         assistant_msg = ReqLLM.Context.assistant(response_text)
