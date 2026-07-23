@@ -297,6 +297,110 @@ defmodule Manfrod.MemoryTest do
     end
   end
 
+  # Regression coverage for the Retrospector bug: a shared access bucket can
+  # hold nodes authored by several different users, since user_id is
+  # provenance, not access control. The plain (non-"_accessible"/"_by_access")
+  # functions below only ever see one author's slice — that's intentional for
+  # their real callers (personal graph views), but the Retrospector was
+  # wrongly using them scoped to one arbitrary "representative" user_id for
+  # a whole bucket, making everyone else's nodes invisible to get_node,
+  # mark_processed, etc. even though they were being shown to the agent via
+  # properly access-scoped listings elsewhere (slipbox, find_similar).
+  describe "multi-author access bucket visibility" do
+    test "get_node_accessible/2 sees nodes regardless of author, unlike get_node/2" do
+      author_a = insert_user!()
+      author_b = insert_user!()
+
+      {:ok, node} =
+        Memory.create_node(author_a.id, ["internal"], node_attrs(%{content: "from author A"}))
+
+      assert Memory.get_node_accessible(["internal"], node.id).id == node.id
+      assert Memory.get_node(author_b.id, node.id) == nil
+    end
+
+    test "mark_processed_accessible/2 marks a node authored by someone else" do
+      author_a = insert_user!()
+      {:ok, node} = Memory.create_node(author_a.id, ["internal"], node_attrs())
+
+      assert :ok = Memory.mark_processed_accessible(["internal"], node.id)
+      refute is_nil(Memory.get_node(author_a.id, node.id).processed_at)
+    end
+
+    test "mark_processed_accessible/2 returns not_found outside the access scope" do
+      author_a = insert_user!()
+      {:ok, node} = Memory.create_node(author_a.id, ["external/other"], node_attrs())
+
+      assert {:error, :not_found} = Memory.mark_processed_accessible(["internal"], node.id)
+    end
+
+    test "delete_link_accessible/3 deletes a link between nodes from different authors" do
+      author_a = insert_user!()
+      author_b = insert_user!()
+      {:ok, node_a} = Memory.create_node(author_a.id, ["internal"], node_attrs())
+      {:ok, node_b} = Memory.create_node(author_b.id, ["internal"], node_attrs())
+      {:ok, _link} = Memory.create_link(author_a.id, node_a.id, node_b.id)
+
+      assert {:ok, _link} = Memory.delete_link_accessible(["internal"], node_a.id, node_b.id)
+      assert Memory.get_node_links(author_a.id, node_a.id) == []
+    end
+
+    test "get_node_links_with_context_accessible/2 sees links regardless of author" do
+      author_a = insert_user!()
+      author_b = insert_user!()
+      {:ok, node_a} = Memory.create_node(author_a.id, ["internal"], node_attrs())
+      {:ok, node_b} = Memory.create_node(author_b.id, ["internal"], node_attrs())
+      {:ok, _link} = Memory.create_link(author_a.id, node_a.id, node_b.id)
+
+      linked = Memory.get_node_links_with_context_accessible(["internal"], node_a.id)
+      assert Enum.map(linked, fn {n, _ctx} -> n.id end) == [node_b.id]
+    end
+
+    test "get_orphan_nodes_by_access/2 includes orphans from every author in the bucket" do
+      author_a = insert_user!()
+      author_b = insert_user!()
+
+      {:ok, orphan_a} =
+        Memory.create_node(author_a.id, ["internal"], node_attrs(%{processed_at: now()}))
+
+      {:ok, orphan_b} =
+        Memory.create_node(author_b.id, ["internal"], node_attrs(%{processed_at: now()}))
+
+      ids = Memory.get_orphan_nodes_by_access(["internal"]) |> Enum.map(& &1.id)
+      assert orphan_a.id in ids
+      assert orphan_b.id in ids
+    end
+
+    test "get_random_nodes_by_access/2 and get_stalest_nodes_by_access/2 include every author" do
+      author_a = insert_user!()
+      author_b = insert_user!()
+
+      {:ok, node_a} =
+        Memory.create_node(author_a.id, ["internal"], node_attrs(%{processed_at: now()}))
+
+      {:ok, node_b} =
+        Memory.create_node(author_b.id, ["internal"], node_attrs(%{processed_at: now()}))
+
+      random_ids = Memory.get_random_nodes_by_access(["internal"], 10) |> Enum.map(& &1.id)
+      stale_ids = Memory.get_stalest_nodes_by_access(["internal"]) |> Enum.map(& &1.id)
+
+      assert node_a.id in random_ids
+      assert node_b.id in random_ids
+      assert node_a.id in stale_ids
+      assert node_b.id in stale_ids
+    end
+
+    test "graph_stats_by_access/1 counts nodes from every author in the bucket" do
+      author_a = insert_user!()
+      author_b = insert_user!()
+      Memory.create_node(author_a.id, ["internal"], node_attrs())
+      Memory.create_node(author_b.id, ["internal"], node_attrs())
+
+      assert Memory.graph_stats_by_access(["internal"]).total_nodes == 2
+    end
+  end
+
+  defp now, do: DateTime.utc_now() |> DateTime.truncate(:second)
+
   describe "list_processed_access_buckets/0" do
     test "includes an access bucket that has a processed node" do
       access = ["internal", "test-#{System.unique_integer([:positive])}"]

@@ -312,6 +312,32 @@ defmodule Manfrod.Memory do
   end
 
   @doc """
+  Mark a node as processed, scoped by readable access levels instead of a
+  single author's `user_id` — for callers (like the Retrospector) operating
+  on a shared access bucket rather than one person's notes.
+  """
+  def mark_processed_accessible(readable_levels, node_id) do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    {count, _} =
+      from(n in Node, where: n.id == ^node_id)
+      |> where(^Access.dynamic_where(readable_levels))
+      |> Repo.update_all(set: [processed_at: now])
+
+    if count > 0 do
+      Events.broadcast(:memory_node_processed, %{
+        user_id: nil,
+        source: :memory,
+        meta: %{node_id: node_id}
+      })
+
+      :ok
+    else
+      {:error, :not_found}
+    end
+  end
+
+  @doc """
   Update a node's content and re-embed it, scoped to a user.
   Preserves the node's ID, links, and provenance.
   Returns {:ok, node} or {:error, :not_found} or {:error, changeset}.
@@ -495,6 +521,42 @@ defmodule Manfrod.Memory do
   end
 
   @doc """
+  Delete a link between two nodes, scoped by readable access levels instead
+  of a single author's `user_id` — see `mark_processed_accessible/2`.
+  Returns {:ok, link} or {:error, :not_found}.
+  """
+  def delete_link_accessible(readable_levels, node_a_id, node_b_id) do
+    {a, b} = if node_a_id < node_b_id, do: {node_a_id, node_b_id}, else: {node_b_id, node_a_id}
+
+    accessible_ids =
+      from(n in Node, where: n.id in ^[a, b])
+      |> where(^Access.dynamic_where(readable_levels))
+      |> select([n], n.id)
+      |> Repo.all()
+      |> MapSet.new()
+
+    if MapSet.size(accessible_ids) == 2 do
+      case Repo.get_by(Link, node_a_id: a, node_b_id: b) do
+        nil ->
+          {:error, :not_found}
+
+        link ->
+          Repo.delete(link)
+
+          Events.broadcast(:memory_link_deleted, %{
+            user_id: nil,
+            source: :memory,
+            meta: %{node_a_id: a, node_b_id: b}
+          })
+
+          {:ok, link}
+      end
+    else
+      {:error, :not_found}
+    end
+  end
+
+  @doc """
   Get all linked nodes for a given node, scoped to a user.
   Returns a list of nodes that are directly connected.
   """
@@ -543,11 +605,41 @@ defmodule Manfrod.Memory do
   end
 
   @doc """
+  Get all linked nodes for a given node with link context, scoped by
+  readable access levels instead of a single author's `user_id` — see
+  `mark_processed_accessible/2`.
+  """
+  def get_node_links_with_context_accessible(readable_levels, node_id) do
+    from(n in Node,
+      join: l in Link,
+      on:
+        (l.node_a_id == ^node_id and l.node_b_id == n.id) or
+          (l.node_b_id == ^node_id and l.node_a_id == n.id),
+      where: ^Access.dynamic_where(readable_levels),
+      select: {n, l.context},
+      distinct: n.id
+    )
+    |> Repo.all()
+  end
+
+  @doc """
   Get a random sample of processed nodes from the user's graph.
   """
   def get_random_nodes(user_id, limit \\ 10) do
     Node
     |> where([n], n.user_id == ^user_id and not is_nil(n.processed_at))
+    |> order_by(fragment("RANDOM()"))
+    |> limit(^limit)
+    |> Repo.all()
+  end
+
+  @doc """
+  Get a random sample of processed nodes for an access bucket instead of a
+  single author's `user_id` — see `mark_processed_accessible/2`.
+  """
+  def get_random_nodes_by_access(access, limit \\ 10) do
+    Node
+    |> where([n], n.access == ^access and not is_nil(n.processed_at))
     |> order_by(fragment("RANDOM()"))
     |> limit(^limit)
     |> Repo.all()
@@ -568,7 +660,18 @@ defmodule Manfrod.Memory do
     * `:link_to_note_ratio` - Total links / total nodes (0.0 if no nodes)
   """
   def graph_stats(user_id \\ nil) do
-    scoped_nodes = scoped_nodes_query(user_id)
+    compute_graph_stats(scoped_nodes_query(user_id))
+  end
+
+  @doc """
+  Graph health statistics for one access bucket instead of one author's
+  `user_id` — see `mark_processed_accessible/2`.
+  """
+  def graph_stats_by_access(access) do
+    compute_graph_stats(from(n in Node, where: n.access == ^access))
+  end
+
+  defp compute_graph_stats(scoped_nodes) do
     total_nodes = Repo.aggregate(scoped_nodes, :count)
 
     scoped_node_ids = from(n in scoped_nodes, select: n.id)
@@ -677,6 +780,62 @@ defmodule Manfrod.Memory do
 
     Node
     |> where([n], n.user_id == ^user_id and not is_nil(n.processed_at))
+    |> order_by([n], asc: n.inserted_at)
+    |> limit(^limit)
+    |> Repo.all()
+  end
+
+  @doc """
+  Get processed nodes with 0 links (orphans) for an access bucket instead
+  of a single author's `user_id` — see `mark_processed_accessible/2`.
+  """
+  def get_orphan_nodes_by_access(access, opts \\ []) do
+    limit = Keyword.get(opts, :limit, 25)
+
+    from(n in Node,
+      where: n.access == ^access and not is_nil(n.processed_at),
+      left_join: la in Link,
+      on: la.node_a_id == n.id,
+      left_join: lb in Link,
+      on: lb.node_b_id == n.id,
+      where: is_nil(la.id) and is_nil(lb.id),
+      order_by: [asc: n.inserted_at],
+      limit: ^limit
+    )
+    |> Repo.all()
+  end
+
+  @doc """
+  Get processed nodes with exactly 1 link (weakly connected) for an access
+  bucket instead of a single author's `user_id` — see
+  `mark_processed_accessible/2`.
+  """
+  def get_weakly_connected_nodes_by_access(access, opts \\ []) do
+    limit = Keyword.get(opts, :limit, 25)
+
+    from(n in Node,
+      where: n.access == ^access and not is_nil(n.processed_at),
+      left_join: la in Link,
+      on: la.node_a_id == n.id,
+      left_join: lb in Link,
+      on: lb.node_b_id == n.id,
+      group_by: n.id,
+      having: count(la.id, :distinct) + count(lb.id, :distinct) == 1,
+      order_by: [asc: n.inserted_at],
+      limit: ^limit
+    )
+    |> Repo.all()
+  end
+
+  @doc """
+  Get the oldest processed nodes for an access bucket instead of a single
+  author's `user_id` — see `mark_processed_accessible/2`.
+  """
+  def get_stalest_nodes_by_access(access, opts \\ []) do
+    limit = Keyword.get(opts, :limit, 25)
+
+    Node
+    |> where([n], n.access == ^access and not is_nil(n.processed_at))
     |> order_by([n], asc: n.inserted_at)
     |> limit(^limit)
     |> Repo.all()
