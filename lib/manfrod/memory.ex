@@ -22,10 +22,12 @@ defmodule Manfrod.Memory do
 
   alias Manfrod.Memory.{
     Access,
+    ChannelMapping,
     Conversation,
     Message,
     Node,
     Link,
+    Project,
     QueryExpander,
     RecurringReminder
   }
@@ -844,6 +846,14 @@ defmodule Manfrod.Memory do
   # --- Graph Visualization ---
 
   @doc """
+  List all projects, ordered by name. Used to populate the admin graph
+  panel's project filter.
+  """
+  def list_projects do
+    Repo.all(from p in Project, order_by: p.name)
+  end
+
+  @doc """
   Get the whole graph for visualization — single shared graph across all users.
 
   Returns a map with nodes and edges suitable for graph rendering.
@@ -852,10 +862,17 @@ defmodule Manfrod.Memory do
 
     * `:filter` - Filter nodes: `:all` (default), `:processed`, or `:slipbox`
     * `:access_level` - Optional access level used to scope the displayed subgraph
+    * `:project_id` - Optional project to scope the displayed subgraph to. A
+      node belongs to a project either via its source conversation's Slack
+      channel mapping (covers internal and client project channels alike) or,
+      for nodes without conversation provenance (e.g. retrospector-synthesized
+      insights), via an `external/<client_id>` access entry matching one of
+      the project's mappings.
   """
   def get_graph_data(opts \\ []) do
     filter = Keyword.get(opts, :filter, :all)
     access_level = Keyword.get(opts, :access_level)
+    project_id = Keyword.get(opts, :project_id)
 
     # Fetch nodes based on filter
     nodes_query =
@@ -873,6 +890,13 @@ defmodule Manfrod.Memory do
     nodes_query =
       if access_level do
         where(nodes_query, ^Access.dynamic_where([access_level]))
+      else
+        nodes_query
+      end
+
+    nodes_query =
+      if project_id do
+        filter_by_project(nodes_query, project_id)
       else
         nodes_query
       end
@@ -914,6 +938,30 @@ defmodule Manfrod.Memory do
       end)
 
     %{nodes: nodes_data, edges: edges}
+  end
+
+  # Scope a node query to one project. Joins through the node's conversation
+  # to that conversation's channel mapping (covers both client and
+  # internal-only project channels), OR-ed with an access-array match on the
+  # project's client-facing level (catches nodes with no conversation
+  # provenance, e.g. insights the retrospector creates directly).
+  defp filter_by_project(query, project_id) do
+    client_ids =
+      Repo.all(
+        from cm in ChannelMapping,
+          where: cm.project_id == ^project_id and not is_nil(cm.client_id),
+          select: cm.client_id,
+          distinct: true
+      )
+
+    external_levels = Enum.map(client_ids, &"external/#{&1}")
+
+    from n in query,
+      left_join: c in Conversation,
+      on: c.id == n.conversation_id,
+      left_join: cm in ChannelMapping,
+      on: cm.slack_channel_id == c.slack_channel_id and cm.status == "active",
+      where: cm.project_id == ^project_id or fragment("? && ?", n.access, ^external_levels)
   end
 
   # --- Hybrid Search with Query Expansion ---
