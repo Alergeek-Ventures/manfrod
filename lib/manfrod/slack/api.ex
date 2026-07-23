@@ -212,6 +212,39 @@ defmodule Manfrod.Slack.API do
     })
   end
 
+  @doc """
+  List Slack channels the bot can see (single page, up to `limit` channels).
+
+  Returns `{:ok, channels}` where each channel is Slack's raw
+  `conversations.list` entry (`"id"`, `"name"`, `"is_private"`,
+  `"is_archived"`, `"is_member"`, ...), or `{:error, reason}`.
+  """
+  @spec list_channels(String.t(), keyword()) :: {:ok, [map()]} | {:error, term()}
+  def list_channels(token, opts \\ []) do
+    params = %{
+      types: Keyword.get(opts, :types, "public_channel,private_channel"),
+      limit: Keyword.get(opts, :limit, 200),
+      exclude_archived: true
+    }
+
+    case get("conversations.list", token, params) do
+      {:ok, %{"channels" => channels}} -> {:ok, channels}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @doc """
+  Delete a message from a channel. Slack only allows deleting messages
+  posted by the same bot token (without extra admin scopes), so `channel`
+  and `ts` must identify a message this bot itself posted.
+
+  Returns `{:ok, body}` or `{:error, reason}`.
+  """
+  @spec delete_message(String.t(), String.t(), String.t()) :: {:ok, map()} | {:error, term()}
+  def delete_message(token, channel, ts) do
+    post("chat.delete", token, %{channel: channel, ts: ts})
+  end
+
   defp parse_retry_after(nil), do: 1
   defp parse_retry_after(value) when is_binary(value), do: String.to_integer(value)
 end
