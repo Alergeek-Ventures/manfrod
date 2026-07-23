@@ -160,7 +160,9 @@ defmodule Manfrod.LLM do
             latency_ms: latency_ms,
             input_tokens: usage[:input_tokens],
             output_tokens: usage[:output_tokens],
-            total_tokens: usage[:total_tokens]
+            total_tokens: usage[:total_tokens],
+            cached_tokens: usage[:cached_tokens],
+            cache_creation_tokens: usage[:cache_creation_tokens]
           }
         })
 
@@ -278,7 +280,9 @@ defmodule Manfrod.LLM do
             latency_ms: latency_ms,
             input_tokens: usage[:input_tokens],
             output_tokens: usage[:output_tokens],
-            total_tokens: usage[:total_tokens]
+            total_tokens: usage[:total_tokens],
+            cached_tokens: usage[:cached_tokens],
+            cache_creation_tokens: usage[:cache_creation_tokens]
           }
         })
 
