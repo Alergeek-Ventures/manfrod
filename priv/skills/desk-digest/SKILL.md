@@ -2,7 +2,7 @@
 name: desk-digest
 description: Daily 18:00 digest of tomorrow's desk bookings and map, posted automatically to a fixed channel. Not for on-demand use via use_skill — SkillSchedulerWorker/SkillRunner triggers this autonomously and feeds you this file's body directly as instructions.
 cron: "0 18 * * *"
-channel: "C0BFLHF7TQ8"
+channel: "C038VPMEV8C"
 ---
 
 # Desk digest (cron skill)
