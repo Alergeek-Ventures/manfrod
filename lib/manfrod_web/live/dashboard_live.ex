@@ -31,7 +31,7 @@ defmodule ManfrodWeb.DashboardLive do
         </header>
 
         <%!-- Summary Cards --%>
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+        <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
           <.metric_card
             label="Total LLM Calls"
             value={@metrics.totals.free_calls + @metrics.totals.paid_calls}
@@ -41,6 +41,11 @@ defmodule ManfrodWeb.DashboardLive do
             label="Total Tokens"
             value={format_number(@metrics.totals.input_tokens + @metrics.totals.output_tokens)}
             sublabel={"#{format_number(@metrics.totals.input_tokens)} in / #{format_number(@metrics.totals.output_tokens)} out"}
+          />
+          <.metric_card
+            label="Cached Input"
+            value={format_number(@metrics.totals.cached_tokens)}
+            sublabel={cache_hit_rate(@metrics.totals)}
           />
           <.metric_card
             label="Messages"
@@ -74,6 +79,18 @@ defmodule ManfrodWeb.DashboardLive do
               bars={[
                 %{key: :input_tokens, color: "bg-blue-500", label: "Input"},
                 %{key: :output_tokens, color: "bg-purple-500", label: "Output"}
+              ]}
+              format={:tokens}
+            />
+          </.chart_card>
+
+          <%!-- Prompt Cache Chart --%>
+          <.chart_card title="Prompt Cache">
+            <.bar_chart
+              data={@metrics.daily}
+              bars={[
+                %{key: :cached_tokens, color: "bg-emerald-500", label: "Cache read"},
+                %{key: :cache_creation_tokens, color: "bg-lime-500", label: "Cache write"}
               ]}
               format={:tokens}
             />
@@ -208,6 +225,12 @@ defmodule ManfrodWeb.DashboardLive do
 
   defp format_value(value, :tokens), do: format_number(value)
   defp format_value(value, _), do: to_string(value)
+
+  defp cache_hit_rate(%{input_tokens: input, cached_tokens: cached}) when input > 0 do
+    "#{Float.round(cached / input * 100, 1)}% of input"
+  end
+
+  defp cache_hit_rate(_totals), do: "no input yet"
 
   defp format_day_total(day, bars, format) do
     total = Enum.sum(Enum.map(bars, fn bar -> Map.get(day, bar.key, 0) end))

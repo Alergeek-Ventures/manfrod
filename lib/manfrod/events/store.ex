@@ -259,6 +259,8 @@ defmodule Manfrod.Events.Store do
   - `:fallbacks` - fallback events
   - `:input_tokens` - total input tokens
   - `:output_tokens` - total output tokens
+  - `:cached_tokens` - input tokens served from a prompt cache (subset of input_tokens)
+  - `:cache_creation_tokens` - input tokens spent writing to a prompt cache
   - `:messages_received` - user messages
   - `:messages_sent` - assistant responses
   - `:tool_calls` - action_started events
@@ -296,6 +298,9 @@ defmodule Manfrod.Events.Store do
           fallbacks: count_by_type(day_events, "llm_fallback"),
           input_tokens: sum_meta_field(day_events, "llm_call_succeeded", "input_tokens"),
           output_tokens: sum_meta_field(day_events, "llm_call_succeeded", "output_tokens"),
+          cached_tokens: sum_meta_field(day_events, "llm_call_succeeded", "cached_tokens"),
+          cache_creation_tokens:
+            sum_meta_field(day_events, "llm_call_succeeded", "cache_creation_tokens"),
           messages_received: count_by_type(day_events, "message_received"),
           messages_sent: count_by_type(day_events, "responding"),
           tool_calls: count_by_type(day_events, "action_started")
@@ -314,6 +319,8 @@ defmodule Manfrod.Events.Store do
       fallbacks: Enum.sum(Enum.map(daily, & &1.fallbacks)),
       input_tokens: Enum.sum(Enum.map(daily, & &1.input_tokens)),
       output_tokens: Enum.sum(Enum.map(daily, & &1.output_tokens)),
+      cached_tokens: Enum.sum(Enum.map(daily, & &1.cached_tokens)),
+      cache_creation_tokens: Enum.sum(Enum.map(daily, & &1.cache_creation_tokens)),
       messages_received: Enum.sum(Enum.map(daily, & &1.messages_received)),
       messages_sent: Enum.sum(Enum.map(daily, & &1.messages_sent)),
       tool_calls: Enum.sum(Enum.map(daily, & &1.tool_calls))
@@ -359,6 +366,8 @@ defmodule Manfrod.Events.Store do
           fallbacks: 0,
           input_tokens: 0,
           output_tokens: 0,
+          cached_tokens: 0,
+          cache_creation_tokens: 0,
           messages_received: 0,
           messages_sent: 0,
           tool_calls: 0
