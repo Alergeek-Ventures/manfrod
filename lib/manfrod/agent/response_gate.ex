@@ -2,7 +2,8 @@ defmodule Manfrod.Agent.ResponseGate do
   @moduledoc """
   Cheap LLM gate deciding how the agent should handle a plain
   (non-@mention, non-DM) thread reply in an already-active shared session:
-  reply in full, just react with an emoji, or do nothing.
+  reply in full, just react with an emoji, react AND reply in full, or do
+  nothing.
 
   Explicit @mentions and DMs never go through this gate — they always get a
   full response, since those are unambiguous direct address. This only
@@ -31,19 +32,25 @@ defmodule Manfrod.Agent.ResponseGate do
   - "react:<emoji>" - add ONLY an emoji reaction, no text. Use this fairly
     often — whenever a lightweight nod fits better than a full reply or
     staying silent, e.g. a message is funny, impressive, a clear
-    success/completion, or otherwise worth a small acknowledgement. If
-    someone says something nice, complimentary, or appreciative about the
-    assistant itself, prefer this over "respond" and pick a warm emoji like
-    "heart" or "smiling_face_with_3_hearts". <emoji> must be exactly one of:
-    #{Enum.join(@reaction_emojis, ", ")}.
+    success/completion, or otherwise worth a small acknowledgement.
+  - "react_and_respond:<emoji>" - add an emoji reaction AND reply with a
+    full text message. Use this when the message both calls for a real
+    reply and clearly deserves an emoji on top — most notably when someone
+    says something nice, complimentary, or appreciative about the
+    assistant itself: react with a warm emoji like "heart" or
+    "smiling_face_with_3_hearts" and also reply.
   - "ignore" - do nothing. Still the right choice for ordinary
     back-and-forth between people that isn't directed at or about the
     assistant and doesn't call for any acknowledgement.
 
-  Respond with exactly one line: "respond", "react:<emoji>", or "ignore".
+  For "react:<emoji>" and "react_and_respond:<emoji>", <emoji> must be
+  exactly one of: #{Enum.join(@reaction_emojis, ", ")}.
+
+  Respond with exactly one line: "respond", "react:<emoji>",
+  "react_and_respond:<emoji>", or "ignore".
   """
 
-  @type decision :: :respond | {:react, String.t()} | :ignore
+  @type decision :: :respond | {:react, String.t()} | {:react_and_respond, String.t()} | :ignore
 
   @doc """
   Decide how to handle new message(s), given recent conversation lines.
@@ -98,16 +105,25 @@ defmodule Manfrod.Agent.ResponseGate do
 
   defp do_parse_decision("respond" <> _), do: :respond
 
-  defp do_parse_decision("react:" <> rest) do
-    emoji = rest |> String.trim() |> String.trim(":")
+  defp do_parse_decision("react_and_respond:" <> rest) do
+    case normalize_emoji(rest) do
+      {:ok, emoji} -> {:react_and_respond, emoji}
+      :error -> :respond
+    end
+  end
 
-    if emoji in @reaction_emojis do
-      {:react, emoji}
-    else
-      :ignore
+  defp do_parse_decision("react:" <> rest) do
+    case normalize_emoji(rest) do
+      {:ok, emoji} -> {:react, emoji}
+      :error -> :ignore
     end
   end
 
   defp do_parse_decision("ignore" <> _), do: :ignore
   defp do_parse_decision(_), do: :respond
+
+  defp normalize_emoji(rest) do
+    emoji = rest |> String.trim() |> String.trim(":")
+    if emoji in @reaction_emojis, do: {:ok, emoji}, else: :error
+  end
 end

@@ -415,6 +415,23 @@ defmodule Manfrod.Agent.Server do
 
           {:noreply, %{state | messages: messages}}
 
+        {:react_and_respond, emoji} ->
+          Logger.debug(
+            "Agent.Server: response gate chose to react (:#{emoji}:) and respond for session #{state.session_key}"
+          )
+
+          Events.broadcast(
+            :reacted,
+            Map.put(event_ctx, :meta, %{emoji: emoji, ts: event_ctx.slack_ts})
+          )
+
+          Events.broadcast(:thinking, event_ctx)
+
+          {:ok, refresher_pid} = TypingRefresher.start(event_ctx.user_id, event_ctx)
+
+          send(self(), {:call_llm, event_ctx, 0, refresher_pid})
+          {:noreply, %{state | messages: messages}}
+
         :ignore ->
           Logger.debug(
             "Agent.Server: response gate declined to reply for session #{state.session_key}"
