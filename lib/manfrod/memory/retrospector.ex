@@ -257,7 +257,7 @@ defmodule Manfrod.Memory.Retrospector do
       Enum.each(buckets, fn access_bucket ->
         readable_levels = Enum.uniq(["internal" | access_bucket])
         user_id = find_bucket_user_id(access_bucket)
-        review_sample = user_id && build_review_sample(user_id, budget)
+        review_sample = user_id && build_review_sample(access_bucket, budget)
 
         cond do
           is_nil(user_id) ->
@@ -397,7 +397,7 @@ defmodule Manfrod.Memory.Retrospector do
             "nodes for bucket #{inspect(write_access)}"
         )
 
-        review_sample = build_review_sample(user_id, review_budget)
+        review_sample = build_review_sample(write_access, review_budget)
         batch_ids = Enum.map(slipbox, & &1.id)
 
         case run_agent(
@@ -437,14 +437,24 @@ defmodule Manfrod.Memory.Retrospector do
   # Build a review sample using priority cascade:
   # orphans → weakly connected → stalest → random
   # Each tier fills remaining budget, deduplicating by node ID.
-  defp build_review_sample(user_id, budget) do
-    orphans = Memory.get_orphan_nodes(user_id, limit: budget)
+  #
+  # Scoped by the bucket's access array, not by a single author's user_id —
+  # a bucket written to by several people would otherwise only ever surface
+  # one arbitrary person's nodes (see find_bucket_user_id/1), leaving the
+  # rest invisible to review even though they're shown to the agent
+  # elsewhere (slipbox listing, find_similar) via proper access scoping.
+  defp build_review_sample(access, budget) do
+    orphans = Memory.get_orphan_nodes_by_access(access, limit: budget)
     seen = MapSet.new(orphans, & &1.id)
     remaining = budget - length(orphans)
 
     {weak, seen, remaining} =
       if remaining > 0 do
-        nodes = Memory.get_weakly_connected_nodes(user_id, limit: remaining + MapSet.size(seen))
+        nodes =
+          Memory.get_weakly_connected_nodes_by_access(access,
+            limit: remaining + MapSet.size(seen)
+          )
+
         new = Enum.reject(nodes, fn n -> MapSet.member?(seen, n.id) end) |> Enum.take(remaining)
         {new, MapSet.union(seen, MapSet.new(new, & &1.id)), remaining - length(new)}
       else
@@ -453,7 +463,7 @@ defmodule Manfrod.Memory.Retrospector do
 
     {stale, seen, remaining} =
       if remaining > 0 do
-        nodes = Memory.get_stalest_nodes(user_id, limit: remaining + MapSet.size(seen))
+        nodes = Memory.get_stalest_nodes_by_access(access, limit: remaining + MapSet.size(seen))
         new = Enum.reject(nodes, fn n -> MapSet.member?(seen, n.id) end) |> Enum.take(remaining)
         {new, MapSet.union(seen, MapSet.new(new, & &1.id)), remaining - length(new)}
       else
@@ -462,7 +472,7 @@ defmodule Manfrod.Memory.Retrospector do
 
     random =
       if remaining > 0 do
-        nodes = Memory.get_random_nodes(user_id, remaining + MapSet.size(seen))
+        nodes = Memory.get_random_nodes_by_access(access, remaining + MapSet.size(seen))
         Enum.reject(nodes, fn n -> MapSet.member?(seen, n.id) end) |> Enum.take(remaining)
       else
         []
@@ -758,13 +768,19 @@ defmodule Manfrod.Memory.Retrospector do
   # Tools
   # ---------------------------------------------------------------------------
 
-  # Tool definitions — user_id is baked into closures for search/create
+  # Tool definitions — readable_levels/write_access (the shared access
+  # bucket) are baked into closures for lookups/mutations, not the run's
+  # representative user_id: a bucket written to by several people has nodes
+  # under several different user_ids, and user_id is provenance, not access
+  # control (see Memory's moduledoc). Scoping tools by it instead of access
+  # made most of a bucket's own nodes invisible to get_node/update_node/
+  # mark_processed/etc. — the model would see a real ID in the slipbox
+  # listing or a find_similar neighbor (both correctly access-scoped) and
+  # then get "not found" trying to act on it.
   defp tools(user_id, readable_levels, write_access) do
     # New nodes are attributed to a dedicated system identity, not the
     # bucket's representative user_id — the latter can shift between runs
-    # (see find_bucket_user_id/1), which would orphan a node's provenance
-    # from a future run's get_node/update_node (both scoped by exact
-    # user_id match).
+    # (see find_bucket_user_id/1), which would orphan a node's provenance.
     create_user_id = system_user_id()
 
     [
@@ -784,7 +800,7 @@ defmodule Manfrod.Memory.Retrospector do
         parameter_schema: [
           id: [type: :string, required: true, doc: "Node UUID"]
         ],
-        callback: fn args -> tool_get_node(user_id, args) end
+        callback: fn args -> tool_get_node(readable_levels, args) end
       ),
       ReqLLM.Tool.new!(
         name: "find_similar",
@@ -821,7 +837,7 @@ defmodule Manfrod.Memory.Retrospector do
             doc: "The new content for the node (1-2 sentences)"
           ]
         ],
-        callback: fn args -> tool_update_node(user_id, args) end
+        callback: fn args -> tool_update_node(readable_levels, args) end
       ),
       ReqLLM.Tool.new!(
         name: "create_link",
@@ -844,7 +860,7 @@ defmodule Manfrod.Memory.Retrospector do
         parameter_schema: [
           id: [type: :string, required: true, doc: "Node UUID to mark as processed"]
         ],
-        callback: fn args -> tool_mark_processed(user_id, args) end
+        callback: fn args -> tool_mark_processed(readable_levels, args) end
       ),
       ReqLLM.Tool.new!(
         name: "delete_node",
@@ -853,7 +869,7 @@ defmodule Manfrod.Memory.Retrospector do
         parameter_schema: [
           id: [type: :string, required: true, doc: "Node UUID to delete"]
         ],
-        callback: fn args -> tool_delete_node(user_id, args) end
+        callback: fn args -> tool_delete_node(readable_levels, args) end
       ),
       ReqLLM.Tool.new!(
         name: "delete_link",
@@ -862,7 +878,7 @@ defmodule Manfrod.Memory.Retrospector do
           node_a_id: [type: :string, required: true, doc: "First node UUID"],
           node_b_id: [type: :string, required: true, doc: "Second node UUID"]
         ],
-        callback: fn args -> tool_delete_link(user_id, args) end
+        callback: fn args -> tool_delete_link(readable_levels, args) end
       ),
       ReqLLM.Tool.new!(
         name: "list_links",
@@ -871,14 +887,14 @@ defmodule Manfrod.Memory.Retrospector do
         parameter_schema: [
           id: [type: :string, required: true, doc: "Node UUID to get links for"]
         ],
-        callback: fn args -> tool_list_links(user_id, args) end
+        callback: fn args -> tool_list_links(readable_levels, args) end
       ),
       ReqLLM.Tool.new!(
         name: "graph_stats",
         description:
           "Get graph health statistics: total nodes, total links, slipbox count, orphan count (0 links), weakly connected count (1 link), and link-to-note ratio. Call this at the start of each session to understand graph health and prioritize work.",
         parameter_schema: [],
-        callback: fn args -> tool_graph_stats(user_id, args) end
+        callback: fn args -> tool_graph_stats(write_access, args) end
       )
     ] ++ WebSearch.definitions(%{})
   end
@@ -923,8 +939,8 @@ defmodule Manfrod.Memory.Retrospector do
     end
   end
 
-  defp tool_get_node(user_id, %{id: id}) do
-    case Memory.get_node(user_id, id) do
+  defp tool_get_node(readable_levels, %{id: id}) do
+    case Memory.get_node_accessible(readable_levels, id) do
       nil ->
         {:ok, "Node not found: #{id}"}
 
@@ -979,10 +995,13 @@ defmodule Manfrod.Memory.Retrospector do
     end
   end
 
-  defp tool_update_node(user_id, %{id: id, content: content}) do
+  defp tool_update_node(readable_levels, %{id: id, content: content}) do
     case Voyage.embed_query(content) do
       {:ok, embedding} ->
-        case Memory.update_node(user_id, id, %{content: content, embedding: embedding}) do
+        case Memory.update_node_accessible(readable_levels, id, %{
+               content: content,
+               embedding: embedding
+             }) do
           {:ok, _node} ->
             {:ok, "Updated node: #{id}"}
 
@@ -1010,13 +1029,15 @@ defmodule Manfrod.Memory.Retrospector do
     end
   end
 
-  defp tool_mark_processed(user_id, %{id: id}) do
-    Memory.mark_processed(user_id, id)
-    {:ok, "Marked #{id} as processed"}
+  defp tool_mark_processed(readable_levels, %{id: id}) do
+    case Memory.mark_processed_accessible(readable_levels, id) do
+      :ok -> {:ok, "Marked #{id} as processed"}
+      {:error, :not_found} -> {:ok, "Node not found: #{id}"}
+    end
   end
 
-  defp tool_delete_node(user_id, %{id: id}) do
-    case Memory.delete_node(user_id, id) do
+  defp tool_delete_node(readable_levels, %{id: id}) do
+    case Memory.delete_node_accessible(readable_levels, id) do
       {:ok, _node} ->
         {:ok, "Deleted node: #{id}"}
 
@@ -1025,8 +1046,8 @@ defmodule Manfrod.Memory.Retrospector do
     end
   end
 
-  defp tool_delete_link(user_id, %{node_a_id: a, node_b_id: b}) do
-    case Memory.delete_link(user_id, a, b) do
+  defp tool_delete_link(readable_levels, %{node_a_id: a, node_b_id: b}) do
+    case Memory.delete_link_accessible(readable_levels, a, b) do
       {:ok, _link} ->
         {:ok, "Deleted link: #{a} <-> #{b}"}
 
@@ -1035,8 +1056,8 @@ defmodule Manfrod.Memory.Retrospector do
     end
   end
 
-  defp tool_list_links(user_id, %{id: id}) do
-    linked = Memory.get_node_links_with_context(user_id, id)
+  defp tool_list_links(readable_levels, %{id: id}) do
+    linked = Memory.get_node_links_with_context_accessible(readable_levels, id)
 
     if linked == [] do
       {:ok, "Node #{id} has no links (orphan)."}
@@ -1053,8 +1074,8 @@ defmodule Manfrod.Memory.Retrospector do
     end
   end
 
-  defp tool_graph_stats(user_id, _args) do
-    stats = Memory.graph_stats(user_id)
+  defp tool_graph_stats(write_access, _args) do
+    stats = Memory.graph_stats_by_access(write_access)
 
     {:ok,
      """
