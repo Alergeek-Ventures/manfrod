@@ -175,7 +175,7 @@ defmodule Manfrod.Memory.Classifier do
          "create_memory",
          result,
          message,
-         _channel_id,
+         channel_id,
          _kind,
          write_access,
          _bot_token
@@ -188,7 +188,11 @@ defmodule Manfrod.Memory.Classifier do
     else
       case Voyage.embed_query(note) do
         {:ok, embedding} ->
-          Memory.create_node(user_id, write_access, %{content: note, embedding: embedding})
+          Memory.create_node(user_id, write_access, %{
+            content: note,
+            embedding: embedding,
+            project_id: project_id_for_channel(channel_id)
+          })
 
         {:error, reason} ->
           Logger.error("Classifier embed error: #{inspect(reason)}")
@@ -226,7 +230,13 @@ defmodule Manfrod.Memory.Classifier do
 
       case Voyage.embed_query(note) do
         {:ok, embedding} ->
-          case Memory.create_node(user_id, write_access, %{content: note, embedding: embedding}) do
+          node_attrs = %{
+            content: note,
+            embedding: embedding,
+            project_id: project_id_for_channel(channel_id)
+          }
+
+          case Memory.create_node(user_id, write_access, node_attrs) do
             {:ok, node} ->
               maybe_propose_absence_escalation(
                 channel_id,
@@ -275,7 +285,11 @@ defmodule Manfrod.Memory.Classifier do
          {:user, uid} when not is_nil(uid) <- {:user, user_id},
          {:ok, embedding} <- Voyage.embed_query(note),
          {:ok, node} <-
-           Memory.create_node(uid, write_access, %{content: note, embedding: embedding}) do
+           Memory.create_node(uid, write_access, %{
+             content: note,
+             embedding: embedding,
+             project_id: project_id_for_channel(channel_id)
+           }) do
       post_escalation_question(
         channel_id,
         original_ts,
@@ -597,6 +611,17 @@ defmodule Manfrod.Memory.Classifier do
     case Accounts.get_user_by_slack_id(slack_user_id) do
       nil -> nil
       user -> user.id
+    end
+  end
+
+  # Project attribution comes straight from the channel mapping — same source
+  # used to derive write_access — so a node's project is stamped at creation
+  # and never depends on downstream provenance (conversation_id) that may be
+  # missing.
+  defp project_id_for_channel(channel_id) do
+    case Access.get_active_mapping(channel_id) do
+      %{project_id: project_id} -> project_id
+      nil -> nil
     end
   end
 end

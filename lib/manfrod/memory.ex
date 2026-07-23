@@ -26,6 +26,7 @@ defmodule Manfrod.Memory do
     Message,
     Node,
     Link,
+    Project,
     QueryExpander,
     RecurringReminder
   }
@@ -202,17 +203,20 @@ defmodule Manfrod.Memory do
     * `:until` - only nodes inserted at or before this `%NaiveDateTime{}` (default: no upper bound)
     * `:limit` - maximum results (default: 50)
     * `:order` - `:desc` (default, newest first) or `:asc` (oldest first)
+    * `:project_id` - only nodes stamped with this project (default: no project scoping)
   """
   def list_nodes_by_date(readable_levels, opts \\ []) do
     since = Keyword.get(opts, :since)
     until = Keyword.get(opts, :until)
     limit = Keyword.get(opts, :limit, 50)
     order = Keyword.get(opts, :order, :desc)
+    project_id = Keyword.get(opts, :project_id)
 
     Node
     |> where(^Access.dynamic_where(readable_levels))
     |> where(^date_bound_where(:since, since))
     |> where(^date_bound_where(:until, until))
+    |> where(^project_bound_where(project_id))
     |> order_by([n], [{^order, n.inserted_at}])
     |> limit(^limit)
     |> Repo.all()
@@ -222,6 +226,9 @@ defmodule Manfrod.Memory do
   defp date_bound_where(:since, %NaiveDateTime{} = dt), do: dynamic([n], n.inserted_at >= ^dt)
   defp date_bound_where(:until, nil), do: dynamic(true)
   defp date_bound_where(:until, %NaiveDateTime{} = dt), do: dynamic([n], n.inserted_at <= ^dt)
+
+  defp project_bound_where(nil), do: dynamic(true)
+  defp project_bound_where(project_id), do: dynamic([n], n.project_id == ^project_id)
 
   @doc """
   Get all nodes in the slipbox (unprocessed) for a user.
@@ -841,6 +848,29 @@ defmodule Manfrod.Memory do
     |> Repo.all()
   end
 
+  @doc """
+  List all projects, ordered by name. Used to populate the admin graph
+  panel's project picker and the `list_projects` agent tool.
+  """
+  def list_projects do
+    Repo.all(from p in Project, order_by: p.name)
+  end
+
+  @doc """
+  Find a project by name or slug (case-insensitive). Tries an exact match
+  first, then falls back to a substring match on the name. Returns nil if
+  nothing matches. Used to resolve a user-named project to its id for
+  scoping note queries.
+  """
+  def find_project(query) when is_binary(query) do
+    needle = query |> String.trim() |> String.downcase()
+    projects = list_projects()
+
+    Enum.find(projects, fn p ->
+      String.downcase(p.slug) == needle or String.downcase(p.name) == needle
+    end) || Enum.find(projects, fn p -> String.contains?(String.downcase(p.name), needle) end)
+  end
+
   # --- Graph Visualization ---
 
   @doc """
@@ -852,10 +882,12 @@ defmodule Manfrod.Memory do
 
     * `:filter` - Filter nodes: `:all` (default), `:processed`, or `:slipbox`
     * `:access_level` - Optional access level used to scope the displayed subgraph
+    * `:project_id` - Optional project used to scope the displayed subgraph
   """
   def get_graph_data(opts \\ []) do
     filter = Keyword.get(opts, :filter, :all)
     access_level = Keyword.get(opts, :access_level)
+    project_id = Keyword.get(opts, :project_id)
 
     # Fetch nodes based on filter
     nodes_query =
@@ -876,6 +908,8 @@ defmodule Manfrod.Memory do
       else
         nodes_query
       end
+
+    nodes_query = where(nodes_query, ^project_bound_where(project_id))
 
     nodes = Repo.all(nodes_query)
     node_ids = Enum.map(nodes, & &1.id) |> MapSet.new()
@@ -935,11 +969,13 @@ defmodule Manfrod.Memory do
     * `:limit` - Maximum number of results (default: 10)
     * `:expand_query` - Whether to use query expansion (default: true)
     * `:rerank` - Whether to use Voyage reranker (default: true)
+    * `:project_id` - Only search nodes stamped with this project (default: no project scoping)
   """
   def search(user_id, readable_levels, query_text, opts \\ []) do
     limit = Keyword.get(opts, :limit, 10)
     expand_query? = Keyword.get(opts, :expand_query, true)
     rerank? = Keyword.get(opts, :rerank, true)
+    project_id = Keyword.get(opts, :project_id)
 
     # Step 1: Query expansion (always succeeds with fallback to original)
     {:ok, queries} =
@@ -954,10 +990,10 @@ defmodule Manfrod.Memory do
       Enum.flat_map(queries, fn query ->
         [
           Task.async(fn ->
-            {:vector, query, search_vector(user_id, readable_levels, query, limit)}
+            {:vector, query, search_vector(user_id, readable_levels, query, limit, project_id)}
           end),
           Task.async(fn ->
-            {:bm25, query, search_bm25(user_id, readable_levels, query, limit)}
+            {:bm25, query, search_bm25(user_id, readable_levels, query, limit, project_id)}
           end)
         ]
       end)
@@ -1034,10 +1070,10 @@ defmodule Manfrod.Memory do
   Search using only vector similarity (no query expansion), scoped to a user.
   Returns `[{node, distance}]` tuples sorted by distance ascending.
   """
-  def search_vector(user_id, readable_levels, query_text, limit \\ 10) do
+  def search_vector(user_id, readable_levels, query_text, limit \\ 10, project_id \\ nil) do
     case Manfrod.Voyage.embed_query(query_text) do
       {:ok, embedding} ->
-        vector_search_with_distance(user_id, readable_levels, embedding, limit)
+        vector_search_with_distance(user_id, readable_levels, embedding, limit, project_id)
 
       {:error, _} ->
         []
@@ -1081,17 +1117,18 @@ defmodule Manfrod.Memory do
   Search using only BM25 keyword matching, filtered by readable access levels.
   Returns list of nodes sorted by BM25 score descending.
   """
-  def search_bm25(user_id, readable_levels, query_text, limit \\ 10) do
-    bm25_search(user_id, readable_levels, query_text, limit)
+  def search_bm25(user_id, readable_levels, query_text, limit \\ 10, project_id \\ nil) do
+    bm25_search(user_id, readable_levels, query_text, limit, project_id)
   end
 
   # Vector search returning {node, distance} tuples, filtered by access only (single graph)
-  defp vector_search_with_distance(_user_id, readable_levels, embedding, limit) do
+  defp vector_search_with_distance(_user_id, readable_levels, embedding, limit, project_id) do
     vec = Pgvector.new(embedding)
 
     from(n in Node,
       where: not is_nil(n.embedding),
       where: ^Access.dynamic_where(readable_levels),
+      where: ^project_bound_where(project_id),
       select: {n, cosine_distance(n.embedding, ^vec)},
       order_by: cosine_distance(n.embedding, ^vec),
       limit: ^limit
@@ -1099,11 +1136,12 @@ defmodule Manfrod.Memory do
     |> Repo.all()
   end
 
-  defp bm25_search(_user_id, readable_levels, query_text, limit) do
+  defp bm25_search(_user_id, readable_levels, query_text, limit, project_id) do
     from(n in Node,
       select: {n, score(n.id)},
       where: n.id ~> match("content", ^query_text),
       where: ^Access.dynamic_where(readable_levels),
+      where: ^project_bound_where(project_id),
       order_by: [desc: score()],
       limit: ^limit
     )

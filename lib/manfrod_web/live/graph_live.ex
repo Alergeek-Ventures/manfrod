@@ -33,8 +33,10 @@ defmodule ManfrodWeb.GraphLive do
       |> assign(stats: stats)
       |> assign(access_filter: "internal")
       |> assign(available_access_levels: load_access_levels())
+      |> assign(project_filter: "all")
       |> assign(editing_node: false)
       |> assign(node_edit_content: "")
+      |> assign(projects: Memory.list_projects())
 
     {:ok, socket}
   end
@@ -43,22 +45,7 @@ defmodule ManfrodWeb.GraphLive do
   def handle_event("node_clicked", %{"id" => node_id}, socket) do
     readable_levels = [socket.assigns.access_filter]
     node = Memory.get_node_accessible(readable_levels, node_id)
-    links = if node, do: Memory.get_node_links_accessible(readable_levels, node_id), else: []
-
-    selected =
-      if node do
-        %{
-          id: node.id,
-          content: node.content,
-          processed: not is_nil(node.processed_at),
-          link_count: length(links),
-          inserted_at: node.inserted_at,
-          links:
-            Enum.map(links, fn n -> %{id: n.id, preview: String.slice(n.content || "", 0, 50)} end)
-        }
-      else
-        nil
-      end
+    selected = node && selected_node_map(node, readable_levels)
 
     {:noreply,
      assign(socket,
@@ -186,12 +173,38 @@ defmodule ManfrodWeb.GraphLive do
   end
 
   def handle_event("filter_access", %{"level" => level}, socket) do
-    graph_data = Memory.get_graph_data(filter: socket.assigns.filter, access_level: level)
+    graph_data =
+      Memory.get_graph_data(
+        filter: socket.assigns.filter,
+        access_level: level,
+        project_id: project_id_param(socket.assigns.project_filter)
+      )
 
     socket =
       socket
       |> assign(
         access_filter: level,
+        search_results: [],
+        search_query: "",
+        graph_data: graph_data
+      )
+      |> push_event("update_graph", graph_data)
+
+    {:noreply, socket}
+  end
+
+  def handle_event("filter_project", %{"project_id" => project_id}, socket) do
+    graph_data =
+      Memory.get_graph_data(
+        filter: socket.assigns.filter,
+        access_level: socket.assigns.access_filter,
+        project_id: project_id_param(project_id)
+      )
+
+    socket =
+      socket
+      |> assign(
+        project_filter: project_id,
         search_results: [],
         search_query: "",
         graph_data: graph_data
@@ -217,7 +230,8 @@ defmodule ManfrodWeb.GraphLive do
     graph_data =
       Memory.get_graph_data(
         filter: filter_atom,
-        access_level: socket.assigns.access_filter
+        access_level: socket.assigns.access_filter,
+        project_id: project_id_param(socket.assigns.project_filter)
       )
 
     socket =
@@ -233,22 +247,7 @@ defmodule ManfrodWeb.GraphLive do
     # Select a linked node from the panel
     readable_levels = [socket.assigns.access_filter]
     node = Memory.get_node_accessible(readable_levels, node_id)
-    links = if node, do: Memory.get_node_links_accessible(readable_levels, node_id), else: []
-
-    selected =
-      if node do
-        %{
-          id: node.id,
-          content: node.content,
-          processed: not is_nil(node.processed_at),
-          link_count: length(links),
-          inserted_at: node.inserted_at,
-          links:
-            Enum.map(links, fn n -> %{id: n.id, preview: String.slice(n.content || "", 0, 50)} end)
-        }
-      else
-        nil
-      end
+    selected = node && selected_node_map(node, readable_levels)
 
     socket =
       socket
@@ -259,8 +258,36 @@ defmodule ManfrodWeb.GraphLive do
     {:noreply, socket}
   end
 
+  def handle_event("set_node_project", %{"project_id" => project_id}, socket) do
+    readable_levels = [socket.assigns.access_filter]
+    project_id = if project_id == "", do: nil, else: project_id
+
+    case socket.assigns.selected_node do
+      nil ->
+        {:noreply, put_flash(socket, :error, "No node selected")}
+
+      %{id: node_id} ->
+        case Memory.update_node_accessible(readable_levels, node_id, %{project_id: project_id}) do
+          {:ok, node} ->
+            socket =
+              socket
+              |> assign(selected_node: selected_node_map(node, readable_levels))
+              |> put_flash(:info, "Project updated")
+
+            {:noreply, socket}
+
+          {:error, :not_found} ->
+            {:noreply, put_flash(socket, :error, "Node not found or not accessible")}
+
+          {:error, reason} ->
+            {:noreply, put_flash(socket, :error, "Save failed: #{inspect(reason)}")}
+        end
+    end
+  end
+
   defp selected_node_map(node, readable_levels) do
     links = Memory.get_node_links_accessible(readable_levels, node.id)
+    node = Repo.preload(node, :project, force: true)
 
     %{
       id: node.id,
@@ -268,6 +295,8 @@ defmodule ManfrodWeb.GraphLive do
       processed: not is_nil(node.processed_at),
       link_count: length(links),
       inserted_at: node.inserted_at,
+      project_id: node.project_id,
+      project_name: node.project && node.project.name,
       links:
         Enum.map(links, fn n -> %{id: n.id, preview: String.slice(n.content || "", 0, 50)} end)
     }
@@ -277,7 +306,8 @@ defmodule ManfrodWeb.GraphLive do
     graph_data =
       Memory.get_graph_data(
         filter: socket.assigns.filter,
-        access_level: socket.assigns.access_filter
+        access_level: socket.assigns.access_filter,
+        project_id: project_id_param(socket.assigns.project_filter)
       )
 
     stats = Memory.graph_stats()
@@ -286,6 +316,9 @@ defmodule ManfrodWeb.GraphLive do
     |> assign(graph_data: graph_data, stats: stats)
     |> push_event("update_graph", graph_data)
   end
+
+  defp project_id_param("all"), do: nil
+  defp project_id_param(project_id), do: project_id
 
   @impl true
   def render(assigns) do
@@ -366,6 +399,22 @@ defmodule ManfrodWeb.GraphLive do
               >
                 <%= for level <- @available_access_levels do %>
                   <option value={level} selected={@access_filter == level}><%= level %></option>
+                <% end %>
+              </select>
+            </form>
+
+            <%!-- Project filter --%>
+            <form phx-change="filter_project" class="flex items-center gap-2 text-xs">
+              <span class="text-zinc-500">Project:</span>
+              <select
+                name="project_id"
+                class="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-200 focus:outline-none focus:border-blue-500"
+              >
+                <option value="all" selected={@project_filter == "all"}>all</option>
+                <%= for project <- @projects do %>
+                  <option value={project.id} selected={@project_filter == project.id}>
+                    <%= project.name %>
+                  </option>
                 <% end %>
               </select>
             </form>
@@ -473,6 +522,30 @@ defmodule ManfrodWeb.GraphLive do
                 <div class="mb-4">
                   <label class="block text-xs text-zinc-500 mb-1">ID</label>
                   <code class="text-xs text-zinc-400 break-all"><%= @selected_node.id %></code>
+                </div>
+
+                <%!-- Project --%>
+                <div class="mb-4">
+                  <label class="block text-xs text-zinc-500 mb-1">Project</label>
+                  <form phx-change="set_node_project">
+                    <select
+                      name="project_id"
+                      class={[
+                        "w-full bg-zinc-800 border rounded px-2 py-1.5 text-sm focus:outline-none focus:border-blue-500",
+                        @selected_node.project_id && "border-zinc-700 text-zinc-200",
+                        !@selected_node.project_id && "border-amber-700 text-amber-400"
+                      ]}
+                    >
+                      <option value="" selected={is_nil(@selected_node.project_id)}>
+                        — none —
+                      </option>
+                      <%= for project <- @projects do %>
+                        <option value={project.id} selected={@selected_node.project_id == project.id}>
+                          <%= project.name %>
+                        </option>
+                      <% end %>
+                    </select>
+                  </form>
                 </div>
 
                 <%!-- Content --%>
