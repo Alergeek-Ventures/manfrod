@@ -33,6 +33,8 @@ defmodule ManfrodWeb.GraphLive do
       |> assign(stats: stats)
       |> assign(access_filter: "internal")
       |> assign(available_access_levels: load_access_levels())
+      |> assign(project_filter: "all")
+      |> assign(available_projects: Memory.list_projects())
       |> assign(editing_node: false)
       |> assign(node_edit_content: "")
 
@@ -186,12 +188,38 @@ defmodule ManfrodWeb.GraphLive do
   end
 
   def handle_event("filter_access", %{"level" => level}, socket) do
-    graph_data = Memory.get_graph_data(filter: socket.assigns.filter, access_level: level)
+    graph_data =
+      Memory.get_graph_data(
+        filter: socket.assigns.filter,
+        access_level: level,
+        project_id: project_id_param(socket.assigns.project_filter)
+      )
 
     socket =
       socket
       |> assign(
         access_filter: level,
+        search_results: [],
+        search_query: "",
+        graph_data: graph_data
+      )
+      |> push_event("update_graph", graph_data)
+
+    {:noreply, socket}
+  end
+
+  def handle_event("filter_project", %{"project_id" => project_id}, socket) do
+    graph_data =
+      Memory.get_graph_data(
+        filter: socket.assigns.filter,
+        access_level: socket.assigns.access_filter,
+        project_id: project_id_param(project_id)
+      )
+
+    socket =
+      socket
+      |> assign(
+        project_filter: project_id,
         search_results: [],
         search_query: "",
         graph_data: graph_data
@@ -217,7 +245,8 @@ defmodule ManfrodWeb.GraphLive do
     graph_data =
       Memory.get_graph_data(
         filter: filter_atom,
-        access_level: socket.assigns.access_filter
+        access_level: socket.assigns.access_filter,
+        project_id: project_id_param(socket.assigns.project_filter)
       )
 
     socket =
@@ -277,7 +306,8 @@ defmodule ManfrodWeb.GraphLive do
     graph_data =
       Memory.get_graph_data(
         filter: socket.assigns.filter,
-        access_level: socket.assigns.access_filter
+        access_level: socket.assigns.access_filter,
+        project_id: project_id_param(socket.assigns.project_filter)
       )
 
     stats = Memory.graph_stats()
@@ -366,6 +396,22 @@ defmodule ManfrodWeb.GraphLive do
               >
                 <%= for level <- @available_access_levels do %>
                   <option value={level} selected={@access_filter == level}><%= level %></option>
+                <% end %>
+              </select>
+            </form>
+
+            <%!-- Project filter --%>
+            <form phx-change="filter_project" class="flex items-center gap-2 text-xs">
+              <span class="text-zinc-500">Project:</span>
+              <select
+                name="project_id"
+                class="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-200 focus:outline-none focus:border-blue-500"
+              >
+                <option value="all" selected={@project_filter == "all"}>all</option>
+                <%= for project <- @available_projects do %>
+                  <option value={project.id} selected={@project_filter == project.id}>
+                    <%= project.name %>
+                  </option>
                 <% end %>
               </select>
             </form>
@@ -569,6 +615,9 @@ defmodule ManfrodWeb.GraphLive do
   defp format_date(%NaiveDateTime{} = dt) do
     Calendar.strftime(dt, "%Y-%m-%d %H:%M")
   end
+
+  defp project_id_param("all"), do: nil
+  defp project_id_param(project_id), do: project_id
 
   defp load_access_levels do
     external =
