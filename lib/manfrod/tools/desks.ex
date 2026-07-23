@@ -54,9 +54,13 @@ defmodule Manfrod.Tools.Desks do
       ReqLLM.Tool.new!(
         name: "show_desk_map",
         description:
-          "Render the office desk map as an image for a date (default today) and post it to this channel.",
+          "Render the office desk map as an image for a date (default today) and post it to Slack. Posts to this channel by default, or to channel_id if given.",
         parameter_schema: [
-          date: [type: :string, doc: "ISO8601 date (YYYY-MM-DD), default today"]
+          date: [type: :string, doc: "ISO8601 date (YYYY-MM-DD), default today"],
+          channel_id: [
+            type: :string,
+            doc: "Slack channel ID to post to instead of the current channel, e.g. 'C087QF130R3'"
+          ]
         ],
         callback: fn args -> show_desk_map(msg_ctx, args) end
       ),
@@ -189,18 +193,21 @@ defmodule Manfrod.Tools.Desks do
     end)
   end
 
-  defp show_desk_map(%{channel: nil}, _args),
-    do: {:ok, "Can't post the map outside a Slack channel."}
+  defp show_desk_map(msg_ctx, args) do
+    case Map.get(args, :channel_id, msg_ctx.channel) do
+      nil ->
+        {:ok, "Can't post the map outside a Slack channel."}
 
-  defp show_desk_map(%{channel: channel}, args) do
-    with_date(args, fn date ->
-      bot_token = Application.get_env(:manfrod, :slack_bot_token)
+      channel ->
+        with_date(args, fn date ->
+          bot_token = Application.get_env(:manfrod, :slack_bot_token)
 
-      case Manfrod.DeskMap.post_map(channel, date, bot_token) do
-        {:ok, _} -> {:ok, "Posted the desk map for #{Date.to_iso8601(date)}."}
-        {:error, reason} -> {:ok, "Could not render/post the desk map: #{inspect(reason)}"}
-      end
-    end)
+          case Manfrod.DeskMap.post_map(channel, date, bot_token) do
+            {:ok, _} -> {:ok, "Posted the desk map for #{Date.to_iso8601(date)}."}
+            {:error, reason} -> {:ok, "Could not render/post the desk map: #{inspect(reason)}"}
+          end
+        end)
+    end
   end
 
   # --- Admin-only tools ---

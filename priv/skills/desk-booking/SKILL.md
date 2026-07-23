@@ -32,7 +32,10 @@ the desk label and date. Only their own reservations can be cancelled.
 User asks who's sitting where, what's free, or wants a written list → call
 `list_desk_reservations` (plain text). If they explicitly want to *see* the
 office/map → call `show_desk_map` instead, which posts an image to the
-current channel.
+current channel by default. If they name a different channel (by name or
+Slack channel ID, e.g. "wyślij na kanał biuro" / "na kanał C087QF130R3"),
+pass that channel's ID as `channel_id` — don't tell them you can't, and
+don't ask them to repeat the request in that other channel.
 
 ## Managing desks (admin only)
 User asks to add/edit/remove a desk, change its equipment, location, or map
