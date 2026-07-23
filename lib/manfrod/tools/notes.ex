@@ -134,7 +134,8 @@ defmodule Manfrod.Tools.Notes do
   defp search_notes(user_id, readable_levels, msg_ctx, %{query: query} = args) do
     case resolve_project(Map.get(args, :project), msg_ctx) do
       {:ok, project_id} ->
-        {:ok, nodes} = Memory.search(user_id, readable_levels, query, limit: 10, project_id: project_id)
+        {:ok, nodes} =
+          Memory.search(user_id, readable_levels, query, limit: 10, project_id: project_id)
 
         if Enum.empty?(nodes) do
           {:ok, "No relevant notes found for: #{query}"}
