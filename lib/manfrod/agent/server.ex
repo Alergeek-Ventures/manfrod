@@ -644,7 +644,7 @@ defmodule Manfrod.Agent.Server do
                   "the model ended its turn with tool calls but no closing text"
               )
 
-              "Done ✅"
+              "👍"
           end
 
         # Persist assistant response to DB, attributed to this turn's
