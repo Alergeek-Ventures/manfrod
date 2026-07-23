@@ -88,6 +88,55 @@ defmodule Manfrod.Google.Calendar do
     }
   end
 
+  @doc """
+  List events from any public calendar (e.g. a country's public holiday
+  calendar) using an API key instead of a user's OAuth token — public
+  calendars don't require the caller to be the owner or a subscriber, just a
+  valid Google API credential.
+
+  ## Options
+
+    * `:time_min` — lower bound (DateTime, required)
+    * `:time_max` — upper bound (DateTime, required)
+
+  Same return shape as `list_events/2`.
+  """
+  def list_holiday_events(calendar_id, opts) do
+    api_key = Application.get_env(:manfrod, :google_api_key)
+    time_min = Keyword.fetch!(opts, :time_min)
+    time_max = Keyword.fetch!(opts, :time_max)
+
+    if is_nil(api_key) or api_key == "" do
+      {:error, :no_google_api_key}
+    else
+      params = [
+        key: api_key,
+        timeMin: DateTime.to_iso8601(time_min),
+        timeMax: DateTime.to_iso8601(time_max),
+        singleEvents: true,
+        orderBy: "startTime"
+      ]
+
+      case Req.get("#{@base_url}/calendars/#{URI.encode_www_form(calendar_id)}/events",
+             params: params
+           ) do
+        {:ok, %Req.Response{status: 200, body: body}} ->
+          events =
+            (body["items"] || [])
+            |> Enum.reject(&(&1["status"] == "cancelled"))
+            |> Enum.map(&normalize_event/1)
+
+          {:ok, events}
+
+        {:ok, %Req.Response{status: status, body: body}} ->
+          {:error, {:api_error, status, body}}
+
+        {:error, reason} ->
+          {:error, {:http_error, reason}}
+      end
+    end
+  end
+
   defp parse_event_time(nil), do: {nil, false}
 
   defp parse_event_time(%{"dateTime" => dt}) when is_binary(dt), do: {dt, false}

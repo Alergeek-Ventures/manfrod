@@ -27,6 +27,7 @@ defmodule Manfrod.Slack.ActivityHandler do
   alias Manfrod.Slack.API
   alias Manfrod.Slack.MessageServer
   alias Manfrod.Slack.Mrkdwn
+  alias Manfrod.Slack.ThreadTitle
 
   # ---------------------------------------------------------------------------
   # Public API
@@ -179,21 +180,33 @@ defmodule Manfrod.Slack.ActivityHandler do
 
     state =
       if dm_channel?(channel) do
-        # DMs: setStatus auto-clears when we send a reply
-        MessageServer.ensure_started(state.bot_token, channel)
+        case get_in(state, [:pending, {channel, thread_ts}, :placeholder_ts]) do
+          nil ->
+            MessageServer.ensure_started(state.bot_token, channel)
 
-        MessageServer.send_message(channel, %{
-          thread_ts: thread_ts,
-          text: content
-        })
+            MessageServer.send_message(channel, %{
+              thread_ts: thread_ts,
+              text: content
+            })
 
-        # Clean up any pending placeholder from start_thread (proactive flow)
-        {_, state} = pop_in(state, [:pending, {channel, thread_ts}])
-        state
+            state
+
+          placeholder_ts ->
+            MessageServer.ensure_started(state.bot_token, channel)
+
+            MessageServer.send_message(channel, %{
+              thread_ts: thread_ts,
+              text: content
+            })
+
+            update_thread_title(state.bot_token, channel, placeholder_ts, content)
+
+            {_, state} = pop_in(state, [:pending, {channel, thread_ts}])
+            state
+        end
       else
         case get_in(state, [:pending, {channel, thread_ts}, :placeholder_ts]) do
           nil ->
-            # No placeholder — post a new message
             MessageServer.ensure_started(state.bot_token, channel)
 
             MessageServer.send_message(channel, %{
@@ -281,6 +294,26 @@ defmodule Manfrod.Slack.ActivityHandler do
 
   defp dm_channel?("D" <> _), do: true
   defp dm_channel?(_), do: false
+
+  defp update_thread_title(bot_token, channel, placeholder_ts, content) do
+    Task.start(fn ->
+      title = ThreadTitle.generate(content)
+
+      case API.post("chat.update", bot_token, %{
+             channel: channel,
+             ts: placeholder_ts,
+             text: title
+           }) do
+        {:ok, _} ->
+          :ok
+
+        {:error, reason} ->
+          Logger.error(
+            "Slack ActivityHandler failed to update thread title in #{channel}: #{inspect(reason)}"
+          )
+      end
+    end)
+  end
 
   defp set_status(bot_token, channel, thread_ts, status) do
     case API.post("assistant.threads.setStatus", bot_token, %{

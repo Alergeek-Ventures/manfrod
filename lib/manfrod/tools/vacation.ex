@@ -5,6 +5,7 @@ defmodule Manfrod.Tools.Vacation do
   this module only implements the tool itself.
   """
 
+  alias Manfrod.Accounts
   alias Manfrod.Memory
   alias Manfrod.Memory.PendingOps
   alias Manfrod.Tools.Support
@@ -20,49 +21,40 @@ defmodule Manfrod.Tools.Vacation do
             "Call whenever the user mentions being absent — do NOT ask the user about client visibility.",
         parameter_schema: [
           start_date: [type: :string, required: true, doc: "Start date ISO8601 (YYYY-MM-DD)"],
-          end_date: [type: :string, required: true, doc: "End date ISO8601 (YYYY-MM-DD)"],
-          note: [type: :string, doc: "Optional note (e.g. 'on vacation', 'public holiday')"]
+          end_date: [type: :string, required: true, doc: "End date ISO8601 (YYYY-MM-DD)"]
         ],
         callback: fn args -> report_vacation(user_id, msg_ctx, args) end
       )
     ]
   end
 
-  # Flags the message as an absence for the memory batch. The Classifier writes
-  # a named node + fact at the channel's default access and, if warranted, posts
-  # the standard escalation buttons — the agent does NOT ask about external/all.
-  defp report_vacation(
-         user_id,
-         msg_ctx,
-         %{start_date: start_date, end_date: end_date} = args
-       ) do
+  defp report_vacation(user_id, msg_ctx, %{start_date: start_date, end_date: end_date}) do
     case Support.flaggable(msg_ctx) do
       {:ok, channel_id, ts} ->
         PendingOps.flag_message(channel_id, ts, "create_absence", %{
           start_date: start_date,
           end_date: end_date,
-          note: Map.get(args, :note)
+          content: absence_note(user_id, start_date, end_date)
         })
 
         {:ok,
          "Zanotowane (#{start_date}..#{end_date}). Pamięć w tle zapisze nieobecność i w razie potrzeby zapyta o udostępnienie klientom."}
 
       :error ->
-        report_vacation_direct(user_id, args)
+        report_vacation_direct(user_id, start_date, end_date)
     end
   end
 
-  defp report_vacation_direct(user_id, %{start_date: start_date, end_date: end_date} = args) do
-    note = Map.get(args, :note, "urlop")
+  defp report_vacation_direct(user_id, start_date, end_date) do
+    note = absence_note(user_id, start_date, end_date)
     key = "vacation:#{user_id}:#{start_date}"
     value = "#{start_date}..#{end_date} — #{note}"
     access = ["internal", "external/all"]
-    content = "#{note}: #{start_date}..#{end_date}"
 
     with {:ok, _fact} <- Manfrod.Facts.set_fact(key, value, access, user_id),
-         {:ok, embedding} <- Voyage.embed_query(content),
+         {:ok, embedding} <- Voyage.embed_query(note),
          {:ok, _node} <-
-           Memory.create_node(user_id, access, %{content: content, embedding: embedding}) do
+           Memory.create_node(user_id, access, %{content: note, embedding: embedding}) do
       {:ok, "Zapisałem urlop: #{value}"}
     else
       {:error, %Ecto.Changeset{} = changeset} ->
@@ -70,6 +62,18 @@ defmodule Manfrod.Tools.Vacation do
 
       {:error, e} ->
         {:ok, "Błąd zapisu: #{inspect(e)}"}
+    end
+  end
+
+  defp absence_note(user_id, start_date, end_date) do
+    dates = if start_date == end_date, do: start_date, else: "#{start_date}..#{end_date}"
+    "#{user_name(user_id)} bierze urlop #{dates}"
+  end
+
+  defp user_name(user_id) do
+    case Accounts.get_user(user_id) do
+      %{name: name} when is_binary(name) and name != "" -> name
+      _ -> "User"
     end
   end
 end
