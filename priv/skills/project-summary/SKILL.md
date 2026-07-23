@@ -5,9 +5,21 @@ description: On-demand summary of what's happened in this project/channel — st
 
 # Project summary
 
-The project is whatever this channel is scoped to (its access level already
-limits `list_recent_notes`/`search_notes` to the right notes — no separate
-"which project" question needed).
+## 0. Work out which project
+
+- **User names a project** ("stan projektu Acme", "co nowego u 10bps") →
+  pass that name/slug as `list_recent_notes`'s `project` parameter directly.
+  If you're not sure it'll match (ambiguous name, unsure spelling), call
+  `list_projects` first to confirm the exact name/slug, then use it.
+- **No project named** → say nothing and pass no `project` param at all.
+  `list_recent_notes` then defaults to whatever project the *current
+  channel* is mapped to (if any) — this covers the common case of asking
+  "what's the state of the project" from inside that project's own channel.
+  If the channel isn't mapped to a project either, results fall back to
+  your normal access-scoped notes (unfiltered by project).
+- If `list_recent_notes` comes back saying it doesn't recognize the named
+  project, call `list_projects` and retry with the closest match, or ask
+  the user to clarify if nothing's close.
 
 ## 1. Work out the time scope from the request
 
@@ -70,8 +82,12 @@ notes.
 ## Notes on scope
 
 - `list_recent_notes` reads the same access-scoped notes as `search_notes`/
-  `get_note` — it's just ordered by time instead of relevance. If the user
-  then asks to drill into one item, use `get_note` with its id.
+  `get_note` — it's just ordered by time instead of relevance, plus the
+  optional project scoping from step 0. If the user then asks to drill into
+  one item, use `get_note` with its id.
+- `search_notes` doesn't take a `project` parameter — it's relevance-based
+  and access-scoped only. If a topic question needs project scoping too,
+  say what you found and let the user narrow it down rather than guessing.
 - If the question is about a specific topic within the project rather than
   general activity ("co się dzieje z fakturami"), prefer `search_notes` for
   that (it's about relevance, not time) — `project-summary` applies when the

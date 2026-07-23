@@ -5,7 +5,7 @@ defmodule Manfrod.Tools.Notes do
   """
 
   alias Manfrod.Memory
-  alias Manfrod.Memory.PendingOps
+  alias Manfrod.Memory.{Access, PendingOps}
   alias Manfrod.Tools.Support
   alias Manfrod.Voyage
 
@@ -27,14 +27,20 @@ defmodule Manfrod.Tools.Notes do
             type: :string,
             required: true,
             doc: "Search query - what you want to find"
+          ],
+          project: [
+            type: :string,
+            required: false,
+            doc:
+              "Project name or slug to scope results to (use list_projects to confirm/disambiguate first if unsure). Omit to use the current channel's project, if this channel is mapped to one — otherwise no project scoping is applied."
           ]
         ],
-        callback: fn args -> search_notes(user_id, readable_levels, args) end
+        callback: fn args -> search_notes(user_id, readable_levels, msg_ctx, args) end
       ),
       ReqLLM.Tool.new!(
         name: "list_recent_notes",
         description:
-          "List notes in chronological order (newest first), optionally bounded to a date range. Use for activity/project summaries — 'what happened today', 'this week', 'between two dates' — where you need everything in time order, not a relevance search like search_notes.",
+          "List notes in chronological order (newest first), optionally bounded to a date range and/or scoped to one project. Use for activity/project summaries — 'what happened today', 'this week', 'between two dates' — where you need everything in time order, not a relevance search like search_notes.",
         parameter_schema: [
           since: [
             type: :string,
@@ -54,9 +60,15 @@ defmodule Manfrod.Tools.Notes do
             required: false,
             doc:
               "'desc' (default, newest first) or 'asc' (oldest first — use to find the earliest/oldest notes in a range)"
+          ],
+          project: [
+            type: :string,
+            required: false,
+            doc:
+              "Project name or slug to scope results to (use list_projects to confirm/disambiguate first if unsure). Omit to use the current channel's project, if this channel is mapped to one — otherwise no project scoping is applied."
           ]
         ],
-        callback: fn args -> list_recent_notes(readable_levels, args) end
+        callback: fn args -> list_recent_notes(readable_levels, msg_ctx, args) end
       ),
       ReqLLM.Tool.new!(
         name: "get_note",
@@ -119,32 +131,39 @@ defmodule Manfrod.Tools.Notes do
     ]
   end
 
-  defp search_notes(user_id, readable_levels, %{query: query}) do
-    {:ok, nodes} = Memory.search(user_id, readable_levels, query, limit: 10)
+  defp search_notes(user_id, readable_levels, msg_ctx, %{query: query} = args) do
+    case resolve_project(Map.get(args, :project), msg_ctx) do
+      {:ok, project_id} ->
+        {:ok, nodes} = Memory.search(user_id, readable_levels, query, limit: 10, project_id: project_id)
 
-    if Enum.empty?(nodes) do
-      {:ok, "No relevant notes found for: #{query}"}
-    else
-      lines =
-        Enum.map(nodes, fn node ->
-          linked = Memory.get_node_links(user_id, node.id)
-          linked_ids = Enum.map(linked, & &1.id) |> Enum.join(", ")
-          date = note_date(node)
+        if Enum.empty?(nodes) do
+          {:ok, "No relevant notes found for: #{query}"}
+        else
+          lines =
+            Enum.map(nodes, fn node ->
+              linked = Memory.get_node_links(user_id, node.id)
+              linked_ids = Enum.map(linked, & &1.id) |> Enum.join(", ")
+              date = note_date(node)
 
-          if linked_ids == "" do
-            "- #{date} [#{node.id}] #{node.content}"
-          else
-            "- #{date} [#{node.id}] #{node.content}\n  Linked to: #{linked_ids}"
-          end
-        end)
+              if linked_ids == "" do
+                "- #{date} [#{node.id}] #{node.content}"
+              else
+                "- #{date} [#{node.id}] #{node.content}\n  Linked to: #{linked_ids}"
+              end
+            end)
 
-      {:ok, "Found #{length(nodes)} notes:\n#{Enum.join(lines, "\n")}"}
+          {:ok, "Found #{length(nodes)} notes:\n#{Enum.join(lines, "\n")}"}
+        end
+
+      {:error, :unknown_project} ->
+        {:ok, unknown_project_message(Map.get(args, :project))}
     end
   end
 
-  defp list_recent_notes(readable_levels, args) do
+  defp list_recent_notes(readable_levels, msg_ctx, args) do
     with {:ok, since_dt} <- parse_date_bound(Map.get(args, :since), :since),
-         {:ok, until_dt} <- parse_date_bound(Map.get(args, :until), :until) do
+         {:ok, until_dt} <- parse_date_bound(Map.get(args, :until), :until),
+         {:ok, project_id} <- resolve_project(Map.get(args, :project), msg_ctx) do
       limit = Map.get(args, :limit, 50)
       order = if Map.get(args, :order) == "asc", do: :asc, else: :desc
 
@@ -152,6 +171,7 @@ defmodule Manfrod.Tools.Notes do
         Memory.list_nodes_by_date(readable_levels,
           since: since_dt,
           until: until_dt,
+          project_id: project_id,
           limit: limit,
           order: order
         )
@@ -168,8 +188,31 @@ defmodule Manfrod.Tools.Notes do
       end
     else
       {:error, :invalid_date} -> {:ok, "Invalid date — use YYYY-MM-DD."}
+      {:error, :unknown_project} -> {:ok, unknown_project_message(Map.get(args, :project))}
     end
   end
+
+  # No project named: fall back to the current channel's own project mapping
+  # (if any) so a project channel's summary is always scoped to it without
+  # the agent having to ask or name it explicitly.
+  defp resolve_project(nil, %{channel: channel}) when is_binary(channel) do
+    case Access.get_active_mapping(channel) do
+      %{project_id: project_id} -> {:ok, project_id}
+      nil -> {:ok, nil}
+    end
+  end
+
+  defp resolve_project(nil, _msg_ctx), do: {:ok, nil}
+
+  defp resolve_project(name, _msg_ctx) when is_binary(name) do
+    case Memory.find_project(name) do
+      nil -> {:error, :unknown_project}
+      project -> {:ok, project.id}
+    end
+  end
+
+  defp unknown_project_message(name),
+    do: "Nie znalazłem projektu \"#{name}\" — sprawdź listę przez list_projects."
 
   defp parse_date_bound(nil, _edge), do: {:ok, nil}
 
