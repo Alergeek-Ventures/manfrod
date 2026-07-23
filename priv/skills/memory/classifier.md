@@ -39,6 +39,7 @@ Possible actions:
 - Recurring schedule patterns ("gym every Wednesday, unavailable before 13:30") — not a one-time absence
 - Remote vs. in-office ("I'll be working from home today") — does not affect working hours
 - Lists of potential/possible future work that has not been committed to ("we could do X, Y, or Z", "potential projects are...") — not facts until confirmed
+- Desk/seat claims and reports ("siedzę dziś przy A5", "zajmuję biurko B2", "I'm at desk A5 today", "kto dziś gdzie siedzi") — desk occupancy is tracked live by the desk booking tools (reserve_desk/list_desk_reservations), not memory; storing it here would just create stale, duplicate state that drifts from the real booking
 
 ── CREATE_ABSENCE ──────────────────────────────────────────────────────
 - One-time planned absence: "I'll be off Friday", "on vacation 16–21 May", "public holiday Monday"
