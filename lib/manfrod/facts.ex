@@ -81,4 +81,25 @@ defmodule Manfrod.Facts do
         order_by: [asc: f.key]
     )
   end
+
+  @doc """
+  List facts whose key starts with the given prefix AND were set by a
+  specific user, filtered by readable access levels. Useful when the key
+  itself doesn't embed the user id (e.g. `absence:<user_name>:<date>`, keyed
+  by display name, not id) — `set_by_user_id` is the reliable join.
+  """
+  @spec list_facts_by_user(
+          key_prefix :: String.t(),
+          user_id :: binary(),
+          readable_levels :: [String.t()]
+        ) :: [Fact.t()]
+  def list_facts_by_user(key_prefix, user_id, readable_levels) do
+    Repo.all(
+      from f in Fact,
+        where: like(f.key, ^"#{key_prefix}%"),
+        where: f.set_by_user_id == ^user_id,
+        where: ^Access.dynamic_where(readable_levels),
+        order_by: [asc: f.key]
+    )
+  end
 end

@@ -9,8 +9,15 @@ database_url =
   env!("DATABASE_URL", :string, "ecto://manfrod:qLmVMeXiYyy65ADb@localhost:35232/manfrod")
 
 if config_env() == :test do
+  test_database_url =
+    env!(
+      "TEST_DATABASE_URL",
+      :string,
+      "ecto://manfrod:qLmVMeXiYyy65ADb@localhost:35232/manfrod_test#{System.get_env("MIX_TEST_PARTITION")}"
+    )
+
   config :manfrod, Manfrod.Repo,
-    url: database_url,
+    url: test_database_url,
     pool: Ecto.Adapters.SQL.Sandbox,
     pool_size: System.schedulers_online() * 2
 
@@ -74,3 +81,9 @@ config :manfrod, :slack_bot_token, env!("SLACK_BOT_TOKEN", :string?)
 # Google OAuth (Sign-In + Calendar)
 config :manfrod, :google_client_id, env!("GOOGLE_CLIENT_ID", :string?)
 config :manfrod, :google_client_secret, env!("GOOGLE_CLIENT_SECRET", :string?)
+
+config :manfrod, :google_api_key, env!("GOOGLE_API_KEY", :string?, nil)
+
+config :manfrod,
+       :holiday_calendar_id,
+       env!("HOLIDAY_CALENDAR_ID", :string, "pl.polish#holiday@group.v.calendar.google.com")
