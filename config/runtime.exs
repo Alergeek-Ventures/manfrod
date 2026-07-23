@@ -11,7 +11,7 @@ database_url =
 if config_env() == :test do
   test_database_url =
     env!(
-      "TEST_DATABASE_URL",
+      "DATABASE_URL",
       :string,
       "ecto://manfrod:qLmVMeXiYyy65ADb@localhost:35232/manfrod_test#{System.get_env("MIX_TEST_PARTITION")}"
     )
