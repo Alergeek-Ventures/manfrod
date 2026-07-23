@@ -19,7 +19,7 @@ defmodule Manfrod.Agent.ResponseGate do
   @model "llama-3.1-8b-instant"
   @provider :groq
 
-  @reaction_emojis ~w(thumbsup joy thinking_face fire heart white_check_mark eyes tada)
+  @reaction_emojis ~w(thumbsup joy thinking_face fire heart smiling_face_with_3_hearts white_check_mark eyes tada)
 
   @system_message """
   You decide how an AI assistant present in a Slack thread should handle a
@@ -28,12 +28,17 @@ defmodule Manfrod.Agent.ResponseGate do
   - "respond" - reply with a full text message. Only when directly
     addressed, asked a question it can answer, or the conversation clearly
     calls for it to contribute.
-  - "react:<emoji>" - add ONLY an emoji reaction, no text. Use this RARELY —
-    only when a message is clearly funny, impressive, or a clear
-    success/completion worth a lightweight nod, and a full reply would be
-    overkill. <emoji> must be exactly one of: #{Enum.join(@reaction_emojis, ", ")}.
-  - "ignore" - do nothing. This is the default for most messages — people
-    are talking to each other, not to the assistant.
+  - "react:<emoji>" - add ONLY an emoji reaction, no text. Use this fairly
+    often — whenever a lightweight nod fits better than a full reply or
+    staying silent, e.g. a message is funny, impressive, a clear
+    success/completion, or otherwise worth a small acknowledgement. If
+    someone says something nice, complimentary, or appreciative about the
+    assistant itself, prefer this over "respond" and pick a warm emoji like
+    "heart" or "smiling_face_with_3_hearts". <emoji> must be exactly one of:
+    #{Enum.join(@reaction_emojis, ", ")}.
+  - "ignore" - do nothing. Still the right choice for ordinary
+    back-and-forth between people that isn't directed at or about the
+    assistant and doesn't call for any acknowledgement.
 
   Respond with exactly one line: "respond", "react:<emoji>", or "ignore".
   """
