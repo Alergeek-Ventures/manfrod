@@ -9,6 +9,8 @@ defmodule Manfrod.Tools.Notes do
   alias Manfrod.Tools.Support
   alias Manfrod.Voyage
 
+  @timezone "Europe/Warsaw"
+
   def definitions(%{
         user_id: user_id,
         readable_levels: readable_levels,
@@ -28,6 +30,31 @@ defmodule Manfrod.Tools.Notes do
           ]
         ],
         callback: fn args -> search_notes(user_id, readable_levels, args) end
+      ),
+      ReqLLM.Tool.new!(
+        name: "list_recent_notes",
+        description:
+          "List notes in chronological order (newest first), optionally bounded to a date range. Use for activity/project summaries — 'what happened today', 'this week', 'between two dates' — where you need everything in time order, not a relevance search like search_notes.",
+        parameter_schema: [
+          since: [
+            type: :string,
+            required: false,
+            doc: "Only notes on/after this date (YYYY-MM-DD, Europe/Warsaw calendar day). Omit for no lower bound."
+          ],
+          until: [
+            type: :string,
+            required: false,
+            doc: "Only notes on/before this date (YYYY-MM-DD, Europe/Warsaw calendar day). Omit for no upper bound."
+          ],
+          limit: [type: :integer, required: false, doc: "Max notes to return (default 50)"],
+          order: [
+            type: :string,
+            required: false,
+            doc:
+              "'desc' (default, newest first) or 'asc' (oldest first — use to find the earliest/oldest notes in a range)"
+          ]
+        ],
+        callback: fn args -> list_recent_notes(readable_levels, args) end
       ),
       ReqLLM.Tool.new!(
         name: "get_note",
@@ -100,16 +127,70 @@ defmodule Manfrod.Tools.Notes do
         Enum.map(nodes, fn node ->
           linked = Memory.get_node_links(user_id, node.id)
           linked_ids = Enum.map(linked, & &1.id) |> Enum.join(", ")
+          date = note_date(node)
 
           if linked_ids == "" do
-            "- [#{node.id}] #{node.content}"
+            "- #{date} [#{node.id}] #{node.content}"
           else
-            "- [#{node.id}] #{node.content}\n  Linked to: #{linked_ids}"
+            "- #{date} [#{node.id}] #{node.content}\n  Linked to: #{linked_ids}"
           end
         end)
 
       {:ok, "Found #{length(nodes)} notes:\n#{Enum.join(lines, "\n")}"}
     end
+  end
+
+  defp list_recent_notes(readable_levels, args) do
+    with {:ok, since_dt} <- parse_date_bound(Map.get(args, :since), :since),
+         {:ok, until_dt} <- parse_date_bound(Map.get(args, :until), :until) do
+      limit = Map.get(args, :limit, 50)
+      order = if Map.get(args, :order) == "asc", do: :asc, else: :desc
+
+      nodes =
+        Memory.list_nodes_by_date(readable_levels,
+          since: since_dt,
+          until: until_dt,
+          limit: limit,
+          order: order
+        )
+
+      if Enum.empty?(nodes) do
+        {:ok, "No notes found in that range."}
+      else
+        order_label = if order == :asc, do: "oldest first", else: "newest first"
+        lines = Enum.map(nodes, fn node -> "- #{note_date(node)} [#{node.id}] #{node.content}" end)
+        {:ok, "Found #{length(nodes)} notes (#{order_label}):\n#{Enum.join(lines, "\n")}"}
+      end
+    else
+      {:error, :invalid_date} -> {:ok, "Invalid date — use YYYY-MM-DD."}
+    end
+  end
+
+  defp parse_date_bound(nil, _edge), do: {:ok, nil}
+
+  defp parse_date_bound(date_str, edge) do
+    case Date.from_iso8601(date_str) do
+      {:ok, date} ->
+        time = if edge == :since, do: ~T[00:00:00], else: ~T[23:59:59]
+
+        naive_utc =
+          date
+          |> DateTime.new!(time, @timezone)
+          |> DateTime.shift_zone!("Etc/UTC")
+          |> DateTime.to_naive()
+
+        {:ok, naive_utc}
+
+      {:error, _} ->
+        {:error, :invalid_date}
+    end
+  end
+
+  defp note_date(node) do
+    node.inserted_at
+    |> DateTime.from_naive!("Etc/UTC")
+    |> DateTime.shift_zone!(@timezone)
+    |> Calendar.strftime("%Y-%m-%d")
   end
 
   defp get_note(readable_levels, %{id: id}) do
@@ -126,7 +207,7 @@ defmodule Manfrod.Tools.Notes do
           else
             lines =
               Enum.map(linked_nodes, fn n ->
-                "- [#{n.id}] #{n.content}"
+                "- #{note_date(n)} [#{n.id}] #{n.content}"
               end)
 
             "Linked notes:\n#{Enum.join(lines, "\n")}"
@@ -134,7 +215,7 @@ defmodule Manfrod.Tools.Notes do
 
         {:ok,
          """
-         Note [#{node.id}]:
+         Note [#{node.id}] (#{note_date(node)}):
          #{node.content}
 
          #{linked_content}

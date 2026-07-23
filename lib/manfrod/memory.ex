@@ -188,6 +188,42 @@ defmodule Manfrod.Memory do
   end
 
   @doc """
+  List nodes visible to the given access levels in chronological order
+  (newest first), optionally bounded by `inserted_at`. Unlike `search/4`
+  there's no query text to rank by relevance — this is for activity/project
+  summaries where the agent needs everything in a time window, in order.
+
+  `inserted_at` is stored as naive UTC (Ecto's `timestamps()` default), so
+  bounds must be `%NaiveDateTime{}` in UTC, not `%DateTime{}`.
+
+  ## Options
+
+    * `:since` - only nodes inserted at or after this `%NaiveDateTime{}` (default: no lower bound)
+    * `:until` - only nodes inserted at or before this `%NaiveDateTime{}` (default: no upper bound)
+    * `:limit` - maximum results (default: 50)
+    * `:order` - `:desc` (default, newest first) or `:asc` (oldest first)
+  """
+  def list_nodes_by_date(readable_levels, opts \\ []) do
+    since = Keyword.get(opts, :since)
+    until = Keyword.get(opts, :until)
+    limit = Keyword.get(opts, :limit, 50)
+    order = Keyword.get(opts, :order, :desc)
+
+    Node
+    |> where(^Access.dynamic_where(readable_levels))
+    |> where(^date_bound_where(:since, since))
+    |> where(^date_bound_where(:until, until))
+    |> order_by([n], [{^order, n.inserted_at}])
+    |> limit(^limit)
+    |> Repo.all()
+  end
+
+  defp date_bound_where(:since, nil), do: dynamic(true)
+  defp date_bound_where(:since, %NaiveDateTime{} = dt), do: dynamic([n], n.inserted_at >= ^dt)
+  defp date_bound_where(:until, nil), do: dynamic(true)
+  defp date_bound_where(:until, %NaiveDateTime{} = dt), do: dynamic([n], n.inserted_at <= ^dt)
+
+  @doc """
   Get all nodes in the slipbox (unprocessed) for a user.
   """
   def get_slipbox_nodes(user_id, opts \\ []) do
