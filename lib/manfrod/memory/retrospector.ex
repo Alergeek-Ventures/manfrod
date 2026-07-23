@@ -30,11 +30,12 @@ defmodule Manfrod.Memory.Retrospector do
 
   ## Tools available to the agent
 
-  - `search` - semantic + keyword search over the graph
+  - `search` - semantic + keyword search over the graph, optionally scoped to one project
+  - `list_projects` - list known projects (name + slug)
   - `get_node` - fetch a node by ID
   - `find_similar` - nearest nodes by embedding (duplicate/link candidates)
-  - `create_node` - create a new node (returns ID)
-  - `update_node` - update a node's content (re-embeds, preserves links)
+  - `create_node` - create a new node, optionally tagged with a project (returns ID)
+  - `update_node` - update a node's content and/or project (re-embeds, preserves links)
   - `create_link` - link two nodes by ID (with optional context)
   - `delete_node` - delete a node and its links (for deduplication)
   - `delete_link` - delete a link between nodes
@@ -136,6 +137,36 @@ defmodule Manfrod.Memory.Retrospector do
   connected, then oldest nodes, then random. Tackle unprocessed slipbox notes
   first, then work through all the review nodes. For each one, search for
   missed connections, deduplicate, edit, consolidate.
+
+  ## Project Grouping
+
+  Some nodes carry a project tag, shown as `[project: Name]` right after the
+  node's id in every listing and neighbor line — stamped automatically from
+  the Slack channel a note came from, when that channel is mapped to a
+  project. Not every node has one; an untagged node is a normal, expected
+  state, not something to fix by guessing.
+
+  Treat a shared project tag as a strong, deterministic clustering signal,
+  on top of (not instead of) embedding similarity:
+
+  - Two project-tagged nodes sharing the same project are natural link
+    candidates even at moderate "~" similarity — shared project context
+    often means shared relevance that the embedding alone underweights.
+  - When working through project-tagged slipbox or review nodes, use
+    `search`'s `project` parameter to pull the rest of that project's nodes
+    and check for missed connections within it, the same way you'd search
+    keywords for a topic.
+  - If a project's own cluster grows dense enough that you're losing
+    overview of it (the same "losing overview" trigger as Structure Notes
+    below, just scoped to one project instead of the whole graph), create a
+    structure note for it and tag it with that project via `create_node`'s
+    `project` parameter — this lets a project's own hub emerge naturally
+    from its nodes, the same way a general hub emerges from a topic cluster.
+  - If you find a node whose project tag looks wrong, or an obviously
+    project-specific node with no tag at all, correct it with `update_node`'s
+    `project` parameter — don't leave a wrong or missing tag once you've
+    noticed it while working the graph.
+  - Use `list_projects` if you're unsure of a project's exact name/slug.
 
   ## Structure Notes
 
@@ -544,9 +575,11 @@ defmodule Manfrod.Memory.Retrospector do
   @likely_duplicate_distance 0.15
 
   defp format_nodes(nodes, readable_levels) do
+    project_names = project_name_map()
+
     nodes
     |> Enum.map(fn n ->
-      base = "- [#{n.id}] #{n.content}"
+      base = "- [#{n.id}]#{project_tag(n, project_names)} #{n.content}"
 
       case Memory.similar_nodes(n, readable_levels,
              limit: @neighbor_limit,
@@ -560,13 +593,27 @@ defmodule Manfrod.Memory.Retrospector do
             Enum.map(neighbors, fn {m, distance} ->
               similarity = Float.round(1.0 - distance, 2)
               flag = if distance < @likely_duplicate_distance, do: " LIKELY DUPLICATE —", else: ""
-              "    ~ [#{m.id}] (sim #{similarity})#{flag} #{m.content}"
+
+              "    ~ [#{m.id}]#{project_tag(m, project_names)} (sim #{similarity})#{flag} #{m.content}"
             end)
 
           Enum.join([base | neighbor_lines], "\n")
       end
     end)
     |> Enum.join("\n")
+  end
+
+  defp project_name_map do
+    Map.new(Memory.list_projects(), fn p -> {p.id, p.name} end)
+  end
+
+  defp project_tag(%{project_id: nil}, _project_names), do: ""
+
+  defp project_tag(%{project_id: project_id}, project_names) do
+    case Map.get(project_names, project_id) do
+      nil -> ""
+      name -> " [project: #{name}]"
+    end
   end
 
   defp build_user_message(slipbox_text, review_text) do
@@ -852,12 +899,24 @@ defmodule Manfrod.Memory.Retrospector do
       ReqLLM.Tool.new!(
         name: "search",
         description:
-          "Search the knowledge graph for related nodes. Uses semantic similarity and keyword matching.",
+          "Search the knowledge graph for related nodes. Uses semantic similarity and keyword matching. Optionally scope to one project — useful when working through a cluster of project-tagged nodes to find its in-project connections.",
         parameter_schema: [
           query: [type: :string, required: true, doc: "Search query text"],
-          limit: [type: :integer, doc: "Maximum results to return (default: 5)"]
+          limit: [type: :integer, doc: "Maximum results to return (default: 5)"],
+          project: [
+            type: :string,
+            required: false,
+            doc: "Project name or slug to scope results to (see list_projects)"
+          ]
         ],
         callback: fn args -> tool_search(user_id, readable_levels, args) end
+      ),
+      ReqLLM.Tool.new!(
+        name: "list_projects",
+        description:
+          "List all known projects (name + slug). Use to confirm a project's exact name before scoping search to it or tagging a node with it.",
+        parameter_schema: [],
+        callback: fn _args -> tool_list_projects() end
       ),
       ReqLLM.Tool.new!(
         name: "get_node",
@@ -880,12 +939,18 @@ defmodule Manfrod.Memory.Retrospector do
       ReqLLM.Tool.new!(
         name: "create_node",
         description:
-          "Create a new node in the knowledge graph. Returns the new node's ID. New nodes are created as already processed (they're derived insights, not raw observations).",
+          "Create a new node in the knowledge graph. Returns the new node's ID. New nodes are created as already processed (they're derived insights, not raw observations). Tag it with `project` when it's a project-specific insight or structure/hub note for that project.",
         parameter_schema: [
           content: [
             type: :string,
             required: true,
             doc: "The atomic idea or fact (1-2 sentences)"
+          ],
+          project: [
+            type: :string,
+            required: false,
+            doc:
+              "Project name or slug this node belongs to, if project-specific (see list_projects). Omit for general/cross-project nodes."
           ]
         ],
         callback: fn args -> tool_create_node(create_user_id, write_access, args) end
@@ -893,13 +958,19 @@ defmodule Manfrod.Memory.Retrospector do
       ReqLLM.Tool.new!(
         name: "update_node",
         description:
-          "Update a node's content. Use this to consolidate duplicates: merge info into one node and delete the other. Re-embeds automatically. Preserves the node's ID, links, and provenance.",
+          "Update a node's content. Use this to consolidate duplicates: merge info into one node and delete the other. Re-embeds automatically. Preserves the node's ID, links, and provenance. Can also set/correct which project the node belongs to.",
         parameter_schema: [
           id: [type: :string, required: true, doc: "Node UUID to update"],
           content: [
             type: :string,
             required: true,
             doc: "The new content for the node (1-2 sentences)"
+          ],
+          project: [
+            type: :string,
+            required: false,
+            doc:
+              "Set/correct this node's project (name or slug, see list_projects). Omit to leave its current project attribution unchanged."
           ]
         ],
         callback: fn args -> tool_update_node(readable_levels, args) end
@@ -990,19 +1061,55 @@ defmodule Manfrod.Memory.Retrospector do
 
   defp tool_search(user_id, readable_levels, %{query: query} = args) do
     limit = Map.get(args, :limit, 5)
-    {:ok, nodes} = Memory.search(user_id, readable_levels, query, limit: limit)
+    project_name = Map.get(args, :project)
 
-    if Enum.empty?(nodes) do
-      {:ok, "No matching nodes found."}
-    else
-      result =
-        nodes
-        |> Enum.map(fn n -> "- [#{n.id}] #{n.content}" end)
-        |> Enum.join("\n")
+    case resolve_project_id(project_name) do
+      {:ok, project_id} ->
+        {:ok, nodes} =
+          Memory.search(user_id, readable_levels, query, limit: limit, project_id: project_id)
 
-      {:ok, "Found #{length(nodes)} nodes:\n#{result}"}
+        if Enum.empty?(nodes) do
+          {:ok, "No matching nodes found."}
+        else
+          result =
+            nodes
+            |> Enum.map(fn n -> "- [#{n.id}] #{n.content}" end)
+            |> Enum.join("\n")
+
+          {:ok, "Found #{length(nodes)} nodes:\n#{result}"}
+        end
+
+      {:error, :unknown_project} ->
+        {:ok, unknown_project_message(project_name)}
     end
   end
+
+  defp tool_list_projects do
+    case Memory.list_projects() do
+      [] ->
+        {:ok, "No projects configured."}
+
+      projects ->
+        lines = Enum.map(projects, fn p -> "- #{p.name} (slug: #{p.slug})" end)
+        {:ok, "Projects:\n#{Enum.join(lines, "\n")}"}
+    end
+  end
+
+  # nil (project not named): no scoping/no change. A named project that
+  # doesn't match anything is a real error, not a silent no-op — the agent
+  # should call list_projects and retry rather than the node landing
+  # unscoped or unfiltered because of a typo.
+  defp resolve_project_id(nil), do: {:ok, nil}
+
+  defp resolve_project_id(name) do
+    case Memory.find_project(name) do
+      nil -> {:error, :unknown_project}
+      project -> {:ok, project.id}
+    end
+  end
+
+  defp unknown_project_message(name),
+    do: "Nie znalazłem projektu \"#{name}\" — sprawdź listę przez list_projects."
 
   defp tool_get_node(readable_levels, %{id: id}) do
     case Memory.get_node_accessible(readable_levels, id) do
@@ -1038,47 +1145,67 @@ defmodule Manfrod.Memory.Retrospector do
     end
   end
 
-  defp tool_create_node(user_id, write_access, %{content: content}) do
-    case Voyage.embed_query(content) do
-      {:ok, embedding} ->
-        now = DateTime.utc_now() |> DateTime.truncate(:second)
+  defp tool_create_node(user_id, write_access, %{content: content} = args) do
+    project_name = Map.get(args, :project)
 
-        case Memory.create_node(user_id, write_access, %{
-               content: content,
-               embedding: embedding,
-               processed_at: now
-             }) do
-          {:ok, node} ->
-            {:ok, "Created node: #{node.id}"}
+    case resolve_project_id(project_name) do
+      {:ok, project_id} ->
+        case Voyage.embed_query(content) do
+          {:ok, embedding} ->
+            now = DateTime.utc_now() |> DateTime.truncate(:second)
 
-          {:error, changeset} ->
-            {:ok, "Failed to create node: #{inspect(changeset.errors)}"}
+            case Memory.create_node(user_id, write_access, %{
+                   content: content,
+                   embedding: embedding,
+                   processed_at: now,
+                   project_id: project_id
+                 }) do
+              {:ok, node} ->
+                {:ok, "Created node: #{node.id}"}
+
+              {:error, changeset} ->
+                {:ok, "Failed to create node: #{inspect(changeset.errors)}"}
+            end
+
+          {:error, reason} ->
+            {:ok, "Failed to generate embedding: #{inspect(reason)}"}
         end
 
-      {:error, reason} ->
-        {:ok, "Failed to generate embedding: #{inspect(reason)}"}
+      {:error, :unknown_project} ->
+        {:ok, unknown_project_message(project_name)}
     end
   end
 
-  defp tool_update_node(readable_levels, %{id: id, content: content}) do
-    case Voyage.embed_query(content) do
-      {:ok, embedding} ->
-        case Memory.update_node_accessible(readable_levels, id, %{
-               content: content,
-               embedding: embedding
-             }) do
-          {:ok, _node} ->
-            {:ok, "Updated node: #{id}"}
+  defp tool_update_node(readable_levels, %{id: id, content: content} = args) do
+    project_name = Map.get(args, :project)
 
-          {:error, :not_found} ->
-            {:ok, "Node not found: #{id}"}
+    case resolve_project_id(project_name) do
+      {:ok, project_id} ->
+        case Voyage.embed_query(content) do
+          {:ok, embedding} ->
+            attrs = %{content: content, embedding: embedding}
+            # Only touch project_id when the agent explicitly named one —
+            # most update_node calls are content-only fixes and must not
+            # silently clear an existing project attribution.
+            attrs = if project_name, do: Map.put(attrs, :project_id, project_id), else: attrs
 
-          {:error, changeset} ->
-            {:ok, "Failed to update node: #{inspect(changeset.errors)}"}
+            case Memory.update_node_accessible(readable_levels, id, attrs) do
+              {:ok, _node} ->
+                {:ok, "Updated node: #{id}"}
+
+              {:error, :not_found} ->
+                {:ok, "Node not found: #{id}"}
+
+              {:error, changeset} ->
+                {:ok, "Failed to update node: #{inspect(changeset.errors)}"}
+            end
+
+          {:error, reason} ->
+            {:ok, "Failed to generate embedding: #{inspect(reason)}"}
         end
 
-      {:error, reason} ->
-        {:ok, "Failed to generate embedding: #{inspect(reason)}"}
+      {:error, :unknown_project} ->
+        {:ok, unknown_project_message(project_name)}
     end
   end
 
