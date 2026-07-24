@@ -76,14 +76,14 @@ config :manfrod, Oban,
     {Oban.Plugins.Lifeline, rescue_after: :timer.hours(4)},
     {Oban.Plugins.Cron,
      crontab: [
-       # Every 2 hours - memory retrospection (slipbox drain)
-       {"0 */2 * * *", Manfrod.Workers.RetrospectionWorker},
+       # Every hour - memory retrospection (slipbox drain)
+       {"5 * * * *", Manfrod.Workers.RetrospectionWorker},
        # Daily at 2:10am - deep review of the already-integrated graph
        # (duplicates/orphans independent of slipbox state)
        {"10 2 * * *", Manfrod.Workers.GraphReviewWorker},
-       # Every hour - schedule reminder triggers for next 48h
+       # Every hour - schedule reminder triggers for next 12h
        {"0 * * * *", Manfrod.Workers.SchedulerWorker},
-       # Every hour - schedule cron-skill triggers for next 48h (skills
+       # Every hour - schedule cron-skill triggers for next 12h (skills
        # with a `cron:` frontmatter field; none exist yet)
        {"0 * * * *", Manfrod.Workers.SkillSchedulerWorker}
      ]}

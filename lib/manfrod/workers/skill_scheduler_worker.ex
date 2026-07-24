@@ -2,7 +2,7 @@ defmodule Manfrod.Workers.SkillSchedulerWorker do
   @moduledoc """
   Runs hourly via Oban cron. Reads skills that declare a `cron` field in
   their frontmatter (`Manfrod.Skills.list_cron_skills/0`) and idempotently
-  schedules `SkillTriggerWorker` jobs for the next 48 hours.
+  schedules `SkillTriggerWorker` jobs for the next 12 hours.
 
   Mirrors `Manfrod.Workers.SchedulerWorker` (recurring reminders), but for
   cron-skills instead of per-user reminders — cron-skills have no owning
@@ -18,7 +18,7 @@ defmodule Manfrod.Workers.SkillSchedulerWorker do
   alias Manfrod.Skills
   alias Manfrod.Workers.SkillTriggerWorker
 
-  @schedule_window_hours 48
+  @schedule_window_hours 12
   @timezone "Europe/Warsaw"
 
   @impl Oban.Worker

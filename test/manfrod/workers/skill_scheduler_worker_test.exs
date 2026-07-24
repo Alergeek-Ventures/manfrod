@@ -4,23 +4,23 @@ defmodule Manfrod.Workers.SkillSchedulerWorkerTest do
   alias Manfrod.Workers.SkillSchedulerWorker
 
   describe "next_occurrences/2" do
-    test "returns occurrences within the 48h window for a daily cron" do
+    test "returns occurrences within the 12h window for a daily cron" do
       # Deliberately not on a cron boundary, to avoid ambiguity over whether
       # an exact-match "now" counts as its own next occurrence.
-      now = ~U[2026-07-17 10:30:00Z]
+      now = ~U[2026-07-17 08:00:00Z]
       skill = %{name: "daily-check", cron: "0 12 * * *"}
 
       occurrences = SkillSchedulerWorker.next_occurrences(skill, now)
 
       # Europe/Warsaw is UTC+2 in July (DST) — 12:00 local == 10:00 UTC.
-      # Next two firings (tomorrow, day after) fall inside the 48h window;
-      # the third (+71.5h) does not.
-      assert length(occurrences) == 2
+      # Today's firing (+2h) falls inside the 12h window; tomorrow's (+26h)
+      # does not.
+      assert length(occurrences) == 1
       assert Enum.all?(occurrences, &(DateTime.compare(&1, now) == :gt))
 
       assert Enum.all?(
                occurrences,
-               &(DateTime.compare(&1, DateTime.add(now, 48, :hour)) in [:lt, :eq])
+               &(DateTime.compare(&1, DateTime.add(now, 12, :hour)) in [:lt, :eq])
              )
     end
 
@@ -32,7 +32,7 @@ defmodule Manfrod.Workers.SkillSchedulerWorkerTest do
 
     test "returns an empty list when the next occurrence is outside the window" do
       now = ~U[2026-07-17 10:00:00Z]
-      # Fires once a year on Jan 1 — far outside any 48h window.
+      # Fires once a year on Jan 1 — far outside any 12h window.
       skill = %{name: "yearly", cron: "0 0 1 1 *"}
 
       assert SkillSchedulerWorker.next_occurrences(skill, now) == []

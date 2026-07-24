@@ -1,14 +1,14 @@
 defmodule Manfrod.Workers.SchedulerWorker do
   @moduledoc """
   Runs hourly via Oban cron. Reads recurring reminders from the database
-  and idempotently schedules `TriggerWorker` jobs for the next 48 hours.
+  and idempotently schedules `TriggerWorker` jobs for the next 12 hours.
 
   Iterates all enabled recurring reminders across all users.
 
   ## How it works
 
   1. Reads all enabled recurring reminders from `Manfrod.Memory`
-  2. For each reminder, calculates the next occurrences within 48 hours using cron expression
+  2. For each reminder, calculates the next occurrences within 12 hours using cron expression
   3. Inserts `TriggerWorker` jobs with Oban's uniqueness constraint
   4. Duplicate jobs (same recurring_reminder_id + scheduled_at) are skipped automatically
 
@@ -25,7 +25,7 @@ defmodule Manfrod.Workers.SchedulerWorker do
 
   alias Manfrod.Workers.TriggerWorker
 
-  @schedule_window_hours 48
+  @schedule_window_hours 12
 
   @impl Oban.Worker
   def perform(%Oban.Job{}) do
