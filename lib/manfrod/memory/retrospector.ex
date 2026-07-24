@@ -657,17 +657,10 @@ defmodule Manfrod.Memory.Retrospector do
     slipbox_section <> review_section
   end
 
-  # Bounds on a single agent run. Both exist because either one alone can
-  # blow up: a run can stay under the iteration cap while still growing the
-  # resent conversation history into the hundreds of thousands of tokens
-  # (observed: 73 iterations in one run cost 2.7M input tokens, growing
-  # linearly from 18k to 53k tokens per call as history accumulated), or hit
-  # many cheap iterations that never trip the token budget. Hitting either
-  # cap ends the run early — the rest of the slipbox/review sample is picked
-  # up by the next cron tick or the next batch in process_bucket/5, so no
-  # work is lost, just deferred.
+  # Bounds a single agent run's iteration count — the rest of the
+  # slipbox/review sample is picked up by the next cron tick or the next
+  # batch in process_bucket/5, so no work is lost, just deferred.
   @max_iterations 150
-  @token_budget 500_000
 
   # Every this many iterations, fold everything except the original
   # system/user framing and the most recent turn into a short progress
@@ -676,120 +669,115 @@ defmodule Manfrod.Memory.Retrospector do
   @compact_every 10
 
   defp call_with_tools(user_id, readable_levels, write_access, messages, iteration, stats) do
-    cond do
-      iteration > @max_iterations ->
-        {:error, :max_iterations}
+    if iteration > @max_iterations do
+      {:error, :max_iterations}
+    else
+      ctx = %{user_id: user_id, source: :retrospector}
 
-      stats.input_tokens_used > @token_budget ->
-        {:error, :token_budget_exceeded}
+      case LLM.generate_text(messages,
+             tools: tools(user_id, readable_levels, write_access),
+             purpose: :retrospector
+           ) do
+        {:ok, response} ->
+          usage = ReqLLM.Response.usage(response) || %{}
+          call_input_tokens = usage[:input_tokens] || 0
+          stats = Map.update!(stats, :input_tokens_used, &(&1 + call_input_tokens))
 
-      true ->
-        ctx = %{user_id: user_id, source: :retrospector}
+          case ReqLLM.Response.finish_reason(response) do
+            :tool_calls ->
+              tool_calls = ReqLLM.Response.tool_calls(response)
+              narrative = ReqLLM.Response.text(response) || ""
 
-        case LLM.generate_text(messages,
-               tools: tools(user_id, readable_levels, write_access),
-               purpose: :retrospector
-             ) do
-          {:ok, response} ->
-            usage = ReqLLM.Response.usage(response) || %{}
-            call_input_tokens = usage[:input_tokens] || 0
-            stats = Map.update!(stats, :input_tokens_used, &(&1 + call_input_tokens))
+              Logger.debug(
+                "Retrospector: executing #{length(tool_calls)} tool(s), iteration #{iteration}"
+              )
 
-            case ReqLLM.Response.finish_reason(response) do
-              :tool_calls ->
-                tool_calls = ReqLLM.Response.tool_calls(response)
-                narrative = ReqLLM.Response.text(response) || ""
-
-                Logger.debug(
-                  "Retrospector: executing #{length(tool_calls)} tool(s), iteration #{iteration}"
+              # Broadcast narrative text if present
+              if narrative != "" do
+                Events.broadcast(
+                  :narrating,
+                  Map.put(ctx, :meta, %{text: narrative, iteration: iteration})
                 )
+              end
 
-                # Broadcast narrative text if present
-                if narrative != "" do
+              # Add assistant message with tool calls
+              assistant_msg = ReqLLM.Context.assistant(narrative, tool_calls: tool_calls)
+              messages_with_assistant = messages ++ [assistant_msg]
+
+              # Execute tools, add results, and update stats
+              {messages_with_results, new_stats} =
+                Enum.reduce(tool_calls, {messages_with_assistant, stats}, fn tool_call,
+                                                                             {msgs, acc_stats} ->
+                  action_id = generate_action_id()
+                  action_name = tool_call.function.name
+                  args = tool_call.function.arguments
+
+                  # Broadcast action started
                   Events.broadcast(
-                    :narrating,
-                    Map.put(ctx, :meta, %{text: narrative, iteration: iteration})
+                    :action_started,
+                    Map.put(ctx, :meta, %{
+                      action_id: action_id,
+                      action: action_name,
+                      args: args,
+                      iteration: iteration
+                    })
                   )
-                end
 
-                # Add assistant message with tool calls
-                assistant_msg = ReqLLM.Context.assistant(narrative, tool_calls: tool_calls)
-                messages_with_assistant = messages ++ [assistant_msg]
+                  # Execute and time the action
+                  {result, duration_ms, success} =
+                    timed_execute_tool(user_id, readable_levels, write_access, tool_call)
 
-                # Execute tools, add results, and update stats
-                {messages_with_results, new_stats} =
-                  Enum.reduce(tool_calls, {messages_with_assistant, stats}, fn tool_call,
-                                                                               {msgs, acc_stats} ->
-                    action_id = generate_action_id()
-                    action_name = tool_call.function.name
-                    args = tool_call.function.arguments
+                  # Broadcast action completed
+                  Events.broadcast(
+                    :action_completed,
+                    Map.put(ctx, :meta, %{
+                      action_id: action_id,
+                      action: action_name,
+                      result: truncate_result(result),
+                      duration_ms: duration_ms,
+                      success: success,
+                      iteration: iteration
+                    })
+                  )
 
-                    # Broadcast action started
-                    Events.broadcast(
-                      :action_started,
-                      Map.put(ctx, :meta, %{
-                        action_id: action_id,
-                        action: action_name,
-                        args: args,
-                        iteration: iteration
-                      })
-                    )
+                  tool_result_msg =
+                    ReqLLM.Context.tool_result(tool_call.id, action_name, result)
 
-                    # Execute and time the action
-                    {result, duration_ms, success} =
-                      timed_execute_tool(user_id, readable_levels, write_access, tool_call)
+                  updated_stats = update_stats(acc_stats, action_name)
+                  {msgs ++ [tool_result_msg], updated_stats}
+                end)
 
-                    # Broadcast action completed
-                    Events.broadcast(
-                      :action_completed,
-                      Map.put(ctx, :meta, %{
-                        action_id: action_id,
-                        action: action_name,
-                        result: truncate_result(result),
-                        duration_ms: duration_ms,
-                        success: success,
-                        iteration: iteration
-                      })
-                    )
+              next_messages =
+                maybe_compact(messages, messages_with_results, new_stats, iteration + 1)
 
-                    tool_result_msg =
-                      ReqLLM.Context.tool_result(tool_call.id, action_name, result)
+              # Continue
+              call_with_tools(
+                user_id,
+                readable_levels,
+                write_access,
+                next_messages,
+                iteration + 1,
+                new_stats
+              )
 
-                    updated_stats = update_stats(acc_stats, action_name)
-                    {msgs ++ [tool_result_msg], updated_stats}
-                  end)
+            _other ->
+              text = ReqLLM.Response.text(response) || ""
+              Logger.debug("Retrospector: agent finished with: #{String.slice(text, 0, 100)}")
 
-                next_messages =
-                  maybe_compact(messages, messages_with_results, new_stats, iteration + 1)
-
-                # Continue
-                call_with_tools(
-                  user_id,
-                  readable_levels,
-                  write_access,
-                  next_messages,
-                  iteration + 1,
-                  new_stats
+              # Broadcast final narrative
+              if text != "" do
+                Events.broadcast(
+                  :narrating,
+                  Map.put(ctx, :meta, %{text: text, iteration: iteration, final: true})
                 )
+              end
 
-              _other ->
-                text = ReqLLM.Response.text(response) || ""
-                Logger.debug("Retrospector: agent finished with: #{String.slice(text, 0, 100)}")
+              {:ok, text, stats}
+          end
 
-                # Broadcast final narrative
-                if text != "" do
-                  Events.broadcast(
-                    :narrating,
-                    Map.put(ctx, :meta, %{text: text, iteration: iteration, final: true})
-                  )
-                end
-
-                {:ok, text, stats}
-            end
-
-          {:error, _} = err ->
-            err
-        end
+        {:error, _} = err ->
+          err
+      end
     end
   end
 
