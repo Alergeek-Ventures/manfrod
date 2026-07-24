@@ -1,14 +1,16 @@
 ---
 name: desk-digest
-description: Daily 18:00 digest of tomorrow's desk bookings and map, posted automatically to a fixed channel. Not for on-demand use via use_skill — SkillSchedulerWorker/SkillRunner triggers this autonomously and feeds you this file's body directly as instructions.
-cron: "0 18 * * *"
+description: Sun-Thu 18:00 digest of tomorrow's desk bookings and map, posted automatically to a fixed channel. Skipped Fri/Sat since desks aren't shown a day ahead on weekends. Not for on-demand use via use_skill — SkillSchedulerWorker/SkillRunner triggers this autonomously and feeds you this file's body directly as instructions.
+cron: "0 18 * * 0-4"
 channel: "C087QF130R3"
 ---
 
 # Desk digest (cron skill)
 
-You're running on a schedule (18:00 Europe/Warsaw), not replying to a
-message — there's no user to ask questions or wait for. Just do this:
+You're running on a schedule (18:00 Europe/Warsaw, Sun-Thu only — so
+Mon-Fri desks get shown the evening before, and no digest fires on
+Fri/Sat evenings), not replying to a message — there's no user to ask
+questions or wait for. Just do this:
 
 1. Work out tomorrow's date from the current time given in your system
    prompt.
