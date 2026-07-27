@@ -245,6 +245,56 @@ defmodule Manfrod.Slack.API do
     post("chat.delete", token, %{channel: channel, ts: ts})
   end
 
+  @doc """
+  Look up channel info (name, im/mpim flags) by ID. Returns Slack's raw
+  `conversations.info` `"channel"` map, or `{:error, reason}`.
+  """
+  @spec get_channel_info(String.t(), String.t()) :: {:ok, map()} | {:error, term()}
+  def get_channel_info(token, channel) do
+    case get("conversations.info", token, %{channel: channel}) do
+      {:ok, %{"channel" => info}} -> {:ok, info}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @doc """
+  Fetch the most recent messages posted directly in a channel (top-level,
+  not thread replies), oldest-first, up to `limit` (Slack default order is
+  newest-first; this reverses it for chronological reading).
+
+  Requires the `channels:history` / `groups:history` / `im:history` /
+  `mpim:history` bot scope matching the channel type.
+
+  Returns `{:ok, messages}` where each message is Slack's raw event map, or
+  `{:error, reason}`.
+  """
+  @spec list_messages(String.t(), String.t(), keyword()) :: {:ok, [map()]} | {:error, term()}
+  def list_messages(token, channel, opts \\ []) do
+    params = %{channel: channel, limit: Keyword.get(opts, :limit, 20)}
+
+    case get("conversations.history", token, params) do
+      {:ok, %{"messages" => messages}} -> {:ok, Enum.reverse(messages)}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @doc """
+  Fetch all replies in a thread (including the parent message as the first
+  entry), oldest-first, up to `limit`.
+
+  Returns `{:ok, messages}` or `{:error, reason}`.
+  """
+  @spec list_thread_replies(String.t(), String.t(), String.t(), keyword()) ::
+          {:ok, [map()]} | {:error, term()}
+  def list_thread_replies(token, channel, thread_ts, opts \\ []) do
+    params = %{channel: channel, ts: thread_ts, limit: Keyword.get(opts, :limit, 50)}
+
+    case get("conversations.replies", token, params) do
+      {:ok, %{"messages" => messages}} -> {:ok, messages}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
   defp parse_retry_after(nil), do: 1
   defp parse_retry_after(value) when is_binary(value), do: String.to_integer(value)
 end
