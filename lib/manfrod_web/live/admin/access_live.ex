@@ -5,8 +5,10 @@ defmodule ManfrodWeb.Admin.AccessLive do
 
   alias Manfrod.Accounts
   alias Manfrod.Facts
+  alias Manfrod.Memory
   alias Manfrod.Repo
   alias Manfrod.Memory.{ChannelMapping, Fact, Project, ProjectMembership}
+  alias Manfrod.Skills
 
   @impl true
   def mount(_params, _session, socket) do
@@ -20,12 +22,14 @@ defmodule ManfrodWeb.Admin.AccessLive do
      )
      |> assign(editing_vacation_id: nil)
      |> assign(editing_vacation_value: "")
+     |> assign(editing_cron_id: nil)
+     |> assign(editing_cron_form: %{})
      |> load_data()}
   end
 
   @impl true
   def handle_params(%{"tab" => tab}, _uri, socket)
-      when tab in ~w(projects channels members vacations) do
+      when tab in ~w(projects channels members vacations cron) do
     {:noreply, assign(socket, tab: tab)}
   end
 
@@ -160,6 +164,92 @@ defmodule ManfrodWeb.Admin.AccessLive do
     end
   end
 
+  def handle_event("edit_cron", %{"id" => id}, socket) do
+    case Memory.get_recurring_reminder(id) do
+      nil ->
+        {:noreply, put_flash(socket, :error, "Nie znaleziono crona")}
+
+      reminder ->
+        {:noreply,
+         assign(socket,
+           editing_cron_id: reminder.id,
+           editing_cron_form: %{
+             "cron" => reminder.cron,
+             "timezone" => reminder.timezone,
+             "instructions" => reminder.instructions
+           }
+         )}
+    end
+  end
+
+  def handle_event("update_cron_form", %{"field" => field, "value" => value}, socket) do
+    form = Map.put(socket.assigns.editing_cron_form, field, value)
+    {:noreply, assign(socket, editing_cron_form: form)}
+  end
+
+  def handle_event("cancel_edit_cron", _params, socket) do
+    {:noreply, assign(socket, editing_cron_id: nil, editing_cron_form: %{})}
+  end
+
+  def handle_event("save_cron_edit", %{"id" => id}, socket) do
+    case Memory.get_recurring_reminder(id) do
+      nil ->
+        {:noreply, put_flash(socket, :error, "Nie znaleziono crona")}
+
+      reminder ->
+        %{"cron" => cron, "timezone" => timezone, "instructions" => instructions} =
+          socket.assigns.editing_cron_form
+
+        attrs = %{cron: cron, timezone: timezone, instructions: instructions}
+
+        case Memory.update_recurring_reminder(reminder.user_id, reminder, attrs) do
+          {:ok, _updated} ->
+            {:noreply,
+             socket
+             |> assign(editing_cron_id: nil, editing_cron_form: %{})
+             |> load_data()
+             |> put_flash(:info, "Cron zaktualizowany")}
+
+          {:error, changeset} ->
+            {:noreply, put_flash(socket, :error, "Błąd: #{format_changeset_errors(changeset)}")}
+        end
+    end
+  end
+
+  def handle_event("toggle_cron_enabled", %{"id" => id}, socket) do
+    case Memory.get_recurring_reminder(id) do
+      nil ->
+        {:noreply, put_flash(socket, :error, "Nie znaleziono crona")}
+
+      reminder ->
+        case Memory.update_recurring_reminder(reminder.user_id, reminder, %{
+               enabled: !reminder.enabled
+             }) do
+          {:ok, _updated} ->
+            {:noreply, socket |> load_data() |> put_flash(:info, "Zaktualizowano")}
+
+          {:error, changeset} ->
+            {:noreply, put_flash(socket, :error, "Błąd: #{format_changeset_errors(changeset)}")}
+        end
+    end
+  end
+
+  def handle_event("delete_cron", %{"id" => id}, socket) do
+    case Memory.get_recurring_reminder(id) do
+      nil ->
+        {:noreply, put_flash(socket, :error, "Nie znaleziono crona")}
+
+      reminder ->
+        case Memory.delete_recurring_reminder(reminder.user_id, reminder) do
+          {:ok, _deleted} ->
+            {:noreply, socket |> load_data() |> put_flash(:info, "Cron usunięty")}
+
+          {:error, _reason} ->
+            {:noreply, put_flash(socket, :error, "Nie udało się usunąć crona")}
+        end
+    end
+  end
+
   def handle_event("activate_mapping", %{"id" => id}, socket) do
     toggle_mapping_status(id, "active", socket)
   end
@@ -276,12 +366,66 @@ defmodule ManfrodWeb.Admin.AccessLive do
           order_by: [desc: f.inserted_at]
       )
 
+    cron_rows = build_cron_rows()
+
     socket
     |> assign(projects: projects)
     |> assign(channels: channels)
     |> assign(members: members)
     |> assign(users: users)
     |> assign(vacations: vacations)
+    |> assign(cron_rows: cron_rows)
+  end
+
+  # Skill-crons (from SKILL.md frontmatter, read-only, no owning user) and
+  # user recurring reminders (DB-backed, editable/deletable, owned by a
+  # user) are structurally different, but the admin cron tab shows them as
+  # one merged, sortable list — so normalize both into a common row shape
+  # here rather than juggling two shapes in the template.
+  defp build_cron_rows do
+    skill_rows =
+      Skills.list_cron_skills()
+      |> Enum.map(fn skill ->
+        %{
+          type: :skill,
+          id: nil,
+          name: skill.name,
+          cron: skill.cron,
+          timezone: "Europe/Warsaw",
+          enabled: true,
+          owner_name: "Skill",
+          owner_slack_id: nil,
+          detail: skill.description,
+          channel: skill.channel
+        }
+      end)
+
+    user_rows =
+      Memory.list_all_recurring_reminders()
+      |> Enum.map(fn reminder ->
+        %{
+          type: :user,
+          id: reminder.id,
+          name: reminder.name,
+          cron: reminder.cron,
+          timezone: reminder.timezone,
+          enabled: reminder.enabled,
+          owner_name: reminder.user && reminder.user.name,
+          owner_slack_id: reminder.user && reminder.user.slack_id,
+          detail: reminder.instructions,
+          channel: nil
+        }
+      end)
+
+    Enum.sort_by(skill_rows ++ user_rows, & &1.name)
+  end
+
+  # Skill rows carry `id: nil` (there's no DB row behind them) and
+  # `editing_cron_id` is nil whenever nothing is being edited — so a bare
+  # `@editing_cron_id == row.id` is true for every skill row at rest and
+  # renders them all as edit forms. Only user rows are ever editable.
+  defp editing?(editing_cron_id, row) do
+    row.type == :user and editing_cron_id == row.id
   end
 
   defp blank_to_default("", default), do: default

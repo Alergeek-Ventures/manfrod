@@ -76,30 +76,10 @@ defmodule Manfrod.Workers.TriggerWorker do
   end
 
   defp build_recurring_reminder_prompt(reminder) do
-    node = reminder.node
-    linked_nodes = Memory.get_node_links(reminder.user_id, node.id)
-
-    linked_section =
-      if linked_nodes == [] do
-        ""
-      else
-        linked_items =
-          linked_nodes
-          |> Enum.map(fn n -> "- [#{n.id}] #{n.content}" end)
-          |> Enum.join("\n")
-
-        """
-
-        ---
-        Linked notes:
-        #{linked_items}
-        """
-      end
-
     """
     [Recurring Reminder: #{reminder.name}]
 
-    #{node.content}#{linked_section}
+    #{reminder.instructions}
     """
     |> String.trim()
   end
