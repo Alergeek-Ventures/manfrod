@@ -135,31 +135,15 @@ defmodule Manfrod.Tools.Holidays do
   end
 
   defp absence_covering(readable_levels, user_id, target) do
-    (Facts.list_facts_by_user("absence:", user_id, readable_levels) ++
-       Facts.list_facts_by_user("vacation:", user_id, readable_levels))
+    Facts.list_facts_by_user("absence:", user_id, readable_levels)
     |> Enum.find_value(:not_covered, fn fact ->
-      with {:ok, from, to} <- date_range(fact.value),
+      with {:ok, from, to} <- Facts.parse_date_range(fact.value),
            true <- Date.compare(target, from) != :lt and Date.compare(target, to) != :gt do
         {:covered, fact.value}
       else
         _ -> false
       end
     end)
-  end
-
-  defp date_range(value) do
-    case Regex.run(~r/^(\d{4}-\d{2}-\d{2})\.\.(\d{4}-\d{2}-\d{2})/, value) do
-      [_, from_s, to_s] ->
-        with {:ok, from} <- Date.from_iso8601(from_s),
-             {:ok, to} <- Date.from_iso8601(to_s) do
-          {:ok, from, to}
-        else
-          _ -> :error
-        end
-
-      _ ->
-        :error
-    end
   end
 
   defp recorded_plan_status(readable_levels, user_id, date) do

@@ -47,7 +47,7 @@ defmodule Manfrod.Tools.Vacation do
 
   defp report_vacation_direct(user_id, start_date, end_date) do
     note = absence_note(user_id, start_date, end_date)
-    key = "vacation:#{user_id}:#{start_date}"
+    key = "absence:#{user_id}:#{start_date}"
     value = "#{start_date}..#{end_date} — #{note}"
     access = ["internal", "external/all"]
 

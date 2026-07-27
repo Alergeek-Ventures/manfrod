@@ -219,41 +219,45 @@ defmodule Manfrod.Memory.Classifier do
     user_id = find_user_id(message["user"])
     {start_date, end_date} = absence_dates(result)
 
-    # Fact value keeps the resolved conclusion first; the literal message stays
-    # as provenance. The key carries the resolved start date, not "today".
-    key = "absence:#{user_name}:#{start_date}"
-    value = "#{start_date}..#{end_date} — \"#{text}\""
-    Facts.set_fact(key, value, write_access, user_id)
+    if user_id && already_recorded_absence?(user_id, start_date, end_date) do
+      Logger.debug("Classifier create_absence: already covered for #{user_id}, skipping")
+    else
+      # Fact value keeps the resolved conclusion first; the literal message stays
+      # as provenance. The key carries the resolved start date, not "today".
+      key = "absence:#{user_id || user_name}:#{start_date}"
+      value = "#{start_date}..#{end_date} — \"#{text}\""
+      Facts.set_fact(key, value, write_access, user_id)
 
-    if user_id do
-      note = note_or_text(result, message)
+      if user_id do
+        note = note_or_text(result, message)
 
-      case Voyage.embed_query(note) do
-        {:ok, embedding} ->
-          node_attrs = %{
-            content: note,
-            embedding: embedding,
-            project_id: project_id_for_channel(channel_id)
-          }
+        case Voyage.embed_query(note) do
+          {:ok, embedding} ->
+            node_attrs = %{
+              content: note,
+              embedding: embedding,
+              project_id: project_id_for_channel(channel_id)
+            }
 
-          case Memory.create_node(user_id, write_access, node_attrs) do
-            {:ok, node} ->
-              maybe_propose_absence_escalation(
-                channel_id,
-                kind,
-                message["ts"],
-                node,
-                key,
-                write_access,
-                bot_token
-              )
+            case Memory.create_node(user_id, write_access, node_attrs) do
+              {:ok, node} ->
+                maybe_propose_absence_escalation(
+                  channel_id,
+                  kind,
+                  message["ts"],
+                  node,
+                  key,
+                  write_access,
+                  bot_token
+                )
 
-            {:error, reason} ->
-              Logger.error("Classifier create_absence node error: #{inspect(reason)}")
-          end
+              {:error, reason} ->
+                Logger.error("Classifier create_absence node error: #{inspect(reason)}")
+            end
 
-        {:error, reason} ->
-          Logger.error("Classifier create_absence embed error: #{inspect(reason)}")
+          {:error, reason} ->
+            Logger.error("Classifier create_absence embed error: #{inspect(reason)}")
+        end
       end
     end
 
@@ -312,6 +316,22 @@ defmodule Manfrod.Memory.Classifier do
   defp dispatch_action(unknown, _result, _message, _channel_id, _kind, _write_access, _bot_token) do
     Logger.warning("Classifier unknown action: #{unknown}")
     :ok
+  end
+
+  defp already_recorded_absence?(user_id, start_date, end_date) do
+    with {:ok, new_from} <- Date.from_iso8601(start_date),
+         {:ok, new_to} <- Date.from_iso8601(end_date) do
+      Facts.list_facts_by_user_unscoped("absence:", user_id)
+      |> Enum.any?(fn fact ->
+        with {:ok, from, to} <- Facts.parse_date_range(fact.value) do
+          Date.compare(new_from, to) != :gt and Date.compare(new_to, from) != :lt
+        else
+          _ -> false
+        end
+      end)
+    else
+      _ -> false
+    end
   end
 
   # -- Agent-flagged ops -------------------------------------------------------

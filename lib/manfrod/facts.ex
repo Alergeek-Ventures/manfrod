@@ -6,8 +6,8 @@ defmodule Manfrod.Facts do
   Unlike Memory nodes they are queried by key, not by semantic search.
 
   Examples:
-    set_fact("vacation:user-id", "2026-07-14..2026-07-21", ["internal", "external/all"], user_id)
-    list_facts("vacation:", ["internal", "external/all"])
+    set_fact("absence:user-id", "2026-07-14..2026-07-21", ["internal", "external/all"], user_id)
+    list_facts("absence:", ["internal", "external/all"])
   """
 
   import Ecto.Query
@@ -85,8 +85,9 @@ defmodule Manfrod.Facts do
   @doc """
   List facts whose key starts with the given prefix AND were set by a
   specific user, filtered by readable access levels. Useful when the key
-  itself doesn't embed the user id (e.g. `absence:<user_name>:<date>`, keyed
-  by display name, not id) — `set_by_user_id` is the reliable join.
+  falls back to a display name instead of the user id (e.g.
+  `absence:<user_name>:<date>`, for messages from unmapped Slack users) —
+  `set_by_user_id` is the reliable join in that case.
   """
   @spec list_facts_by_user(
           key_prefix :: String.t(),
@@ -101,5 +102,43 @@ defmodule Manfrod.Facts do
         where: ^Access.dynamic_where(readable_levels),
         order_by: [asc: f.key]
     )
+  end
+
+  @doc """
+  List facts whose key starts with the given prefix AND were set by a
+  specific user, ignoring access entirely. For system-level checks (e.g.
+  the classifier deduplicating a fact against what's already recorded)
+  where the caller isn't a reader whose visibility should be scoped —
+  never expose this through a tool the LLM can call directly.
+  """
+  @spec list_facts_by_user_unscoped(key_prefix :: String.t(), user_id :: binary()) :: [Fact.t()]
+  def list_facts_by_user_unscoped(key_prefix, user_id) do
+    Repo.all(
+      from f in Fact,
+        where: like(f.key, ^"#{key_prefix}%"),
+        where: f.set_by_user_id == ^user_id,
+        order_by: [asc: f.key]
+    )
+  end
+
+  @doc """
+  Parse a fact value of the form "YYYY-MM-DD..YYYY-MM-DD — ..." into its
+  {from, to} date range. Returns :error if the value doesn't start with a
+  recognizable date range.
+  """
+  @spec parse_date_range(value :: String.t()) :: {:ok, Date.t(), Date.t()} | :error
+  def parse_date_range(value) do
+    case Regex.run(~r/^(\d{4}-\d{2}-\d{2})\.\.(\d{4}-\d{2}-\d{2})/, value) do
+      [_, from_s, to_s] ->
+        with {:ok, from} <- Date.from_iso8601(from_s),
+             {:ok, to} <- Date.from_iso8601(to_s) do
+          {:ok, from, to}
+        else
+          _ -> :error
+        end
+
+      _ ->
+        :error
+    end
   end
 end
