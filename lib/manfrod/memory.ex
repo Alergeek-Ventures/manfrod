@@ -1261,12 +1261,34 @@ defmodule Manfrod.Memory do
   # --- Recurring Reminders ---
 
   @doc """
+  List every recurring reminder across all users, with `:user` preloaded —
+  for the admin cron tab, which shows user-created crons alongside
+  skill-crons regardless of owner.
+  """
+  def list_all_recurring_reminders do
+    RecurringReminder
+    |> order_by([r], asc: r.name)
+    |> preload(:user)
+    |> Repo.all()
+  end
+
+  @doc """
+  Get a recurring reminder by ID alone (not scoped to a user), with `:user`
+  preloaded — for admin actions where the caller isn't the reminder's owner.
+  """
+  def get_recurring_reminder(id) do
+    RecurringReminder
+    |> preload(:user)
+    |> Repo.get(id)
+  end
+
+  @doc """
   List recurring reminders for a user.
 
   ## Options
 
     * `:enabled` - Filter by enabled status (true/false). Default: all.
-    * `:preload` - Preload associations. Default: [:node].
+    * `:preload` - Preload associations. Default: [].
   """
   def list_recurring_reminders(user_id, opts \\ []) do
     query =
@@ -1278,7 +1300,7 @@ defmodule Manfrod.Memory do
           from(r in RecurringReminder, where: r.user_id == ^user_id and r.enabled == ^enabled)
       end
 
-    preload = Keyword.get(opts, :preload, [:node])
+    preload = Keyword.get(opts, :preload, [])
 
     query
     |> order_by([r], asc: r.name)
@@ -1287,19 +1309,18 @@ defmodule Manfrod.Memory do
   end
 
   @doc """
-  Get a recurring reminder by ID with node preloaded, scoped to a user.
+  Get a recurring reminder by ID, scoped to a user.
   """
   def get_recurring_reminder(user_id, id) do
     RecurringReminder
     |> where([r], r.user_id == ^user_id and r.id == ^id)
-    |> preload(:node)
     |> Repo.one()
   end
 
   @doc """
   Create a recurring reminder for a user.
 
-  Expects attrs with :name, :cron, and :node_id.
+  Expects attrs with :name, :cron, and :instructions.
   Optional: :timezone (default "Europe/Warsaw"), :enabled (default true).
   """
   def create_recurring_reminder(user_id, attrs) do
@@ -1316,7 +1337,7 @@ defmodule Manfrod.Memory do
           meta: %{reminder_id: reminder.id, name: reminder.name}
         })
 
-        {:ok, Repo.preload(reminder, :node)}
+        {:ok, reminder}
 
       error ->
         error
@@ -1349,7 +1370,7 @@ defmodule Manfrod.Memory do
           meta: %{reminder_id: updated.id, name: updated.name, cron_changed: cron_changed?}
         })
 
-        {:ok, Repo.preload(updated, :node, force: true)}
+        {:ok, updated}
 
       error ->
         error

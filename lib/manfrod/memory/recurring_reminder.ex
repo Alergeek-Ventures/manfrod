@@ -2,15 +2,19 @@ defmodule Manfrod.Memory.RecurringReminder do
   @moduledoc """
   A recurring reminder that triggers the agent on a cron schedule.
 
-  Each reminder links to a node that provides context/instructions for the agent
-  when the reminder fires. The node's content becomes the prompt, and all notes
-  linked to that node are included as additional context.
+  `instructions` is the prompt: when the cron fires, that text becomes a full
+  autonomous agent turn (see `Manfrod.Workers.TriggerWorker`).
+
+  Instructions are stored inline rather than as a `nodes` row on purpose.
+  They are configuration, not knowledge — a node would be subject to
+  retrospection, which deduplicates and rewrites node content by design and
+  would silently change what the cron does (see the migration
+  `MoveReminderInstructionsInline` for the failure modes this avoids).
   """
   use Ecto.Schema
   import Ecto.Changeset
 
   alias Manfrod.Accounts.User
-  alias Manfrod.Memory.Node
 
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
@@ -18,23 +22,22 @@ defmodule Manfrod.Memory.RecurringReminder do
   schema "recurring_reminders" do
     field :name, :string
     field :cron, :string
+    field :instructions, :string
     field :timezone, :string, default: "Europe/Warsaw"
     field :enabled, :boolean, default: true
 
     belongs_to :user, User
-    belongs_to :node, Node
 
     timestamps()
   end
 
   def changeset(reminder, attrs) do
     reminder
-    |> cast(attrs, [:name, :cron, :timezone, :enabled, :node_id])
-    |> validate_required([:name, :cron, :node_id])
+    |> cast(attrs, [:name, :cron, :instructions, :timezone, :enabled])
+    |> validate_required([:name, :cron, :instructions])
     |> validate_cron()
     |> validate_timezone()
     |> unique_constraint(:name)
-    |> foreign_key_constraint(:node_id)
   end
 
   defp validate_cron(changeset) do

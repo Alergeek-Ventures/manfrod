@@ -60,6 +60,19 @@
     >
       Urlopy (<%= length(@vacations) %>)
     </button>
+    <button
+      phx-click="switch_tab"
+      phx-value-tab="cron"
+      class={[
+        "px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors",
+        if(@tab == "cron",
+          do: "border-indigo-500 text-indigo-400",
+          else: "border-transparent text-gray-400 hover:text-gray-200"
+        )
+      ]}
+    >
+      Cron (<%= length(@cron_rows) %>)
+    </button>
   </div>
 
   <%!-- Channels tab --%>
@@ -373,6 +386,152 @@
                     >
                       Usuń
                     </button>
+                  <% end %>
+                </td>
+              </tr>
+            <% end %>
+          </tbody>
+        </table>
+      </div>
+    <% end %>
+  <% end %>
+
+  <%!-- Cron tab --%>
+  <%= if @tab == "cron" do %>
+    <p class="text-xs text-gray-500 mb-4">
+      Wszystkie zaplanowane zadania: skille z crona w frontmatter (nieedytowalne z poziomu panelu) oraz cykliczne przypomnienia dodane przez userów (przez agenta, np. "rób to codziennie o 8").
+    </p>
+
+    <%= if @cron_rows == [] do %>
+      <p class="text-gray-500 text-sm">Brak zaplanowanych zadań.</p>
+    <% else %>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm text-left">
+          <thead>
+            <tr class="border-b border-gray-700 text-gray-400 text-xs uppercase tracking-wider">
+              <th class="pb-3 pr-4">Nazwa</th>
+              <th class="pb-3 pr-4">Typ</th>
+              <th class="pb-3 pr-4">Cron</th>
+              <th class="pb-3 pr-4">Strefa</th>
+              <th class="pb-3 pr-4">Właściciel</th>
+              <th class="pb-3 pr-4">Opis</th>
+              <th class="pb-3 pr-4">Status</th>
+              <th class="pb-3"></th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-800">
+            <%= for row <- @cron_rows do %>
+              <tr class="text-gray-300 align-top">
+                <td class="py-3 pr-4 font-mono text-xs"><%= row.name %></td>
+                <td class="py-3 pr-4">
+                  <span class={[
+                    "px-2 py-0.5 rounded text-xs font-medium",
+                    if(row.type == :skill,
+                      do: "bg-purple-900/50 text-purple-300",
+                      else: "bg-blue-900/50 text-blue-300"
+                    )
+                  ]}>
+                    <%= if row.type == :skill, do: "Skill", else: "User" %>
+                  </span>
+                </td>
+                <td class="py-3 pr-4">
+                  <%= if editing?(@editing_cron_id, row) do %>
+                    <input
+                      type="text"
+                      value={@editing_cron_form["cron"]}
+                      phx-blur="update_cron_form"
+                      phx-value-field="cron"
+                      class="w-36 bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs font-mono text-gray-100 focus:outline-none focus:border-indigo-500"
+                    />
+                  <% else %>
+                    <span class="font-mono text-xs"><%= row.cron %></span>
+                  <% end %>
+                </td>
+                <td class="py-3 pr-4 text-xs">
+                  <%= if editing?(@editing_cron_id, row) do %>
+                    <input
+                      type="text"
+                      value={@editing_cron_form["timezone"]}
+                      phx-blur="update_cron_form"
+                      phx-value-field="timezone"
+                      class="w-32 bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs text-gray-100 focus:outline-none focus:border-indigo-500"
+                    />
+                  <% else %>
+                    <%= row.timezone %>
+                  <% end %>
+                </td>
+                <td class="py-3 pr-4 text-xs">
+                  <div><%= row.owner_name || "—" %></div>
+                  <%= if row.owner_slack_id do %>
+                    <div class="text-gray-500 font-mono"><%= row.owner_slack_id %></div>
+                  <% end %>
+                  <%= if row.channel do %>
+                    <div class="text-gray-500 font-mono">kanał: <%= row.channel %></div>
+                  <% end %>
+                </td>
+                <td class="py-3 pr-4 text-xs text-gray-400 max-w-xs">
+                  <%= if editing?(@editing_cron_id, row) do %>
+                    <textarea
+                      phx-blur="update_cron_form"
+                      phx-value-field="instructions"
+                      class="w-full min-h-24 bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs text-gray-100 focus:outline-none focus:border-indigo-500"
+                    ><%= @editing_cron_form["instructions"] %></textarea>
+                  <% else %>
+                    <div class="whitespace-pre-wrap"><%= row.detail %></div>
+                  <% end %>
+                </td>
+                <td class="py-3 pr-4">
+                  <%= if row.type == :skill do %>
+                    <span class="text-xs text-gray-500">—</span>
+                  <% else %>
+                    <button
+                      phx-click="toggle_cron_enabled"
+                      phx-value-id={row.id}
+                      class={[
+                        "px-2 py-0.5 rounded text-xs font-medium",
+                        if(row.enabled,
+                          do: "bg-green-900/50 text-green-400 hover:bg-green-900/80",
+                          else: "bg-yellow-900/50 text-yellow-400 hover:bg-yellow-900/80"
+                        )
+                      ]}
+                    >
+                      <%= if row.enabled, do: "włączony", else: "wyłączony" %>
+                    </button>
+                  <% end %>
+                </td>
+                <td class="py-3 flex gap-2 justify-end">
+                  <%= if row.type == :user do %>
+                    <%= if editing?(@editing_cron_id, row) do %>
+                      <button
+                        phx-click="save_cron_edit"
+                        phx-value-id={row.id}
+                        class="text-xs text-green-500 hover:text-green-300"
+                      >
+                        Zapisz
+                      </button>
+                      <button
+                        phx-click="cancel_edit_cron"
+                        class="text-xs text-gray-400 hover:text-gray-200"
+                      >
+                        Anuluj
+                      </button>
+                    <% else %>
+                      <button
+                        phx-click="edit_cron"
+                        phx-value-id={row.id}
+                        class="text-xs text-indigo-400 hover:text-indigo-300"
+                      >
+                        Edytuj
+                      </button>
+                      <button
+                        phx-click="delete_cron"
+                        phx-value-id={row.id}
+                        data-confirm="Usunąć ten cron?"
+                        class="text-xs text-red-500 hover:text-red-300"
+                      >
+                        Usuń
+                      </button>
+                    <% end %>
                   <% end %>
                 </td>
               </tr>

@@ -39,7 +39,7 @@ defmodule Manfrod.Tools.Reminders do
       ReqLLM.Tool.new!(
         name: "create_recurring_reminder",
         description:
-          "Create a recurring reminder that triggers on a cron schedule. Requires a note to be linked - the note content becomes the prompt.",
+          "Set up a task that runs itself on a recurring schedule, e.g. 'every day at 8 send me X' or 'every Monday check Y'. When it fires, the instructions become a full agent turn (same tools as a live chat), not just a text reminder.",
         parameter_schema: [
           name: [
             type: :string,
@@ -52,10 +52,11 @@ defmodule Manfrod.Tools.Reminders do
             doc:
               "Cron expression (5 fields: minute hour day-of-month month day-of-week). Examples: '0 8 * * *' (daily at 8:00), '0 9 * * 1' (Mondays at 9:00)"
           ],
-          node_id: [
+          instructions: [
             type: :string,
             required: true,
-            doc: "UUID of the note containing instructions for this reminder"
+            doc:
+              "Full instructions for what you should do each time this fires — written as if telling yourself what to do. This becomes the prompt for that future turn."
           ],
           timezone: [
             type: :string,
@@ -73,11 +74,14 @@ defmodule Manfrod.Tools.Reminders do
       ReqLLM.Tool.new!(
         name: "update_recurring_reminder",
         description:
-          "Update a recurring reminder. Can change cron schedule, linked note, timezone, or enabled status.",
+          "Update a recurring reminder. Can change the cron schedule, the instructions that run each time it fires, the timezone, or enabled status.",
         parameter_schema: [
           id: [type: :string, required: true, doc: "UUID of the recurring reminder to update"],
           cron: [type: :string, doc: "New cron expression"],
-          node_id: [type: :string, doc: "UUID of new note to link"],
+          instructions: [
+            type: :string,
+            doc: "New instructions — replaces what runs when this fires"
+          ],
           timezone: [type: :string, doc: "New timezone"],
           enabled: [type: :boolean, doc: "Enable/disable the reminder"]
         ],
@@ -146,24 +150,17 @@ defmodule Manfrod.Tools.Reminders do
     attrs = %{
       name: args.name,
       cron: args.cron,
-      node_id: args.node_id,
+      instructions: args.instructions,
       timezone: Map.get(args, :timezone, "Europe/Warsaw")
     }
 
     case Memory.create_recurring_reminder(user_id, attrs) do
       {:ok, reminder} ->
         {:ok,
-         "Created recurring reminder '#{reminder.name}' with cron '#{reminder.cron}' (#{reminder.timezone}). Linked to note: #{reminder.node_id}"}
+         "Created recurring reminder '#{reminder.name}' with cron '#{reminder.cron}' (#{reminder.timezone})."}
 
       {:error, changeset} ->
-        errors =
-          Ecto.Changeset.traverse_errors(changeset, fn {msg, opts} ->
-            Enum.reduce(opts, msg, fn {key, value}, acc ->
-              String.replace(acc, "%{#{key}}", to_string(value))
-            end)
-          end)
-
-        {:ok, "Failed to create recurring reminder: #{inspect(errors)}"}
+        {:ok, "Failed to create recurring reminder: #{format_changeset_errors(changeset)}"}
     end
   end
 
@@ -176,9 +173,8 @@ defmodule Manfrod.Tools.Reminders do
       lines =
         Enum.map(reminders, fn r ->
           status = if r.enabled, do: "enabled", else: "disabled"
-          note_preview = String.slice(r.node.content || "", 0, 50)
 
-          "• #{r.name} (#{r.id})\n  Cron: #{r.cron} (#{r.timezone})\n  Status: #{status}\n  Note: [#{r.node_id}] #{note_preview}..."
+          "• #{r.name} (#{r.id})\n  Cron: #{r.cron} (#{r.timezone})\n  Status: #{status}\n  Instructions: #{r.instructions}"
         end)
 
       {:ok, "Recurring reminders:\n\n#{Enum.join(lines, "\n\n")}"}
@@ -202,14 +198,7 @@ defmodule Manfrod.Tools.Reminders do
             {:ok, "Updated recurring reminder '#{updated.name}'"}
 
           {:error, changeset} ->
-            errors =
-              Ecto.Changeset.traverse_errors(changeset, fn {msg, opts} ->
-                Enum.reduce(opts, msg, fn {key, value}, acc ->
-                  String.replace(acc, "%{#{key}}", to_string(value))
-                end)
-              end)
-
-            {:ok, "Failed to update recurring reminder: #{inspect(errors)}"}
+            {:ok, "Failed to update recurring reminder: #{format_changeset_errors(changeset)}"}
         end
     end
   end
@@ -222,5 +211,16 @@ defmodule Manfrod.Tools.Reminders do
       {:error, :not_found} ->
         {:ok, "Recurring reminder not found: #{id}"}
     end
+  end
+
+  defp format_changeset_errors(changeset) do
+    errors =
+      Ecto.Changeset.traverse_errors(changeset, fn {msg, opts} ->
+        Enum.reduce(opts, msg, fn {key, value}, acc ->
+          String.replace(acc, "%{#{key}}", to_string(value))
+        end)
+      end)
+
+    inspect(errors)
   end
 end
