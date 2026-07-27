@@ -8,7 +8,7 @@ defmodule Manfrod.Tools.Facts do
       ReqLLM.Tool.new!(
         name: "get_fact",
         description:
-          "Look up a structured fact by key (vacations, meetings, absences). Key format: 'vacation:user_id', 'absence:name:date', 'meeting:channel:ts'.",
+          "Look up a structured fact by key (vacations, meetings). Key format: 'absence:user_id:date', 'meeting:channel:ts'.",
         parameter_schema: [
           key: [type: :string, required: true, doc: "Exact fact key"]
         ],
@@ -17,7 +17,7 @@ defmodule Manfrod.Tools.Facts do
       ReqLLM.Tool.new!(
         name: "list_facts",
         description:
-          "List structured facts with a key prefix. E.g. prefix 'vacation:' lists all vacations you can see.",
+          "List structured facts with a key prefix. E.g. prefix 'absence:' lists all vacations/absences you can see.",
         parameter_schema: [
           prefix: [type: :string, required: true, doc: "Key prefix to search"]
         ],

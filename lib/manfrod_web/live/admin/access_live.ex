@@ -82,7 +82,7 @@ defmodule ManfrodWeb.Admin.AccessLive do
         {:noreply, put_flash(socket, :error, "Wybierz osobę i daty urlopu")}
 
       true ->
-        key = "vacation:#{user_id}:#{start_date}"
+        key = "absence:#{user_id}:#{start_date}"
         value = "#{start_date}..#{end_date} — #{blank_to_default(note, "urlop")}"
 
         case Facts.set_fact(key, value, ["internal", "external/all"], user_id) do
@@ -262,7 +262,7 @@ defmodule ManfrodWeb.Admin.AccessLive do
         from f in Fact,
           left_join: u in Manfrod.Accounts.User,
           on: u.id == f.set_by_user_id,
-          where: like(f.key, "vacation:%") or like(f.key, "absence:%"),
+          where: like(f.key, "absence:%"),
           select: %{
             id: f.id,
             key: f.key,
