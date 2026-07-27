@@ -128,9 +128,25 @@ defmodule Manfrod.SkillRunner do
     end
   end
 
+  @doc """
+  Whether a final reply is the "nothing to report" sentinel a cron-skill is
+  instructed to use instead of a chatty "no holidays" confirmation (see
+  priv/skills/holiday-check/SKILL.md) — exposed for testing.
+  """
+  @spec empty_reply?(String.t()) :: boolean()
+  def empty_reply?(text), do: String.trim(text) == "EMPTY"
+
   defp post_final_text(_channel, ""), do: :ok
 
   defp post_final_text(channel, text) do
+    if empty_reply?(text) do
+      :ok
+    else
+      do_post_final_text(channel, text)
+    end
+  end
+
+  defp do_post_final_text(channel, text) do
     bot_token = Application.get_env(:manfrod, :slack_bot_token)
     API.post("chat.postMessage", bot_token, %{channel: channel, text: Mrkdwn.from_markdown(text)})
   end
