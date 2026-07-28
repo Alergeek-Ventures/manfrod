@@ -1,7 +1,7 @@
 ---
 name: holiday-check
 description: Daily 13:00 check for public holidays coming up within a week; DMs any team member who hasn't recorded a vacation or work plan for one. Not for on-demand use via use_skill — SkillSchedulerWorker/SkillRunner triggers this autonomously and feeds you this file's body directly as instructions.
-cron: "0 13 * * *"
+cron: "0 13 * * 1-5"
 channel: "C0BFLHF7TQ8"
 ---
 
