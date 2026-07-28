@@ -2,8 +2,8 @@
   <Layouts.nav current={:admin} />
   <div class="max-w-6xl mx-auto p-6">
   <div class="mb-6">
-    <h1 class="text-2xl font-bold text-gray-100">Panel dostępu</h1>
-    <p class="text-sm text-gray-400 mt-1">Zarządzaj projektami, kanałami i członkostwami</p>
+    <h1 class="text-2xl font-bold text-gray-100">Access Panel</h1>
+    <p class="text-sm text-gray-400 mt-1">Manage projects, channels, and memberships</p>
   </div>
 
   <%!-- Tabs --%>
@@ -19,7 +19,7 @@
         )
       ]}
     >
-      Kanały (<%= length(@channels) %>)
+      Channels (<%= length(@channels) %>)
     </button>
     <button
       phx-click="switch_tab"
@@ -32,7 +32,7 @@
         )
       ]}
     >
-      Projekty (<%= length(@projects) %>)
+      Projects (<%= length(@projects) %>)
     </button>
     <button
       phx-click="switch_tab"
@@ -45,7 +45,7 @@
         )
       ]}
     >
-      Członkowie (<%= length(@members) %>)
+      Members (<%= length(@members) %>)
     </button>
     <button
       phx-click="switch_tab"
@@ -58,7 +58,7 @@
         )
       ]}
     >
-      Urlopy (<%= length(@vacations) %>)
+      Vacations (<%= length(@vacations) %>)
     </button>
     <button
       phx-click="switch_tab"
@@ -78,18 +78,18 @@
   <%!-- Channels tab --%>
   <%= if @tab == "channels" do %>
     <%= if @channels == [] do %>
-      <p class="text-gray-500 text-sm">Brak zmapowanych kanałów. Wyślij wiadomość na kanale — auto-detekcja doda go automatycznie.</p>
+      <p class="text-gray-500 text-sm">No mapped channels. Send a message in the channel — auto-detection will add it automatically.</p>
     <% else %>
       <div class="overflow-x-auto">
         <table class="w-full text-sm text-left">
           <thead>
             <tr class="border-b border-gray-700 text-gray-400 text-xs uppercase tracking-wider">
-              <th class="pb-3 pr-4">Kanał</th>
+              <th class="pb-3 pr-4">Channel</th>
               <th class="pb-3 pr-4">ID</th>
-              <th class="pb-3 pr-4">Projekt</th>
+              <th class="pb-3 pr-4">Project</th>
               <th class="pb-3 pr-4">Client ID</th>
               <th class="pb-3 pr-4">Status</th>
-              <th class="pb-3 pr-4">Źródło</th>
+              <th class="pb-3 pr-4">Source</th>
               <th class="pb-3"></th>
             </tr>
           </thead>
@@ -129,7 +129,7 @@
                       phx-value-id={ch.id}
                       class="text-xs text-yellow-500 hover:text-yellow-300"
                     >
-                      Dezaktywuj
+                      Deactivate
                     </button>
                   <% else %>
                     <button
@@ -137,16 +137,16 @@
                       phx-value-id={ch.id}
                       class="text-xs text-green-500 hover:text-green-300"
                     >
-                      Aktywuj
+                      Activate
                     </button>
                   <% end %>
                   <button
                     phx-click="delete_mapping"
                     phx-value-id={ch.id}
-                    data-confirm="Usunąć ten mapping?"
+                    data-confirm="Delete this mapping?"
                     class="text-xs text-red-500 hover:text-red-300"
                   >
-                    Usuń
+                    Delete
                   </button>
                 </td>
               </tr>
@@ -164,19 +164,19 @@
         phx-click="toggle_add_project"
         class="px-3 py-1.5 text-sm bg-indigo-600 hover:bg-indigo-500 text-white rounded"
       >
-        <%= if @show_add_project, do: "Anuluj", else: "Dodaj projekt" %>
+        <%= if @show_add_project, do: "Cancel", else: "Add project" %>
       </button>
     </div>
 
     <%= if @show_add_project do %>
       <div class="mb-6 p-4 bg-gray-800 rounded border border-gray-700">
-        <h3 class="text-sm font-medium text-gray-200 mb-3">Nowy projekt</h3>
+        <h3 class="text-sm font-medium text-gray-200 mb-3">New project</h3>
         <div class="flex gap-3 items-end">
           <div>
             <label class="block text-xs text-gray-400 mb-1">Slug</label>
             <input
               type="text"
-              placeholder="np. klient-abc"
+              placeholder="e.g. client-abc"
               value={@add_project_form["slug"]}
               phx-blur="update_add_project"
               phx-value-field="slug"
@@ -184,10 +184,10 @@
             />
           </div>
           <div>
-            <label class="block text-xs text-gray-400 mb-1">Nazwa</label>
+            <label class="block text-xs text-gray-400 mb-1">Name</label>
             <input
               type="text"
-              placeholder="np. Klient ABC Sp. z o.o."
+              placeholder="e.g. Client ABC Inc."
               value={@add_project_form["name"]}
               phx-blur="update_add_project"
               phx-value-field="name"
@@ -198,22 +198,22 @@
             phx-click="save_project"
             class="px-3 py-1.5 text-sm bg-green-700 hover:bg-green-600 text-white rounded"
           >
-            Zapisz
+            Save
           </button>
         </div>
       </div>
     <% end %>
 
     <%= if @projects == [] do %>
-      <p class="text-gray-500 text-sm">Brak projektów.</p>
+      <p class="text-gray-500 text-sm">No projects.</p>
     <% else %>
       <table class="w-full text-sm text-left">
         <thead>
           <tr class="border-b border-gray-700 text-gray-400 text-xs uppercase tracking-wider">
             <th class="pb-3 pr-4">Slug</th>
-            <th class="pb-3 pr-4">Nazwa</th>
-            <th class="pb-3 pr-4 text-right">Kanały</th>
-            <th class="pb-3 text-right">Członkowie</th>
+            <th class="pb-3 pr-4">Name</th>
+            <th class="pb-3 pr-4 text-right">Channels</th>
+            <th class="pb-3 text-right">Members</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-gray-800">
@@ -233,14 +233,14 @@
   <%!-- Members tab --%>
   <%= if @tab == "members" do %>
     <%= if @members == [] do %>
-      <p class="text-gray-500 text-sm">Brak członkostw.</p>
+      <p class="text-gray-500 text-sm">No memberships.</p>
     <% else %>
       <table class="w-full text-sm text-left">
         <thead>
           <tr class="border-b border-gray-700 text-gray-400 text-xs uppercase tracking-wider">
-            <th class="pb-3 pr-4">Użytkownik</th>
+            <th class="pb-3 pr-4">User</th>
             <th class="pb-3 pr-4">Slack ID</th>
-            <th class="pb-3">Projekty</th>
+            <th class="pb-3">Projects</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-gray-800">
@@ -261,16 +261,16 @@
   <%!-- Vacations tab --%>
   <%= if @tab == "vacations" do %>
     <div class="mb-6 p-4 bg-gray-800 rounded border border-gray-700">
-      <h3 class="text-sm font-medium text-gray-200 mb-3">Dodaj urlop</h3>
+      <h3 class="text-sm font-medium text-gray-200 mb-3">Add vacation</h3>
       <div class="grid grid-cols-1 md:grid-cols-5 gap-3 items-end">
         <div>
-          <label class="block text-xs text-gray-400 mb-1">Osoba</label>
+          <label class="block text-xs text-gray-400 mb-1">Person</label>
           <select
             name="user_id"
             phx-change="update_vacation_form"
             class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-1.5 text-sm text-gray-100 focus:outline-none focus:border-indigo-500"
           >
-            <option value="">Wybierz...</option>
+            <option value="">Select...</option>
             <%= for user <- @users do %>
               <option value={user.id} selected={@vacation_form["user_id"] == user.id}>
                 <%= user.name || user.email || user.slack_id %>
@@ -279,7 +279,7 @@
           </select>
         </div>
         <div>
-          <label class="block text-xs text-gray-400 mb-1">Od</label>
+          <label class="block text-xs text-gray-400 mb-1">From</label>
           <input
             type="date"
             name="start_date"
@@ -289,7 +289,7 @@
           />
         </div>
         <div>
-          <label class="block text-xs text-gray-400 mb-1">Do</label>
+          <label class="block text-xs text-gray-400 mb-1">To</label>
           <input
             type="date"
             name="end_date"
@@ -299,13 +299,13 @@
           />
         </div>
         <div>
-          <label class="block text-xs text-gray-400 mb-1">Opis</label>
+          <label class="block text-xs text-gray-400 mb-1">Description</label>
           <input
             type="text"
             name="note"
             value={@vacation_form["note"]}
             phx-change="update_vacation_form"
-            placeholder="urlop"
+            placeholder="vacation"
             class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-1.5 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:border-indigo-500"
           />
         </div>
@@ -313,24 +313,24 @@
           phx-click="save_vacation"
           class="px-3 py-1.5 text-sm bg-green-700 hover:bg-green-600 text-white rounded"
         >
-          Zapisz
+          Save
         </button>
       </div>
-      <p class="text-xs text-gray-500 mt-3">Urlopy są zapisywane jako facts z dostępem <code>["internal", "external/all"]</code>.</p>
+      <p class="text-xs text-gray-500 mt-3">Vacations are saved as facts with access <code>["internal", "external/all"]</code>.</p>
     </div>
 
     <%= if @vacations == [] do %>
-      <p class="text-gray-500 text-sm">Brak zapisanych urlopów/absencji.</p>
+      <p class="text-gray-500 text-sm">No vacations/absences saved.</p>
     <% else %>
       <div class="overflow-x-auto">
         <table class="w-full text-sm text-left">
           <thead>
             <tr class="border-b border-gray-700 text-gray-400 text-xs uppercase tracking-wider">
-              <th class="pb-3 pr-4">Osoba</th>
-              <th class="pb-3 pr-4">Klucz</th>
-              <th class="pb-3 pr-4">Wartość</th>
+              <th class="pb-3 pr-4">Person</th>
+              <th class="pb-3 pr-4">Key</th>
+              <th class="pb-3 pr-4">Value</th>
               <th class="pb-3 pr-4">Access</th>
-              <th class="pb-3 pr-4">Aktualizacja</th>
+              <th class="pb-3 pr-4">Updated</th>
               <th class="pb-3"></th>
             </tr>
           </thead>
@@ -362,13 +362,13 @@
                       phx-value-id={vacation.id}
                       class="text-xs text-green-500 hover:text-green-300"
                     >
-                      Zapisz
+                      Save
                     </button>
                     <button
                       phx-click="cancel_edit_vacation"
                       class="text-xs text-gray-400 hover:text-gray-200"
                     >
-                      Anuluj
+                      Cancel
                     </button>
                   <% else %>
                     <button
@@ -376,15 +376,15 @@
                       phx-value-id={vacation.id}
                       class="text-xs text-indigo-400 hover:text-indigo-300"
                     >
-                      Edytuj
+                      Edit
                     </button>
                     <button
                       phx-click="delete_vacation"
                       phx-value-id={vacation.id}
-                      data-confirm="Usunąć ten urlop?"
+                      data-confirm="Delete this vacation?"
                       class="text-xs text-red-500 hover:text-red-300"
                     >
-                      Usuń
+                      Delete
                     </button>
                   <% end %>
                 </td>
@@ -399,22 +399,22 @@
   <%!-- Cron tab --%>
   <%= if @tab == "cron" do %>
     <p class="text-xs text-gray-500 mb-4">
-      Wszystkie zaplanowane zadania: skille z crona w frontmatter (nieedytowalne z poziomu panelu) oraz cykliczne przypomnienia dodane przez userów (przez agenta, np. "rób to codziennie o 8").
+      All scheduled tasks: cron skills from the frontmatter (not editable from the panel) and recurring reminders added by users (via the agent, e.g. "do this every day at 8").
     </p>
 
     <%= if @cron_rows == [] do %>
-      <p class="text-gray-500 text-sm">Brak zaplanowanych zadań.</p>
+      <p class="text-gray-500 text-sm">No scheduled tasks.</p>
     <% else %>
       <div class="overflow-x-auto">
         <table class="w-full text-sm text-left">
           <thead>
             <tr class="border-b border-gray-700 text-gray-400 text-xs uppercase tracking-wider">
-              <th class="pb-3 pr-4">Nazwa</th>
-              <th class="pb-3 pr-4">Typ</th>
+              <th class="pb-3 pr-4">Name</th>
+              <th class="pb-3 pr-4">Type</th>
               <th class="pb-3 pr-4">Cron</th>
-              <th class="pb-3 pr-4">Strefa</th>
-              <th class="pb-3 pr-4">Właściciel</th>
-              <th class="pb-3 pr-4">Opis</th>
+              <th class="pb-3 pr-4">Timezone</th>
+              <th class="pb-3 pr-4">Owner</th>
+              <th class="pb-3 pr-4">Description</th>
               <th class="pb-3 pr-4">Status</th>
               <th class="pb-3"></th>
             </tr>
@@ -466,7 +466,7 @@
                     <div class="text-gray-500 font-mono"><%= row.owner_slack_id %></div>
                   <% end %>
                   <%= if row.channel do %>
-                    <div class="text-gray-500 font-mono">kanał: <%= row.channel %></div>
+                    <div class="text-gray-500 font-mono">channel: <%= row.channel %></div>
                   <% end %>
                 </td>
                 <td class="py-3 pr-4 text-xs text-gray-400 max-w-xs">
@@ -495,7 +495,7 @@
                         )
                       ]}
                     >
-                      <%= if row.enabled, do: "włączony", else: "wyłączony" %>
+                      <%= if row.enabled, do: "enabled", else: "disabled" %>
                     </button>
                   <% end %>
                 </td>
@@ -507,13 +507,13 @@
                         phx-value-id={row.id}
                         class="text-xs text-green-500 hover:text-green-300"
                       >
-                        Zapisz
+                        Save
                       </button>
                       <button
                         phx-click="cancel_edit_cron"
                         class="text-xs text-gray-400 hover:text-gray-200"
                       >
-                        Anuluj
+                        Cancel
                       </button>
                     <% else %>
                       <button
@@ -521,15 +521,15 @@
                         phx-value-id={row.id}
                         class="text-xs text-indigo-400 hover:text-indigo-300"
                       >
-                        Edytuj
+                        Edit
                       </button>
                       <button
                         phx-click="delete_cron"
                         phx-value-id={row.id}
-                        data-confirm="Usunąć ten cron?"
+                        data-confirm="Delete this cron?"
                         class="text-xs text-red-500 hover:text-red-300"
                       >
-                        Usuń
+                        Delete
                       </button>
                     <% end %>
                   <% end %>
