@@ -18,7 +18,12 @@ defmodule ManfrodWeb.Admin.AccessLive do
      |> assign(show_add_project: false)
      |> assign(add_project_form: %{"slug" => "", "name" => ""})
      |> assign(
-       vacation_form: %{"user_id" => "", "start_date" => "", "end_date" => "", "note" => "urlop"}
+       vacation_form: %{
+         "user_id" => "",
+         "start_date" => "",
+         "end_date" => "",
+         "note" => "vacation"
+       }
      )
      |> assign(editing_vacation_id: nil)
      |> assign(editing_vacation_value: "")
@@ -59,11 +64,11 @@ defmodule ManfrodWeb.Admin.AccessLive do
          |> assign(show_add_project: false)
          |> assign(add_project_form: %{"slug" => "", "name" => ""})
          |> load_data()
-         |> put_flash(:info, "Projekt dodany")}
+         |> put_flash(:info, "Project added")}
 
       {:error, changeset} ->
         errors = Enum.map_join(changeset.errors, ", ", fn {k, {msg, _}} -> "#{k}: #{msg}" end)
-        {:noreply, put_flash(socket, :error, "Błąd: #{errors}")}
+        {:noreply, put_flash(socket, :error, "Error: #{errors}")}
     end
   end
 
@@ -83,11 +88,11 @@ defmodule ManfrodWeb.Admin.AccessLive do
 
     cond do
       user_id == "" or start_date == "" or end_date == "" ->
-        {:noreply, put_flash(socket, :error, "Wybierz osobę i daty urlopu")}
+        {:noreply, put_flash(socket, :error, "Select a person and vacation dates")}
 
       true ->
         key = "absence:#{user_id}:#{start_date}"
-        value = "#{start_date}..#{end_date} — #{blank_to_default(note, "urlop")}"
+        value = "#{start_date}..#{end_date} — #{blank_to_default(note, "vacation")}"
 
         case Facts.set_fact(key, value, ["internal", "external/all"], user_id) do
           {:ok, _fact} ->
@@ -98,14 +103,14 @@ defmodule ManfrodWeb.Admin.AccessLive do
                  "user_id" => user_id,
                  "start_date" => "",
                  "end_date" => "",
-                 "note" => "urlop"
+                 "note" => "vacation"
                }
              )
              |> load_data()
-             |> put_flash(:info, "Urlop zapisany")}
+             |> put_flash(:info, "Vacation saved")}
 
           {:error, changeset} ->
-            {:noreply, put_flash(socket, :error, "Błąd: #{format_changeset_errors(changeset)}")}
+            {:noreply, put_flash(socket, :error, "Error: #{format_changeset_errors(changeset)}")}
         end
     end
   end
@@ -113,7 +118,7 @@ defmodule ManfrodWeb.Admin.AccessLive do
   def handle_event("edit_vacation", %{"id" => id}, socket) do
     case Repo.get(Fact, id) do
       nil ->
-        {:noreply, put_flash(socket, :error, "Nie znaleziono urlopu")}
+        {:noreply, put_flash(socket, :error, "Vacation not found")}
 
       fact ->
         {:noreply,
@@ -132,7 +137,7 @@ defmodule ManfrodWeb.Admin.AccessLive do
   def handle_event("save_vacation_edit", %{"id" => id}, socket) do
     case Repo.get(Fact, id) do
       nil ->
-        {:noreply, put_flash(socket, :error, "Nie znaleziono urlopu")}
+        {:noreply, put_flash(socket, :error, "Vacation not found")}
 
       fact ->
         case Repo.update(Fact.changeset(fact, %{value: socket.assigns.editing_vacation_value})) do
@@ -141,10 +146,10 @@ defmodule ManfrodWeb.Admin.AccessLive do
              socket
              |> assign(editing_vacation_id: nil, editing_vacation_value: "")
              |> load_data()
-             |> put_flash(:info, "Urlop zaktualizowany")}
+             |> put_flash(:info, "Vacation updated")}
 
           {:error, changeset} ->
-            {:noreply, put_flash(socket, :error, "Błąd: #{format_changeset_errors(changeset)}")}
+            {:noreply, put_flash(socket, :error, "Error: #{format_changeset_errors(changeset)}")}
         end
     end
   end
@@ -152,7 +157,7 @@ defmodule ManfrodWeb.Admin.AccessLive do
   def handle_event("delete_vacation", %{"id" => id}, socket) do
     case Repo.get(Fact, id) do
       nil ->
-        {:noreply, put_flash(socket, :error, "Nie znaleziono urlopu")}
+        {:noreply, put_flash(socket, :error, "Vacation not found")}
 
       fact ->
         Repo.delete(fact)
@@ -160,14 +165,14 @@ defmodule ManfrodWeb.Admin.AccessLive do
         {:noreply,
          socket
          |> load_data()
-         |> put_flash(:info, "Urlop usunięty")}
+         |> put_flash(:info, "Vacation deleted")}
     end
   end
 
   def handle_event("edit_cron", %{"id" => id}, socket) do
     case Memory.get_recurring_reminder(id) do
       nil ->
-        {:noreply, put_flash(socket, :error, "Nie znaleziono crona")}
+        {:noreply, put_flash(socket, :error, "Cron not found")}
 
       reminder ->
         {:noreply,
@@ -194,7 +199,7 @@ defmodule ManfrodWeb.Admin.AccessLive do
   def handle_event("save_cron_edit", %{"id" => id}, socket) do
     case Memory.get_recurring_reminder(id) do
       nil ->
-        {:noreply, put_flash(socket, :error, "Nie znaleziono crona")}
+        {:noreply, put_flash(socket, :error, "Cron not found")}
 
       reminder ->
         %{"cron" => cron, "timezone" => timezone, "instructions" => instructions} =
@@ -208,10 +213,10 @@ defmodule ManfrodWeb.Admin.AccessLive do
              socket
              |> assign(editing_cron_id: nil, editing_cron_form: %{})
              |> load_data()
-             |> put_flash(:info, "Cron zaktualizowany")}
+             |> put_flash(:info, "Cron updated")}
 
           {:error, changeset} ->
-            {:noreply, put_flash(socket, :error, "Błąd: #{format_changeset_errors(changeset)}")}
+            {:noreply, put_flash(socket, :error, "Error: #{format_changeset_errors(changeset)}")}
         end
     end
   end
@@ -219,17 +224,17 @@ defmodule ManfrodWeb.Admin.AccessLive do
   def handle_event("toggle_cron_enabled", %{"id" => id}, socket) do
     case Memory.get_recurring_reminder(id) do
       nil ->
-        {:noreply, put_flash(socket, :error, "Nie znaleziono crona")}
+        {:noreply, put_flash(socket, :error, "Cron not found")}
 
       reminder ->
         case Memory.update_recurring_reminder(reminder.user_id, reminder, %{
                enabled: !reminder.enabled
              }) do
           {:ok, _updated} ->
-            {:noreply, socket |> load_data() |> put_flash(:info, "Zaktualizowano")}
+            {:noreply, socket |> load_data() |> put_flash(:info, "Updated")}
 
           {:error, changeset} ->
-            {:noreply, put_flash(socket, :error, "Błąd: #{format_changeset_errors(changeset)}")}
+            {:noreply, put_flash(socket, :error, "Error: #{format_changeset_errors(changeset)}")}
         end
     end
   end
@@ -237,15 +242,15 @@ defmodule ManfrodWeb.Admin.AccessLive do
   def handle_event("delete_cron", %{"id" => id}, socket) do
     case Memory.get_recurring_reminder(id) do
       nil ->
-        {:noreply, put_flash(socket, :error, "Nie znaleziono crona")}
+        {:noreply, put_flash(socket, :error, "Cron not found")}
 
       reminder ->
         case Memory.delete_recurring_reminder(reminder.user_id, reminder) do
           {:ok, _deleted} ->
-            {:noreply, socket |> load_data() |> put_flash(:info, "Cron usunięty")}
+            {:noreply, socket |> load_data() |> put_flash(:info, "Cron deleted")}
 
           {:error, _reason} ->
-            {:noreply, put_flash(socket, :error, "Nie udało się usunąć crona")}
+            {:noreply, put_flash(socket, :error, "Failed to delete cron")}
         end
     end
   end
@@ -261,25 +266,25 @@ defmodule ManfrodWeb.Admin.AccessLive do
   def handle_event("delete_mapping", %{"id" => id}, socket) do
     case Repo.get(ChannelMapping, id) do
       nil ->
-        {:noreply, put_flash(socket, :error, "Nie znaleziono mappingu")}
+        {:noreply, put_flash(socket, :error, "Mapping not found")}
 
       mapping ->
         Repo.delete(mapping)
-        {:noreply, socket |> load_data() |> put_flash(:info, "Usunięto")}
+        {:noreply, socket |> load_data() |> put_flash(:info, "Deleted")}
     end
   end
 
   defp toggle_mapping_status(id, new_status, socket) do
     case Repo.get(ChannelMapping, id) do
       nil ->
-        {:noreply, put_flash(socket, :error, "Nie znaleziono mappingu")}
+        {:noreply, put_flash(socket, :error, "Mapping not found")}
 
       mapping ->
         mapping
         |> ChannelMapping.changeset(%{status: new_status})
         |> Repo.update()
 
-        {:noreply, socket |> load_data() |> put_flash(:info, "Zaktualizowano")}
+        {:noreply, socket |> load_data() |> put_flash(:info, "Updated")}
     end
   end
 
