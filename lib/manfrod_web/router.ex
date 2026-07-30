@@ -56,6 +56,16 @@ defmodule ManfrodWeb.Router do
     delete "/logout", LogoutController, :delete
   end
 
+  # MCP connection OAuth (Linear, Granola, ...) - any authenticated user
+  # can connect their own account
+  scope "/mcp", ManfrodWeb do
+    pipe_through [:browser, :require_auth]
+
+    get "/:provider/connect", McpOauthController, :connect
+    get "/:provider/callback", McpOauthController, :callback
+    delete "/:provider/disconnect", McpOauthController, :disconnect
+  end
+
   # Temporary local-only impersonation endpoint
   scope "/dev", ManfrodWeb do
     pipe_through :browser
@@ -74,6 +84,7 @@ defmodule ManfrodWeb.Router do
       live "/dashboard", DashboardLive
       live "/graph", GraphLive
       live "/retrospection", RetrospectionLive
+      live "/mcp", McpLive
     end
   end
 

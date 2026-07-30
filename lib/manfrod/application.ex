@@ -15,6 +15,7 @@ defmodule Manfrod.Application do
         Manfrod.Memory.FlushHandler,
         Manfrod.Memory.PendingConfirmations,
         Manfrod.Memory.PendingOps,
+        Manfrod.Mcp.ToolCache,
         # Per-user agent processes (DynamicSupervisor + Registry)
         Manfrod.Agent.Supervisor,
         ManfrodWeb.Endpoint
