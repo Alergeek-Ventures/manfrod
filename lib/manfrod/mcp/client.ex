@@ -64,7 +64,10 @@ defmodule Manfrod.Mcp.Client do
         {:error, :unauthorized}
 
       {:ok, %Req.Response{status: status, body: resp_body}} ->
-        Logger.warning("Mcp.Client: initialize failed for #{mcp_url}: HTTP #{status} #{inspect(resp_body)}")
+        Logger.warning(
+          "Mcp.Client: initialize failed for #{mcp_url}: HTTP #{status} #{inspect(resp_body)}"
+        )
+
         {:error, {:unexpected_status, status}}
 
       {:error, reason} ->
@@ -83,7 +86,10 @@ defmodule Manfrod.Mcp.Client do
         {:error, :unauthorized}
 
       {:ok, %Req.Response{status: status, body: resp_body}} ->
-        Logger.warning("Mcp.Client: #{method} failed for #{mcp_url}: HTTP #{status} #{inspect(resp_body)}")
+        Logger.warning(
+          "Mcp.Client: #{method} failed for #{mcp_url}: HTTP #{status} #{inspect(resp_body)}"
+        )
+
         {:error, {:unexpected_status, status}}
 
       {:error, reason} ->

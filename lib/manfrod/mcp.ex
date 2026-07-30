@@ -185,7 +185,9 @@ defmodule Manfrod.Mcp do
 
   def mark_notified(%Connection{} = conn) do
     conn
-    |> Connection.changeset(%{notified_expired_at: DateTime.utc_now() |> DateTime.truncate(:second)})
+    |> Connection.changeset(%{
+      notified_expired_at: DateTime.utc_now() |> DateTime.truncate(:second)
+    })
     |> Repo.update()
   end
 
@@ -221,7 +223,9 @@ defmodule Manfrod.Mcp do
       {:ok, tokens} ->
         expires_at =
           if tokens.expires_in do
-            DateTime.utc_now() |> DateTime.add(tokens.expires_in, :second) |> DateTime.truncate(:second)
+            DateTime.utc_now()
+            |> DateTime.add(tokens.expires_in, :second)
+            |> DateTime.truncate(:second)
           end
 
         case save_tokens(conn.user_id, conn.provider, %{
