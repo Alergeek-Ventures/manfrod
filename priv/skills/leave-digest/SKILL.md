@@ -2,7 +2,7 @@
 name: leave-digest
 description: Daily 18:00 (Sun-Thu) digest of who has tomorrow off, with a short note on their absence where known, posted automatically to a fixed channel. Not for on-demand use via use_skill — SkillSchedulerWorker/SkillRunner triggers this autonomously and feeds you this file's body directly as instructions.
 cron: "0 18 * * 0-4"
-channel: "C0BFLHF7TQ8"
+channel: "C087QF130R3"
 ---
 
 # Leave digest (cron skill)
