@@ -1,0 +1,171 @@
+defmodule Manfrod.Config.LocalEnv do
+  @moduledoc """
+  Loads local development and test environment variables before runtime config reads them.
+  """
+
+  require Logger
+
+  @doc """
+  Loads Infisical secrets and `.env.worktree` into the process environment.
+  """
+  @spec load!() :: :ok
+  def load! do
+    if skip_infisical?() do
+      Logger.info("Skipping Infisical local env load")
+    else
+      Logger.info("Loading local env from Infisical")
+      load_infisical_env()
+      Logger.info("Loaded local env from Infisical")
+    end
+
+    if File.exists?(".env.worktree") do
+      Logger.info("Loading local env from .env.worktree")
+      load_worktree_env_file()
+      Logger.info("Loaded local env from .env.worktree")
+    else
+      Logger.info("No .env.worktree file found")
+    end
+
+    :ok
+  end
+
+  defp skip_infisical? do
+    truthy?(System.get_env("CI")) or truthy?(System.get_env("AV_SKIP_INFISICAL"))
+  end
+
+  defp truthy?(value), do: value in ["1", "true"]
+
+  defp blank_or_comment?(line), do: line == "" or String.starts_with?(line, "#")
+
+  defp valid_env_key?(key), do: key =~ ~r/^[A-Za-z_][A-Za-z0-9_]*$/
+
+  defp parse_dotenv_value(value) do
+    value = String.trim(value)
+
+    cond do
+      String.starts_with?(value, "\"") and String.ends_with?(value, "\"") ->
+        value
+        |> String.trim_leading("\"")
+        |> String.trim_trailing("\"")
+        |> String.replace(~S(\"), ~S("))
+        |> String.replace(~S(\n), "\n")
+
+      String.starts_with?(value, "'") and String.ends_with?(value, "'") ->
+        value
+        |> String.trim_leading("'")
+        |> String.trim_trailing("'")
+
+      true ->
+        value
+        |> String.split(~r/\s+#/, parts: 2)
+        |> List.first()
+        |> String.trim()
+    end
+  end
+
+  defp parse_dotenv_line(raw_line) do
+    line = String.trim(raw_line)
+
+    with false <- blank_or_comment?(line),
+         [key, raw_value] <-
+           line |> String.replace_prefix("export ", "") |> String.split("=", parts: 2),
+         key = String.trim(key),
+         true <- valid_env_key?(key) do
+      {key, parse_dotenv_value(raw_value)}
+    else
+      _ -> nil
+    end
+  end
+
+  defp parse_dotenv(contents) do
+    contents
+    |> String.split(~r/\R/)
+    |> Enum.reduce(%{}, fn raw_line, acc ->
+      case parse_dotenv_line(raw_line) do
+        {key, value} -> Map.put(acc, key, value)
+        nil -> acc
+      end
+    end)
+  end
+
+  # An expired Infisical session makes `infisical export` block on an interactive
+  # login prompt. When it runs deep inside runtime.exs (e.g. under `mix check`),
+  # that silent hang looks like a frozen build, so cap it with a hard timeout.
+  @infisical_export_timeout to_timeout(second: 20)
+
+  defp load_infisical_env do
+    infisical =
+      System.find_executable("infisical") ||
+        raise """
+        Infisical CLI is required for local dev/test configuration.
+
+        Install it, then authenticate once with:
+        infisical login --domain="https://infisical.alergeek.me"
+
+        To work offline temporarily, run Mix commands with AV_SKIP_INFISICAL=1.
+        """
+
+    case run_infisical_export(infisical) do
+      {:ok, dotenv} ->
+        dotenv |> parse_dotenv() |> System.put_env()
+
+      {:error, :timeout} ->
+        raise """
+        Infisical export timed out for local dev/test configuration.
+
+        This usually means the Infisical CLI session expired and is waiting for
+        an interactive login prompt. Re-authenticate with:
+        infisical login --domain="https://infisical.alergeek.me"
+
+        To work offline temporarily, run Mix commands with AV_SKIP_INFISICAL=1.
+        """
+
+      {:error, {_output, _status}} ->
+        raise """
+        Infisical export failed for local dev/test configuration.
+
+        This usually means the Infisical CLI session expired and is waiting for
+        an interactive login prompt. Re-authenticate with:
+        infisical login --domain="https://infisical.alergeek.me"
+
+        To work offline temporarily, run Mix commands with AV_SKIP_INFISICAL=1.
+        """
+    end
+  end
+
+  # sobelow_skip ["CI.System"]
+  # The executable path is resolved by System.find_executable/1 for the fixed
+  # Infisical command and is shell-escaped; every other argument is a static
+  # string, not user input. stdin is redirected from /dev/null so an expired
+  # session fails fast instead of blocking on an interactive login prompt.
+  defp run_infisical_export(infisical) do
+    command =
+      Enum.join(
+        [
+          shell_escape(infisical),
+          "export",
+          "--env=dev",
+          "--path=/app",
+          "--format=dotenv",
+          "--domain=https://infisical.alergeek.me",
+          "--silent",
+          "< /dev/null"
+        ],
+        " "
+      )
+
+    task = Task.async(fn -> System.cmd("sh", ["-c", command], stderr_to_stdout: true) end)
+
+    case Task.yield(task, @infisical_export_timeout) || Task.shutdown(task) do
+      {:ok, {dotenv, 0}} -> {:ok, dotenv}
+      {:ok, result} -> {:error, result}
+      _ -> {:error, :timeout}
+    end
+  end
+
+  defp shell_escape(arg), do: "'" <> String.replace(arg, "'", "'\\''") <> "'"
+
+  defp load_worktree_env_file do
+    ".env.worktree" |> File.read!() |> parse_dotenv() |> System.put_env()
+  end
+end

@@ -1,0 +1,45 @@
+name: Deploy production
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+
+      - name: Checkout coolify deploy action
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          repository: Alergeek-Ventures/av-secret-service
+          ref: 3831a639eac12845c63db50472ed4f9b220cc2eb
+          ssh-key: ${{ secrets.AV_SECRET_SERVICE_DEPLOY_KEY }}
+          path: .github/actions/av-secret-service
+          persist-credentials: false
+
+      - name: Deploy to Coolify
+        uses: ./.github/actions/av-secret-service/coolify-deploy
+        with:
+          infisical-identity-id: ${{ vars.INFISICAL_MACHINE_IDENTITY_ID }}
+          infisical-project-slug: manfrod
+          coolify-token: ${{ secrets.COOLIFY_TOKEN }}
+          coolify-app-uuid: ${{ vars.COOLIFY_APP_UUID }}

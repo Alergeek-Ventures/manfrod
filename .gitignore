@@ -27,6 +27,7 @@ manfred-*.tar
 
 # secrets
 .env
+.env.worktree
 
 # Eval — raw Slack exports and labeled dataset contain real messages, never commit
 /eval/slack_raw.json
@@ -47,3 +48,5 @@ manfred-*.tar
 deployment/remote/ansible/.vault_pass
 deployment/remote/ansible/.ansible_cache/
 deployment/remote/ansible/*.retry
+manfrod-av-secret-service
+manfrod-av-secret-service.pub
