@@ -73,27 +73,27 @@ defmodule ManfrodWeb.Router do
     get "/impersonate", DevImpersonationController, :create
   end
 
-  # Authenticated LiveView routes
+  # MCP page - any authenticated user (non-admins are funneled here)
   scope "/", ManfrodWeb do
     pipe_through [:browser, :require_auth]
 
-    live_session :authenticated,
+    live_session :mcp,
+      on_mount: [{ManfrodWeb.UserAuth, :require_authenticated}] do
+      live "/mcp", McpLive
+    end
+  end
+
+  # Admin-only LiveView routes - non-admins get bounced to /mcp
+  scope "/", ManfrodWeb do
+    pipe_through [:browser, :admin_only]
+
+    live_session :admin,
       on_mount: [{ManfrodWeb.UserAuth, :require_authenticated}] do
       live "/", ActivityLive
       live "/chat", ChatLive
       live "/dashboard", DashboardLive
       live "/graph", GraphLive
       live "/retrospection", RetrospectionLive
-      live "/mcp", McpLive
-    end
-  end
-
-  # Admin routes
-  scope "/", ManfrodWeb do
-    pipe_through [:browser, :admin_only]
-
-    live_session :admin,
-      on_mount: [{ManfrodWeb.UserAuth, :require_authenticated}] do
       live "/admin/access", Admin.AccessLive
     end
   end

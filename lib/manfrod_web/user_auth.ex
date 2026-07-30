@@ -56,7 +56,8 @@ defmodule ManfrodWeb.UserAuth do
   end
 
   @doc """
-  Requires one of the configured admin users.
+  Requires one of the configured admin users. Non-admins are redirected to
+  `/mcp` — the only page they're allowed to use.
 
   Must be called after `require_authenticated_user`.
   """
@@ -67,8 +68,7 @@ defmodule ManfrodWeb.UserAuth do
       conn
     else
       conn
-      |> put_resp_content_type("text/plain")
-      |> send_resp(403, "Forbidden")
+      |> redirect(to: ~p"/mcp")
       |> halt()
     end
   end
@@ -79,9 +79,13 @@ defmodule ManfrodWeb.UserAuth do
   Used on the login page to skip it when already signed in.
   """
   def redirect_if_authenticated(conn, _opts) do
-    if conn.assigns[:current_scope] do
+    scope = conn.assigns[:current_scope]
+
+    if scope do
+      destination = if scope.user.email in admin_emails(), do: ~p"/", else: ~p"/mcp"
+
       conn
-      |> redirect(to: ~p"/")
+      |> redirect(to: destination)
       |> halt()
     else
       conn
@@ -97,11 +101,12 @@ defmodule ManfrodWeb.UserAuth do
   """
   def log_in_user(conn, user) do
     token = Accounts.create_session_token(user)
+    destination = if user.email in admin_emails(), do: ~p"/", else: ~p"/mcp"
 
     conn
     |> renew_session()
     |> put_session(:user_token, token)
-    |> redirect(to: ~p"/")
+    |> redirect(to: destination)
   end
 
   @doc """
