@@ -241,19 +241,30 @@ defmodule ManfrodWeb.Layouts do
   Navigation bar component.
   """
   attr :current, :atom, required: true
+  attr :current_scope, :any, default: nil
 
   def nav(assigns) do
     ~H"""
     <nav class="flex justify-center items-center gap-4 w-full font-mono px-2 py-4">
-      <.nav_link href="/" label="activity" current={@current == :activity} />
-      <.nav_link href="/retrospection" label="retrospection" current={@current == :retrospection} />
-      <.nav_link href="/dashboard" label="dashboard" current={@current == :dashboard} />
-      <.nav_link href="/graph" label="graph" current={@current == :graph} />
-      <.nav_link href="/mcp" label="mcp" current={@current == :mcp} />
-      <.nav_link href="/admin/access" label="admin" current={@current == :admin} />
+      <%= if admin?(@current_scope) do %>
+        <.nav_link href="/" label="activity" current={@current == :activity} />
+        <.nav_link href="/retrospection" label="retrospection" current={@current == :retrospection} />
+        <.nav_link href="/dashboard" label="dashboard" current={@current == :dashboard} />
+        <.nav_link href="/graph" label="graph" current={@current == :graph} />
+        <.nav_link href="/mcp" label="mcp" current={@current == :mcp} />
+        <.nav_link href="/admin/access" label="admin" current={@current == :admin} />
+      <% else %>
+        <.nav_link href="/mcp" label="mcp" current={@current == :mcp} />
+      <% end %>
     </nav>
     """
   end
+
+  defp admin?(%{user: %{email: email}}) when is_binary(email) do
+    email in Application.get_env(:manfrod, :admin_emails, [])
+  end
+
+  defp admin?(_scope), do: false
 
   defp nav_link(assigns) do
     ~H"""
