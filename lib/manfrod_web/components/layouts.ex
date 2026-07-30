@@ -249,6 +249,7 @@ defmodule ManfrodWeb.Layouts do
       <.nav_link href="/retrospection" label="retrospection" current={@current == :retrospection} />
       <.nav_link href="/dashboard" label="dashboard" current={@current == :dashboard} />
       <.nav_link href="/graph" label="graph" current={@current == :graph} />
+      <.nav_link href="/mcp" label="mcp" current={@current == :mcp} />
       <.nav_link href="/admin/access" label="admin" current={@current == :admin} />
     </nav>
     """

@@ -85,6 +85,8 @@ config :manfrod, Oban,
        {"0 * * * *", Manfrod.Workers.SchedulerWorker},
        # Every hour - schedule cron-skill triggers for next 12h (skills
        # with a `cron:` frontmatter field; none exist yet)
-       {"0 * * * *", Manfrod.Workers.SkillSchedulerWorker}
+       {"0 * * * *", Manfrod.Workers.SkillSchedulerWorker},
+       # Every hour - refresh/expire user MCP connections (Linear, Granola, ...)
+       {"15 * * * *", Manfrod.Workers.McpExpiryWorker}
      ]}
   ]
