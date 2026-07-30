@@ -29,7 +29,7 @@ defmodule Mix.Tasks.Slack.Export do
     Mix.Task.run("app.start")
 
     token = Application.get_env(:manfrod, :slack_bot_token)
-    unless token, do: Mix.raise("SLACK_BOT_TOKEN not configured in .env")
+    unless token, do: Mix.raise("SLACK_BOT_TOKEN not configured in Infisical or .env.worktree")
 
     limit =
       case args do
