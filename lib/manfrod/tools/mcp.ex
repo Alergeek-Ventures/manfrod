@@ -38,7 +38,10 @@ defmodule Manfrod.Tools.Mcp do
             fetch_tools(user_id, provider, access_token)
 
           {:error, reason} ->
-            Logger.debug("Tools.Mcp: no valid token for #{provider.id}/#{user_id}: #{inspect(reason)}")
+            Logger.debug(
+              "Tools.Mcp: no valid token for #{provider.id}/#{user_id}: #{inspect(reason)}"
+            )
+
             []
         end
     end
@@ -66,9 +69,12 @@ defmodule Manfrod.Tools.Mcp do
 
     ReqLLM.Tool.new!(
       name: name,
-      description: "[#{provider.name} MCP] " <> (remote_tool["description"] || remote_tool["name"]),
+      description:
+        "[#{provider.name} MCP] " <> (remote_tool["description"] || remote_tool["name"]),
       parameter_schema: remote_tool["inputSchema"] || %{"type" => "object", "properties" => %{}},
-      callback: fn args -> call_remote_tool(user_id, provider, access_token, remote_tool["name"], args) end
+      callback: fn args ->
+        call_remote_tool(user_id, provider, access_token, remote_tool["name"], args)
+      end
     )
   end
 
@@ -79,7 +85,9 @@ defmodule Manfrod.Tools.Mcp do
 
       {:error, :unauthorized} ->
         handle_unauthorized(user_id, provider)
-        {:ok, "ERROR: #{provider.name} connection expired. The user needs to reconnect it at the web app."}
+
+        {:ok,
+         "ERROR: #{provider.name} connection expired. The user needs to reconnect it at the web app."}
 
       {:error, reason} ->
         {:ok, "#{provider.name} MCP call failed: #{inspect(reason)}"}
@@ -111,6 +119,7 @@ defmodule Manfrod.Tools.Mcp do
       connection ->
         was_connected = connection.status != "expired"
         {:ok, connection} = Mcp.mark_expired(connection)
+
         if was_connected or is_nil(connection.notified_expired_at) do
           notify_expired(user_id, provider)
           Mcp.mark_notified(connection)

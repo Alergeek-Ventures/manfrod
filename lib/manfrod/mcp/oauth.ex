@@ -127,7 +127,12 @@ defmodule Manfrod.Mcp.OAuth do
           state: state
         })
 
-      {:ok, %{url: client.authorization_endpoint <> "?" <> query, code_verifier: code_verifier, state: state}}
+      {:ok,
+       %{
+         url: client.authorization_endpoint <> "?" <> query,
+         code_verifier: code_verifier,
+         state: state
+       }}
     end
   end
 
@@ -163,7 +168,8 @@ defmodule Manfrod.Mcp.OAuth do
   end
 
   defp post_token(client, form) do
-    form = if client.client_secret, do: Map.put(form, :client_secret, client.client_secret), else: form
+    form =
+      if client.client_secret, do: Map.put(form, :client_secret, client.client_secret), else: form
 
     case Req.post(client.token_endpoint, form: form, receive_timeout: 10_000) do
       {:ok, %Req.Response{status: 200, body: body}} when is_map(body) ->
