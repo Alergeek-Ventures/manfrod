@@ -159,56 +159,27 @@ defmodule ManfrodWeb.McpLive do
   end
 
   # ---------------------------------------------------------------------------
-  # Provider logos — self-contained SVG marks for built-ins (no external
-  # asset requests); custom providers render their discovered/none logo.
+  # Provider logos — built-ins render a static asset from priv/static/images/mcp;
+  # custom providers render their discovered/none logo.
   # ---------------------------------------------------------------------------
 
   attr :provider, :map, required: true
 
   def provider_logo(%{provider: %{id: "linear"}} = assigns) do
     ~H"""
-    <svg viewBox="0 0 32 32" class="w-10 h-10 rounded-lg" style="background:#0f1023">
-      <g fill="#fff">
-        <rect x="14" y="4" width="4" height="10" rx="1.5" transform="rotate(45 16 16)" />
-        <rect x="9" y="4" width="4" height="18" rx="1.5" transform="rotate(45 16 16)" />
-        <rect x="19" y="4" width="4" height="18" rx="1.5" transform="rotate(45 16 16)" />
-      </g>
-    </svg>
+    <img src="/images/mcp/linear.png" class="w-10 h-10 rounded-lg object-cover" />
     """
   end
 
   def provider_logo(%{provider: %{id: "granola"}} = assigns) do
     ~H"""
-    <svg viewBox="0 0 32 32" class="w-10 h-10 rounded-lg">
-      <rect width="32" height="32" rx="8" fill="#F97C4B" />
-      <path
-        d="M16 6a10 10 0 1 0 7.07 17.07"
-        fill="none"
-        stroke="#FFF3E8"
-        stroke-width="3.4"
-        stroke-linecap="round"
-      />
-      <circle cx="16" cy="16" r="3.4" fill="#FFF3E8" />
-    </svg>
+    <img src="/images/mcp/granola.webp" class="w-10 h-10 rounded-lg object-cover" />
     """
   end
 
   def provider_logo(%{provider: %{id: "firmowid"}} = assigns) do
     ~H"""
-    <svg viewBox="0 0 32 32" class="w-10 h-10 rounded-lg">
-      <rect width="32" height="32" rx="8" fill="#374151" />
-      <text
-        x="16"
-        y="22"
-        text-anchor="middle"
-        font-family="ui-sans-serif, system-ui"
-        font-size="16"
-        font-weight="700"
-        fill="#D1D5DB"
-      >
-        F
-      </text>
-    </svg>
+    <img src="/images/mcp/firmowid.png" class="w-10 h-10 rounded-lg object-cover" />
     """
   end
 
