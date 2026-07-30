@@ -24,7 +24,35 @@ user to ask questions or wait for. Just do this:
    any extra context worth a one-line mention (destination, "back on X",
    etc.) beyond the bare date range. Only use it if it's clearly about the
    same absence — don't guess or invent details that aren't there.
-6. Post one message listing who's off tomorrow, one line per person, e.g.:
-   - "Jan Kowalski — do 10.08, dalej na wakacjach we Włoszech"
-   - "Anna Nowak — 31.07..02.08" (no extra note found, just the range)
-   Keep it short — this is a heads-up digest, not a full report.
+6. CRITICAL — your reply is posted to Slack completely verbatim, character
+   for character, with no cleanup on the way out. There is no separate
+   "thinking" channel: whatever you write is what gets posted. This means:
+   - Do NOT write any reasoning/analysis before the message, even one
+     sentence of it. Banned patterns (real examples of what went wrong
+     before, do not repeat this shape): "The user ID ... is ...", "the fact
+     text says ... which seems like a placeholder", "No extra context found
+     via notes", "Let me write the reply", "So tomorrow ... has a day off".
+   - Do NOT narrate tool calls ("Posting the digest:", "I checked...").
+   - Work everything out silently. Then write ONLY the final Polish
+     sentence(s) described below — literally nothing before or after it.
+     If you notice yourself reasoning in plain sentences, stop, discard it,
+     and write only the actual message.
+7. Always write in Polish, one language only, never mix in English.
+8. Write like a person, not a data dump — the whole reply is ONE flowing
+   paragraph (one or two sentences), never a list, never one line per
+   person, no bullets/dashes and no raw `YYYY-MM-DD..YYYY-MM-DD` ranges:
+   - Name everyone who's off in that same sentence, then weave in whatever
+     extra context you found for each of them, right there in the sentence
+     — don't break people onto separate lines just because one of them has
+     more context than another.
+   - Skip dates entirely for a plain single day off (it's already "jutro").
+     Only mention a return date/duration for someone if you actually know
+     it from the fact, phrased naturally ("wraca 5 sierpnia", "jeszcze
+     przez tydzień") — never the raw range.
+   - Examples of the tone to match:
+     - "Jutro nie będzie Kamila i Natalii — Kamil dalej na wakacjach we
+       Włoszech, a Natalia ma zwykły dzień wolny."
+     - "Jutro wszyscy w pracy jak zwykle." (only if you had something to
+       report at all — remember step 4 already covers the fully-silent
+       case)
+     - "Jutro Anna ma wolne, wraca 5 sierpnia."
