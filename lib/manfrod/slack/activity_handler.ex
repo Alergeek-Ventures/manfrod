@@ -176,28 +176,24 @@ defmodule Manfrod.Slack.ActivityHandler do
          } = activity},
         state
       ) do
-    content = Mrkdwn.from_markdown(activity.meta.content)
+    {content, blocks} = Mrkdwn.to_blocks(activity.meta.content)
+
+    message =
+      %{thread_ts: thread_ts, text: content}
+      |> then(fn m -> if blocks, do: Map.put(m, :blocks, blocks), else: m end)
 
     state =
       if dm_channel?(channel) do
         case get_in(state, [:pending, {channel, thread_ts}, :placeholder_ts]) do
           nil ->
             MessageServer.ensure_started(state.bot_token, channel)
-
-            MessageServer.send_message(channel, %{
-              thread_ts: thread_ts,
-              text: content
-            })
+            MessageServer.send_message(channel, message)
 
             state
 
           placeholder_ts ->
             MessageServer.ensure_started(state.bot_token, channel)
-
-            MessageServer.send_message(channel, %{
-              thread_ts: thread_ts,
-              text: content
-            })
+            MessageServer.send_message(channel, message)
 
             update_thread_title(state.bot_token, channel, placeholder_ts, content)
 
@@ -208,20 +204,14 @@ defmodule Manfrod.Slack.ActivityHandler do
         case get_in(state, [:pending, {channel, thread_ts}, :placeholder_ts]) do
           nil ->
             MessageServer.ensure_started(state.bot_token, channel)
-
-            MessageServer.send_message(channel, %{
-              thread_ts: thread_ts,
-              text: content
-            })
+            MessageServer.send_message(channel, message)
 
             state
 
           placeholder_ts ->
-            case API.post("chat.update", state.bot_token, %{
-                   channel: channel,
-                   ts: placeholder_ts,
-                   text: content
-                 }) do
+            update_body = Map.merge(message, %{channel: channel, ts: placeholder_ts})
+
+            case API.post("chat.update", state.bot_token, update_body) do
               {:ok, _} ->
                 :ok
 
