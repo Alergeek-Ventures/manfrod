@@ -68,6 +68,13 @@ defmodule ManfrodWeb.McpLive do
     {:noreply, socket |> load_data() |> put_flash(:info, "Custom MCP server removed")}
   end
 
+  def handle_event("disconnect_provider", %{"id" => id}, socket) do
+    user_id = socket.assigns.current_scope.user.id
+    Mcp.disconnect(user_id, id)
+
+    {:noreply, socket |> load_data() |> put_flash(:info, "Disconnected")}
+  end
+
   defp load_data(socket) do
     user_id = socket.assigns.current_scope.user.id
     providers = Mcp.providers_for_user(user_id)
@@ -124,14 +131,14 @@ defmodule ManfrodWeb.McpLive do
               >
                 Reconnect
               </a>
-              <.link
-                href={"/mcp/#{@provider.id}/disconnect"}
-                method="delete"
+              <button
+                phx-click="disconnect_provider"
+                phx-value-id={@provider.id}
                 data-confirm={"Disconnect #{@provider.name}?"}
                 class="text-xs font-medium text-red-500 hover:text-red-300"
               >
                 Disconnect
-              </.link>
+              </button>
             </div>
           <% else %>
             <a
