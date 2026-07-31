@@ -103,7 +103,8 @@ defmodule Manfrod.Tools.Reminders do
     with {:ok, scheduled_at, _offset} <- DateTime.from_iso8601(at_string),
          :gt <- DateTime.compare(scheduled_at, DateTime.utc_now()),
          args = %{
-           prompt: "[Reminder] #{message}",
+           prompt: build_reminder_prompt(message),
+           message: message,
            trigger_id: "reminder_#{:erlang.phash2({message, scheduled_at})}",
            user_id: user_id
          },
@@ -114,6 +115,18 @@ defmodule Manfrod.Tools.Reminders do
       :lt -> {:ok, "Cannot set reminder in the past. Provide a future datetime."}
       :eq -> {:ok, "Cannot set reminder in the past. Provide a future datetime."}
     end
+  end
+
+  defp build_reminder_prompt(message) do
+    """
+    [Reminder firing now] You set this reminder for the user earlier — they are \
+    not addressing you right now, you are notifying them. Deliver the reminder \
+    to them as a short natural message; don't carry out the reminder's content \
+    yourself.
+
+    Reminder: #{message}
+    """
+    |> String.trim()
   end
 
   defp list_reminders(user_id, _args) do
@@ -133,8 +146,7 @@ defmodule Manfrod.Tools.Reminders do
     else
       lines =
         Enum.map(jobs, fn job ->
-          message = String.replace_prefix(job.args["prompt"], "[Reminder] ", "")
-          "• ##{job.id} at #{job.scheduled_at}: #{message}"
+          "• ##{job.id} at #{job.scheduled_at}: #{job.args["message"]}"
         end)
 
       {:ok, "Pending reminders:\n#{Enum.join(lines, "\n")}"}
