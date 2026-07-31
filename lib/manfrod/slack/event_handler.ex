@@ -135,6 +135,21 @@ defmodule Manfrod.Slack.EventHandler do
     :ok
   end
 
+  def handle_event("slash_commands", %{"command" => "/add-user"} = payload, bot) do
+    channel_id = payload["channel_id"]
+    slack_user_id = payload["user_id"]
+
+    text =
+      if admin_slack_user?(slack_user_id) do
+        handle_add_user_command(payload, bot.token)
+      else
+        "Tylko admin może używać `/add-user`."
+      end
+
+    API.post("chat.postMessage", bot.token, %{channel: channel_id, text: text})
+    :ok
+  end
+
   def handle_event("interactive", %{"type" => "block_actions"} = payload, bot) do
     action = List.first(payload["actions"] || []) || %{}
     channel_id = get_in(payload, ["channel", "id"])
@@ -570,6 +585,77 @@ defmodule Manfrod.Slack.EventHandler do
           {:error, changeset} ->
             "Nie udało się zapisać mappingu: #{inspect(changeset.errors)}"
         end
+    end
+  end
+
+  # -- /add-user: provision a user without requiring them to DM first ---------
+
+  @add_user_usage "Użycie: `/add-user @osoba email@domena.pl`"
+
+  defp handle_add_user_command(payload, bot_token) do
+    text = String.trim(payload["text"] || "")
+
+    case parse_add_user_args(text) do
+      {:ok, target_id, email} ->
+        case Accounts.get_user_by_slack_id(target_id) do
+          %{} = existing ->
+            "<@#{target_id}> już jest w bazie " <>
+              "(#{existing.name || "bez imienia"}, #{existing.email || "bez maila"})."
+
+          nil ->
+            provision_user(bot_token, target_id, email)
+        end
+
+      :error ->
+        @add_user_usage <>
+          " — oznacz osobę prawdziwym @mention i podaj adres email. " <>
+          "Jeśli mention nie jest rozpoznawany, włącz \"Escape channels, users, " <>
+          "and links\" w konfiguracji komendy w Slack."
+    end
+  end
+
+  # Slash-command text with escaping enabled delivers mentions as
+  # "<@U123|handle>" (or "<@U123>"); the email is matched anywhere in the rest.
+  defp parse_add_user_args(text) do
+    with [_, target_id] <- Regex.run(~r/<@([A-Z0-9]+)(?:\|[^>]*)?>/, text),
+         [email] <- Regex.run(~r/[\w.+-]+@[\w-]+\.[\w.-]+/, text) do
+      {:ok, target_id, email}
+    else
+      _ -> :error
+    end
+  end
+
+  # The users table requires slack_dm_channel_id (DM-first invariant), so a
+  # user added by command gets their DM channel opened up front via
+  # conversations.open — after this they're indistinguishable from a user who
+  # DMed the bot themselves.
+  defp provision_user(bot_token, target_id, email) do
+    name =
+      case API.fetch_user_info(bot_token, target_id) do
+        {:ok, %{name: name}} -> name
+        :error -> nil
+      end
+
+    case open_dm_channel(bot_token, target_id) do
+      {:ok, dm_channel_id} ->
+        case Accounts.find_or_create_by_slack_id(target_id, dm_channel_id, name, email) do
+          {:ok, user} ->
+            "Dodałem <@#{target_id}> (#{user.name || "bez imienia"}, #{user.email}) do bazy."
+
+          {:error, changeset} ->
+            "Nie udało się dodać użytkownika: #{inspect(changeset.errors)}"
+        end
+
+      {:error, reason} ->
+        "Nie udało się otworzyć DM z <@#{target_id}> (#{inspect(reason)}) — nie dodałem."
+    end
+  end
+
+  defp open_dm_channel(bot_token, target_id) do
+    case API.post("conversations.open", bot_token, %{users: target_id}) do
+      {:ok, %{"channel" => %{"id" => dm_channel_id}}} -> {:ok, dm_channel_id}
+      {:ok, other} -> {:error, other}
+      {:error, reason} -> {:error, reason}
     end
   end
 
