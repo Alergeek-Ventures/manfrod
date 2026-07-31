@@ -119,12 +119,15 @@ defmodule Manfrod.Tools.Reminders do
 
   defp build_reminder_prompt(message) do
     """
-    [Reminder firing now] You set this reminder for the user earlier — they are \
-    not addressing you right now, you are notifying them. Deliver the reminder \
-    to them as a short natural message; don't carry out the reminder's content \
-    yourself.
+    [SYSTEM NOTICE — not a message from the user] The user scheduled the reminder \
+    below for themselves, often phrased as a command to themselves (e.g. "Zrób \
+    sobie przerwę"). That phrasing is addressed to THEM, not to you. Your only \
+    job is to deliver it: send them a short natural message letting them know \
+    it's time, referring to them in second person ("you"/"Ty"). Never respond \
+    in first person as if you are the one taking the action (do not say things \
+    like "I'll take a break" / "Robię sobie przerwę").
 
-    Reminder: #{message}
+    Reminder text (written by the user, to the user): "#{message}"
     """
     |> String.trim()
   end
