@@ -34,7 +34,7 @@ defmodule ManfrodWeb.Admin.AccessLive do
 
   @impl true
   def handle_params(%{"tab" => tab}, _uri, socket)
-      when tab in ~w(projects channels members vacations cron) do
+      when tab in ~w(projects channels members vacations cron reminders) do
     {:noreply, assign(socket, tab: tab)}
   end
 
@@ -255,6 +255,12 @@ defmodule ManfrodWeb.Admin.AccessLive do
     end
   end
 
+  def handle_event("cancel_reminder", %{"id" => id}, socket) do
+    :ok = Oban.cancel_job(String.to_integer(id))
+
+    {:noreply, socket |> load_data() |> put_flash(:info, "Reminder cancelled")}
+  end
+
   def handle_event("activate_mapping", %{"id" => id}, socket) do
     toggle_mapping_status(id, "active", socket)
   end
@@ -372,6 +378,7 @@ defmodule ManfrodWeb.Admin.AccessLive do
       )
 
     cron_rows = build_cron_rows()
+    reminder_rows = build_reminder_rows(users)
 
     socket
     |> assign(projects: projects)
@@ -380,6 +387,7 @@ defmodule ManfrodWeb.Admin.AccessLive do
     |> assign(users: users)
     |> assign(vacations: vacations)
     |> assign(cron_rows: cron_rows)
+    |> assign(reminder_rows: reminder_rows)
   end
 
   # Skill-crons (from SKILL.md frontmatter, read-only, no owning user) and
@@ -423,6 +431,34 @@ defmodule ManfrodWeb.Admin.AccessLive do
       end)
 
     Enum.sort_by(skill_rows ++ user_rows, & &1.name)
+  end
+
+  # One-time reminders (from `set_reminder`) are plain Oban jobs, not DB
+  # rows of their own — pull them from the jobs table and match them back
+  # to users in-memory rather than joining, since args is a jsonb blob.
+  defp build_reminder_rows(users) do
+    jobs =
+      Oban.Job
+      |> where([j], j.worker == "Manfrod.Workers.TriggerWorker")
+      |> where([j], j.state in ["scheduled", "available"])
+      |> where([j], fragment("?->>'trigger_id' LIKE 'reminder_%'", j.args))
+      |> order_by([j], asc: j.scheduled_at)
+      |> Repo.all()
+
+    users_by_id = Map.new(users, &{&1.id, &1})
+
+    Enum.map(jobs, fn job ->
+      user = Map.get(users_by_id, job.args["user_id"])
+
+      %{
+        id: job.id,
+        message: String.replace_prefix(job.args["prompt"] || "", "[Reminder] ", ""),
+        scheduled_at: job.scheduled_at,
+        state: job.state,
+        owner_name: user && user.name,
+        owner_slack_id: user && user.slack_id
+      }
+    end)
   end
 
   # Skill rows carry `id: nil` (there's no DB row behind them) and

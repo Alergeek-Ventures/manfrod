@@ -73,6 +73,19 @@
     >
       Cron (<%= length(@cron_rows) %>)
     </button>
+    <button
+      phx-click="switch_tab"
+      phx-value-tab="reminders"
+      class={[
+        "px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors",
+        if(@tab == "reminders",
+          do: "border-indigo-500 text-indigo-400",
+          else: "border-transparent text-gray-400 hover:text-gray-200"
+        )
+      ]}
+    >
+      Reminders (<%= length(@reminder_rows) %>)
+    </button>
   </div>
 
   <%!-- Channels tab --%>
@@ -533,6 +546,62 @@
                       </button>
                     <% end %>
                   <% end %>
+                </td>
+              </tr>
+            <% end %>
+          </tbody>
+        </table>
+      </div>
+    <% end %>
+  <% end %>
+
+  <%!-- Reminders tab --%>
+  <%= if @tab == "reminders" do %>
+    <p class="text-xs text-gray-500 mb-4">
+      One-time reminders set via the agent's <code>set_reminder</code> tool. Recurring reminders live under the Cron tab.
+    </p>
+
+    <%= if @reminder_rows == [] do %>
+      <p class="text-gray-500 text-sm">No pending reminders.</p>
+    <% else %>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm text-left">
+          <thead>
+            <tr class="border-b border-gray-700 text-gray-400 text-xs uppercase tracking-wider">
+              <th class="pb-3 pr-4">Message</th>
+              <th class="pb-3 pr-4">Scheduled at</th>
+              <th class="pb-3 pr-4">Owner</th>
+              <th class="pb-3 pr-4">Status</th>
+              <th class="pb-3"></th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-800">
+            <%= for reminder <- @reminder_rows do %>
+              <tr class="text-gray-300 align-top">
+                <td class="py-3 pr-4 max-w-md">
+                  <div class="whitespace-pre-wrap"><%= reminder.message %></div>
+                </td>
+                <td class="py-3 pr-4 text-xs text-gray-400"><%= reminder.scheduled_at %></td>
+                <td class="py-3 pr-4 text-xs">
+                  <div><%= reminder.owner_name || "—" %></div>
+                  <%= if reminder.owner_slack_id do %>
+                    <div class="text-gray-500 font-mono"><%= reminder.owner_slack_id %></div>
+                  <% end %>
+                </td>
+                <td class="py-3 pr-4">
+                  <span class="px-2 py-0.5 rounded text-xs font-medium bg-blue-900/50 text-blue-300">
+                    <%= reminder.state %>
+                  </span>
+                </td>
+                <td class="py-3 flex justify-end">
+                  <button
+                    phx-click="cancel_reminder"
+                    phx-value-id={reminder.id}
+                    data-confirm="Cancel this reminder?"
+                    class="text-xs text-red-500 hover:text-red-300"
+                  >
+                    Cancel
+                  </button>
                 </td>
               </tr>
             <% end %>
