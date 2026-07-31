@@ -22,6 +22,7 @@ defmodule Manfrod.Slack.EventHandler do
   alias Manfrod.Memory.{Admin, Buffer, ChannelDetector, ChannelMapping, Classifier, Project}
   alias Manfrod.Repo
   alias Manfrod.Slack.API
+  alias Manfrod.Slack.EventDedup
 
   @doc """
   Handle an incoming Slack event.
@@ -187,7 +188,20 @@ defmodule Manfrod.Slack.EventHandler do
 
   # -- Channel thread replies: only respond if bot is already in the thread ---
 
+  # A single @mention arrives as two Slack events (`message` + `app_mention`),
+  # and Socket Mode can redeliver either — without this guard each delivery
+  # would reach the Agent and the bot would reply twice to one message.
   defp handle_channel_mention(bot, event, raw_text, slack_user_id, channel, thread_ts) do
+    if EventDedup.first?({:mention, channel, event["ts"]}) do
+      do_handle_channel_mention(bot, event, raw_text, slack_user_id, channel, thread_ts)
+    else
+      Logger.debug(
+        "Slack EventHandler ignoring duplicate mention delivery for #{channel}/#{event["ts"]}"
+      )
+    end
+  end
+
+  defp do_handle_channel_mention(bot, event, raw_text, slack_user_id, channel, thread_ts) do
     session_key = "#{channel}:#{thread_ts}"
 
     cleaned_text =
@@ -217,7 +231,8 @@ defmodule Manfrod.Slack.EventHandler do
 
           access_channel_id = resolve_agent_channel(event, channel, channel_name, channel_info)
           channel_context = build_channel_context(channel_name, bot.token, slack_user_id)
-          content_with_context = "[#{channel_context}]\n#{cleaned_text}"
+          history_block = maybe_thread_history(bot, event, channel, thread_ts, session_key)
+          content_with_context = history_block <> "[#{channel_context}]\n#{cleaned_text}"
 
           Agent.send_message(
             user.id,
