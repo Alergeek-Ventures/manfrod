@@ -452,7 +452,7 @@ defmodule ManfrodWeb.Admin.AccessLive do
 
       %{
         id: job.id,
-        message: String.replace_prefix(job.args["prompt"] || "", "[Reminder] ", ""),
+        message: job.args["message"] || job.args["prompt"],
         scheduled_at: job.scheduled_at,
         state: job.state,
         owner_name: user && user.name,
