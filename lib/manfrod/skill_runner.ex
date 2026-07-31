@@ -141,7 +141,7 @@ defmodule Manfrod.SkillRunner do
   priv/skills/holiday-check/SKILL.md) — exposed for testing.
   """
   @spec empty_reply?(String.t()) :: boolean()
-  def empty_reply?(text), do: String.trim(text) == "EMPTY"
+  def empty_reply?(text), do: Regex.match?(~r/\bEMPTY\b/, text)
 
   defp post_final_text(_channel, ""), do: :ok
 
