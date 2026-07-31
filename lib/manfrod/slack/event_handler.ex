@@ -46,7 +46,11 @@ defmodule Manfrod.Slack.EventHandler do
       conversation.
   - `"app_mention"` — Channel @mentions. Requires user to already exist
     (must have DMed the bot first). Strips the bot mention prefix and
-    includes channel context (name + user) before forwarding.
+    includes channel context (name + user) before forwarding. A mention
+    mid-thread where the bot has no live session backfills the prior thread
+    messages into the new session, so the bot joins the ongoing conversation
+    (shared session, gated replies from everyone) instead of starting a
+    fresh exchange with the mentioning user.
 
   All other event types are logged at debug level and ignored.
   """
@@ -316,6 +320,70 @@ defmodule Manfrod.Slack.EventHandler do
 
   defp session_exists?(session_key) do
     Registry.lookup(Manfrod.Agent.Registry, session_key) != []
+  end
+
+  @thread_history_limit 50
+
+  # An @mention mid-thread where no Agent session exists yet means the bot is
+  # being pulled into a conversation that started without it. Backfill the
+  # prior thread messages into the new session's first message so the agent
+  # joins with the same context as if it had been present from the start —
+  # not as a fresh one-on-one exchange with whoever mentioned it. Mentions at
+  # the thread root, or in threads with a live session, have nothing to
+  # backfill.
+  defp maybe_thread_history(bot, event, channel, thread_ts, session_key) do
+    if event["thread_ts"] != nil and not session_exists?(session_key) do
+      case API.list_thread_replies(bot.token, channel, thread_ts, limit: @thread_history_limit) do
+        {:ok, messages} ->
+          format_thread_history(bot, messages, event["ts"])
+
+        {:error, reason} ->
+          Logger.warning(
+            "Slack EventHandler: failed to backfill thread history for #{session_key}: " <>
+              inspect(reason)
+          )
+
+          ""
+      end
+    else
+      ""
+    end
+  end
+
+  defp format_thread_history(bot, messages, mention_ts) do
+    prior = Enum.reject(messages, &(&1["ts"] == mention_ts))
+    names = resolve_history_authors(bot, prior)
+
+    lines =
+      for msg <- prior, text_present?(msg["text"]) do
+        "#{history_author(bot, msg, names)}: #{msg["text"]}"
+      end
+
+    if lines == [] do
+      ""
+    else
+      "[Thread history — you were just mentioned in an ongoing thread. " <>
+        "These messages were sent before you joined:]\n" <>
+        Enum.join(lines, "\n") <> "\n[End of thread history]\n"
+    end
+  end
+
+  defp resolve_history_authors(bot, messages) do
+    messages
+    |> Enum.map(& &1["user"])
+    |> Enum.reject(&(is_nil(&1) or &1 == bot.user_id))
+    |> Enum.uniq()
+    |> Map.new(fn slack_user_id ->
+      {slack_user_id, resolve_user_name(bot.token, slack_user_id)}
+    end)
+  end
+
+  defp history_author(bot, msg, names) do
+    cond do
+      msg["user"] == bot.user_id -> "Manfrod"
+      msg["user"] -> format_author(names[msg["user"]], msg["user"])
+      true -> msg["username"] || "bot"
+    end
   end
 
   defp tag_author(text, author_name, slack_user_id) do
