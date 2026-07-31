@@ -2,14 +2,9 @@ defmodule Manfrod.Slack.ActivityHandler do
   @moduledoc """
   Subscribes to the PubSub event bus and delivers Agent activity to Slack.
 
-  Handles the differences between DM threads (assistant surface) and channel
-  threads (@mention surface):
-
-  - **DM threads** use `assistant.threads.setStatus` to show typing indicators,
-    which auto-clear when the bot sends a reply. The final response is posted
-    directly as a threaded reply.
-  - **Channel threads** post a placeholder message ("Thinking...") and update
-    it in-place as the Agent progresses through actions and its final response.
+  Uses `assistant.threads.setStatus` to show shimmer typing indicators while
+  the Agent is working (both DMs and regular channel threads support this),
+  which auto-clear when the bot sends its reply as a normal threaded message.
 
   Handles events from any source (`:slack`, `:proactive`, etc.) as long as
   they carry a `reply_to` map with `channel` and `thread_ts`.
@@ -95,34 +90,10 @@ defmodule Manfrod.Slack.ActivityHandler do
          %Activity{type: :thinking, reply_to: %{channel: channel, thread_ts: thread_ts}}},
         state
       ) do
-    # Skip if placeholder already exists (e.g. from start_thread)
-    state =
-      if get_in(state, [:pending, {channel, thread_ts}]) do
-        state
-      else
-        if dm_channel?(channel) do
-          set_status(state.bot_token, channel, thread_ts, "is thinking...")
-          state
-        else
-          MessageServer.ensure_started(state.bot_token, channel)
-
-          case API.post("chat.postMessage", state.bot_token, %{
-                 channel: channel,
-                 thread_ts: thread_ts,
-                 text: ":hourglass_flowing_sand: Thinking..."
-               }) do
-            {:ok, %{"ts" => placeholder_ts}} ->
-              put_in(state, [:pending, {channel, thread_ts}], %{placeholder_ts: placeholder_ts})
-
-            {:error, reason} ->
-              Logger.error(
-                "Slack ActivityHandler failed to post placeholder to #{channel}: #{inspect(reason)}"
-              )
-
-              state
-          end
-        end
-      end
+    # Skip if a placeholder already exists (e.g. from start_thread)
+    unless get_in(state, [:pending, {channel, thread_ts}]) do
+      set_status(state.bot_token, channel, thread_ts, "is thinking...")
+    end
 
     {:noreply, state}
   end
@@ -138,30 +109,7 @@ defmodule Manfrod.Slack.ActivityHandler do
         state
       ) do
     action_name = activity.meta.action
-
-    if dm_channel?(channel) do
-      set_status(state.bot_token, channel, thread_ts, "is using #{action_name}...")
-    else
-      case get_in(state, [:pending, {channel, thread_ts}, :placeholder_ts]) do
-        nil ->
-          :ok
-
-        placeholder_ts ->
-          case API.post("chat.update", state.bot_token, %{
-                 channel: channel,
-                 ts: placeholder_ts,
-                 text: ":hourglass_flowing_sand: Using #{action_name}..."
-               }) do
-            {:ok, _} ->
-              :ok
-
-            {:error, reason} ->
-              Logger.error(
-                "Slack ActivityHandler failed to update placeholder in #{channel}: #{inspect(reason)}"
-              )
-          end
-      end
-    end
+    set_status(state.bot_token, channel, thread_ts, "is using #{action_name}...")
 
     {:noreply, state}
   end
@@ -183,47 +131,21 @@ defmodule Manfrod.Slack.ActivityHandler do
       |> then(fn m -> if blocks, do: Map.put(m, :blocks, blocks), else: m end)
 
     state =
-      if dm_channel?(channel) do
-        case get_in(state, [:pending, {channel, thread_ts}, :placeholder_ts]) do
-          nil ->
-            MessageServer.ensure_started(state.bot_token, channel)
-            MessageServer.send_message(channel, message)
+      case get_in(state, [:pending, {channel, thread_ts}, :placeholder_ts]) do
+        nil ->
+          MessageServer.ensure_started(state.bot_token, channel)
+          MessageServer.send_message(channel, message)
 
-            state
+          state
 
-          placeholder_ts ->
-            MessageServer.ensure_started(state.bot_token, channel)
-            MessageServer.send_message(channel, message)
+        placeholder_ts ->
+          MessageServer.ensure_started(state.bot_token, channel)
+          MessageServer.send_message(channel, message)
 
-            update_thread_title(state.bot_token, channel, placeholder_ts, content)
+          update_thread_title(state.bot_token, channel, placeholder_ts, content)
 
-            {_, state} = pop_in(state, [:pending, {channel, thread_ts}])
-            state
-        end
-      else
-        case get_in(state, [:pending, {channel, thread_ts}, :placeholder_ts]) do
-          nil ->
-            MessageServer.ensure_started(state.bot_token, channel)
-            MessageServer.send_message(channel, message)
-
-            state
-
-          placeholder_ts ->
-            update_body = Map.merge(message, %{channel: channel, ts: placeholder_ts})
-
-            case API.post("chat.update", state.bot_token, update_body) do
-              {:ok, _} ->
-                :ok
-
-              {:error, reason} ->
-                Logger.error(
-                  "Slack ActivityHandler failed to update response in #{channel}: #{inspect(reason)}"
-                )
-            end
-
-            {_, state} = pop_in(state, [:pending, {channel, thread_ts}])
-            state
-        end
+          {_, state} = pop_in(state, [:pending, {channel, thread_ts}])
+          state
       end
 
     {:noreply, state}
@@ -281,9 +203,6 @@ defmodule Manfrod.Slack.ActivityHandler do
   # ---------------------------------------------------------------------------
   # Helpers
   # ---------------------------------------------------------------------------
-
-  defp dm_channel?("D" <> _), do: true
-  defp dm_channel?(_), do: false
 
   defp update_thread_title(bot_token, channel, placeholder_ts, content) do
     Task.start(fn ->
