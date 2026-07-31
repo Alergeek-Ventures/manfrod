@@ -19,7 +19,7 @@ defmodule Manfrod.Slack.Supervisor do
 
   require Logger
 
-  alias Manfrod.Slack.{API, Bot, ActivityHandler, EventHandler, Socket}
+  alias Manfrod.Slack.{API, Bot, ActivityHandler, EventDedup, EventHandler, Socket}
 
   @doc """
   Start the Slack supervisor.
@@ -49,6 +49,9 @@ defmodule Manfrod.Slack.Supervisor do
       # Passive memory buffer infrastructure
       {Registry, keys: :unique, name: Manfrod.Memory.BufferRegistry},
       {DynamicSupervisor, strategy: :one_for_one, name: Manfrod.Memory.BufferSupervisor},
+      # Once-only guard for duplicate event deliveries (message + app_mention
+      # for the same @mention, Socket Mode redeliveries)
+      EventDedup,
       # Outbound: PubSub → Slack delivery
       {ActivityHandler, bot_token},
       # Inbound: Slack → Agent
