@@ -67,6 +67,13 @@ defmodule Manfrod.Slack.EventHandler do
     channel = event["channel"]
 
     if text_present?(text) and slack_user_id do
+      # Before anything else: a DM is always answered, so the shimmer can go up
+      # the moment the message lands rather than after the identity and channel
+      # lookups below, which are several sequential Slack round trips.
+      if dm_channel?(channel) do
+        start_thinking(bot.token, channel, event["thread_ts"] || event["ts"])
+      end
+
       user_name = resolve_user_name(bot.token, slack_user_id)
       channel_name = resolve_channel_name(bot.token, channel)
 
@@ -295,6 +302,15 @@ defmodule Manfrod.Slack.EventHandler do
     end
   end
 
+  # Fire-and-forget: this exists to make the bot look responsive, so it must
+  # not itself add a round trip to the path it is trying to shorten. The
+  # status is cleared again once the reply starts streaming — see
+  # `Manfrod.Slack.StreamSession`.
+  defp start_thinking(bot_token, channel, thread_ts) do
+    Task.start(fn -> API.set_status(bot_token, channel, thread_ts, "is thinking...") end)
+    :ok
+  end
+
   defp suggest_prompts(bot, slack_user_id, channel_id, thread_ts)
        when is_binary(slack_user_id) and is_binary(channel_id) do
     user = Accounts.get_user_by_slack_id(slack_user_id)
@@ -320,6 +336,12 @@ defmodule Manfrod.Slack.EventHandler do
   # would reach the Agent and the bot would reply twice to one message.
   defp handle_channel_mention(bot, event, raw_text, slack_user_id, channel, thread_ts) do
     if EventDedup.first?({:mention, channel, event["ts"]}) do
+      # An explicit @mention is always answered, so — as with a DM — the
+      # shimmer goes up now, ahead of the lookups and the thread backfill.
+      # Inside the dedup guard, or the duplicate `message`/`app_mention`
+      # delivery of one mention would set it twice.
+      start_thinking(bot.token, channel, thread_ts)
+
       do_handle_channel_mention(bot, event, raw_text, slack_user_id, channel, thread_ts)
     else
       Logger.debug(

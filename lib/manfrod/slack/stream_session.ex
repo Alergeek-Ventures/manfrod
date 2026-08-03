@@ -337,6 +337,7 @@ defmodule Manfrod.Slack.StreamSession do
 
     case API.start_stream(state.bot_token, state.channel, state.thread_ts, opts) do
       {:ok, ts} ->
+        clear_status(state)
         %{state | ts: ts, pending: []}
 
       {:error, reason} ->
@@ -366,6 +367,17 @@ defmodule Manfrod.Slack.StreamSession do
         # finish/4 anyway, and retrying would reorder chunks against the tasks.
         %{state | pending: []}
     end
+  end
+
+  # The shimmer and the stream say the same thing, so the shimmer's job ends
+  # the moment there is real content on screen. Slack clears the status when
+  # the app posts into the thread, but a stream is not an ordinary post and
+  # the two would otherwise sit there together — so clear it explicitly.
+  # Fire-and-forget: it must not delay the first chunk.
+  defp clear_status(state) do
+    %{bot_token: bot_token, channel: channel, thread_ts: thread_ts} = state
+    Task.start(fn -> API.set_status(bot_token, channel, thread_ts, "") end)
+    :ok
   end
 
   defp put_recipient(opts, nil), do: opts
