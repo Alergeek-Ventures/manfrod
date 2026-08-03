@@ -71,7 +71,7 @@ defmodule Manfrod.Memory.Extractor do
     # Node creation is intentionally NOT done here: the passive Classifier is the
     # single writer of memory nodes (named, third-person, deduplicated). The
     # Extractor only summarizes and closes the conversation for provenance.
-    with {:ok, summary} <- generate_summary(conversation_text),
+    with {:ok, summary} <- generate_summary(conversation_text, user_id, session_key),
          {:ok, conversation} <-
            Memory.close_conversation(user_id, session_key, %{
              summary: summary,
@@ -127,11 +127,15 @@ defmodule Manfrod.Memory.Extractor do
     |> Enum.join("\n\n")
   end
 
-  defp generate_summary(conversation_text) do
+  defp generate_summary(conversation_text, user_id, session_key) do
     prompt = @summary_prompt <> conversation_text
     messages = [ReqLLM.Context.user(prompt)]
 
-    case LLM.generate_text(messages, purpose: :extractor) do
+    case LLM.generate_text(messages,
+           purpose: :extractor,
+           user_id: user_id,
+           session_key: session_key
+         ) do
       {:ok, response} ->
         summary = ReqLLM.Response.text(response) |> String.trim()
         {:ok, summary}

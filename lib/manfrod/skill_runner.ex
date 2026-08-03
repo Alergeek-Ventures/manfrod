@@ -97,7 +97,11 @@ defmodule Manfrod.SkillRunner do
   end
 
   defp run_loop(ctx, messages, iteration) do
-    case LLM.generate_text(messages, tools: Tools.definitions(ctx), purpose: :skill_runner) do
+    case LLM.generate_text(messages,
+           tools: Tools.definitions(ctx),
+           purpose: :skill_runner,
+           user_id: ctx.user_id
+         ) do
       {:ok, response} ->
         case ReqLLM.Response.finish_reason(response) do
           :tool_calls -> run_tool_calls(ctx, messages, response, iteration)

@@ -95,6 +95,7 @@ defmodule ManfrodWeb.Router do
       live "/graph", GraphLive
       live "/retrospection", RetrospectionLive
       live "/admin/access", Admin.AccessLive
+      live "/admin/analytics", Admin.AnalyticsLive
     end
   end
 

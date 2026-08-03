@@ -694,7 +694,8 @@ defmodule Manfrod.Memory.Retrospector do
 
       case LLM.generate_text(messages,
              tools: tools(user_id, readable_levels, write_access),
-             purpose: :retrospector
+             purpose: :retrospector,
+             user_id: user_id
            ) do
         {:ok, response} ->
           usage = ReqLLM.Response.usage(response) || %{}
