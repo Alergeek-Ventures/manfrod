@@ -1,9 +1,11 @@
 defmodule Manfrod.Slack.ThreadTitle do
   @moduledoc """
-  Generates a short thread-root title for a proactive DM, from the actual
-  message content the agent is about to send — used by
-  `Manfrod.Slack.ActivityHandler` to replace the "Thinking..." placeholder
-  once the reply is ready.
+  Generates a short thread title from the actual message content the agent is
+  about to send. `Manfrod.Slack.ActivityHandler` uses it twice over:
+
+  - `assistant.threads.setTitle`, to name a DM thread in the agent's Messages
+    tab (once per thread, on the first answer)
+  - replacing the "Thinking..." placeholder that roots a proactive DM thread
   """
 
   require Logger

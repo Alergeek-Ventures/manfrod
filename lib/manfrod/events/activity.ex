@@ -14,10 +14,18 @@ defmodule Manfrod.Events.Activity do
   Agent (conversation):
   - `:thinking` - message received, starting LLM call
   - `:narrating` - agent explaining what it's doing (text between tool calls)
+  - `:plan_titled` - a name for the work this turn is doing, for the progress
+    card transports show while the tool calls run. Emitted once per turn, and
+    asynchronously — the card is already open by the time it arrives.
+  - `:response_chunk` - incremental text as the LLM produces it, ahead of the
+    final `:responding`. Deliberately *not* persisted (see
+    `Manfrod.Events.Persister`) — it is a live-rendering signal, and the same
+    text arrives again, whole, on `:responding`.
   - `:responding` - final response ready
   - `:reacted` - agent chose to react with an emoji instead of a full reply
   - `:interrupted` - new message arrived, restarting with fresh context
   - `:idle` - conversation timed out
+  - `:feedback_received` - a user rated a response (Slack feedback buttons)
 
   Logs (BEAM-wide):
   - `:log` - captured from Logger (debug, info, warning, error levels)
@@ -70,10 +78,13 @@ defmodule Manfrod.Events.Activity do
           # Agent
           | :thinking
           | :narrating
+          | :plan_titled
+          | :response_chunk
           | :responding
           | :reacted
           | :interrupted
           | :idle
+          | :feedback_received
           # Logs
           | :log
           # Memory

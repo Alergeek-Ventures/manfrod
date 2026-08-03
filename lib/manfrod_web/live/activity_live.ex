@@ -159,11 +159,19 @@ defmodule ManfrodWeb.ActivityLive do
     else
       # Filter incoming logs based on current setting
       should_show =
-        if activity.type == :log do
-          socket.assigns.show_all_logs or
-            activity.meta[:level] in [:warning, :error]
-        else
-          true
+        cond do
+          # Streaming deltas: a dozen per answer, and the same text arrives
+          # whole on :responding. They are not persisted either, so showing
+          # them live would make the feed disagree with itself on reload.
+          activity.type == :response_chunk ->
+            false
+
+          activity.type == :log ->
+            socket.assigns.show_all_logs or
+              activity.meta[:level] in [:warning, :error]
+
+          true ->
+            true
         end
 
       socket =
@@ -396,6 +404,11 @@ defmodule ManfrodWeb.ActivityLive do
   defp type_color_class(%Activity{type: :thinking}), do: "text-yellow-400"
   defp type_color_class(%Activity{type: :narrating}), do: "text-yellow-400"
   defp type_color_class(%Activity{type: :responding}), do: "text-green-400"
+
+  defp type_color_class(%Activity{type: :feedback_received, meta: %{rating: "bad"}}),
+    do: "text-red-400"
+
+  defp type_color_class(%Activity{type: :feedback_received}), do: "text-green-400"
   defp type_color_class(%Activity{type: :idle}), do: "text-zinc-500"
   defp type_color_class(%Activity{type: :message_received}), do: "text-cyan-400"
   defp type_color_class(%Activity{type: :action_started}), do: "text-purple-400"
@@ -454,6 +467,8 @@ defmodule ManfrodWeb.ActivityLive do
   defp format_type(%Activity{type: :thinking}), do: "THINKING"
   defp format_type(%Activity{type: :narrating}), do: "NARRATING"
   defp format_type(%Activity{type: :responding}), do: "RESPONDING"
+  defp format_type(%Activity{type: :feedback_received}), do: "FEEDBACK"
+  defp format_type(%Activity{type: :plan_titled}), do: "PLAN"
   defp format_type(%Activity{type: :idle}), do: "IDLE"
   defp format_type(%Activity{type: :memory_searched}), do: "MEMORY:SEARCH"
   defp format_type(%Activity{type: :memory_node_created}), do: "MEMORY:CREATE"
@@ -498,6 +513,12 @@ defmodule ManfrodWeb.ActivityLive do
 
   defp format_detail(%Activity{type: :responding, meta: %{content: content}}) do
     truncate(content, 120)
+  end
+
+  defp format_detail(%Activity{type: :plan_titled, meta: %{title: title}}), do: title
+
+  defp format_detail(%Activity{type: :feedback_received, meta: %{rating: rating}}) do
+    if rating == "good", do: "👍 dobra odpowiedź", else: "👎 słaba odpowiedź"
   end
 
   defp format_detail(%Activity{type: :idle}), do: "conversation timeout"

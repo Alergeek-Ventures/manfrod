@@ -8,6 +8,20 @@ config :manfrod,
   generators: [timestamp_type: :utc_datetime, binary_id: true],
   admin_emails: ["franek@alergeek.ventures", "kamil@alergeek.ventures"]
 
+# Kill switches for streamed replies, one per failure domain — both default to
+# true and exist so a provider or Slack regression can be worked around
+# without a deploy.
+#
+#   :llm_streaming   - consume the model response as a stream (Manfrod.LLM).
+#                      Turn off if streamed tool calls come back malformed;
+#                      answers then arrive whole, as they did before.
+#   :slack_streaming - render that stream into Slack with chat.startStream
+#                      (Manfrod.Slack.ActivityHandler). Turn off to fall back
+#                      to a shimmer plus one finished message.
+config :manfrod,
+  llm_streaming: true,
+  slack_streaming: true
+
 config :manfrod, Manfrod.Repo, types: Manfrod.PostgrexTypes
 
 config :manfrod, ManfrodWeb.Endpoint,

@@ -143,6 +143,112 @@ defmodule Manfrod.Slack.API do
     post("reactions.add", token, %{channel: channel, timestamp: ts, name: emoji})
   end
 
+  # ---------------------------------------------------------------------------
+  # Agent / assistant surface
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  Set the "thinking" shimmer shown at the bottom of an agent thread.
+
+  Clears itself once the app posts into the thread, so there is no matching
+  "clear" call — send `""` only to drop it early.
+  """
+  @spec set_status(String.t(), String.t(), String.t(), String.t()) ::
+          {:ok, map()} | {:error, term()}
+  def set_status(token, channel, thread_ts, status) do
+    post("assistant.threads.setStatus", token, %{
+      channel_id: channel,
+      thread_ts: thread_ts,
+      status: status
+    })
+  end
+
+  @doc """
+  Name a thread in the agent's Messages tab. Only meaningful for assistant
+  threads (DMs with the app), where Slack lists threads by title.
+  """
+  @spec set_title(String.t(), String.t(), String.t(), String.t()) ::
+          {:ok, map()} | {:error, term()}
+  def set_title(token, channel, thread_ts, title) do
+    post("assistant.threads.setTitle", token, %{
+      channel_id: channel,
+      thread_ts: thread_ts,
+      title: title
+    })
+  end
+
+  @doc """
+  Pin up to four suggested prompts to the top of an agent thread.
+
+  `prompts` is a list of `%{title: ..., message: ...}` — `title` is the label
+  on the button, `message` the text sent as the user when it is clicked.
+  Anything beyond the first four is dropped by Slack, so trim before calling.
+  """
+  @spec set_suggested_prompts(String.t(), String.t(), String.t(), [map()], String.t() | nil) ::
+          {:ok, map()} | {:error, term()}
+  def set_suggested_prompts(token, channel, thread_ts, prompts, title \\ nil) do
+    body =
+      %{channel_id: channel, prompts: prompts}
+      |> then(fn b -> if thread_ts, do: Map.put(b, :thread_ts, thread_ts), else: b end)
+      |> then(fn b -> if title, do: Map.put(b, :title, title), else: b end)
+
+    post("assistant.threads.setSuggestedPrompts", token, body)
+  end
+
+  @doc """
+  Open a streaming message in `thread_ts` and return `{:ok, ts}` — the
+  timestamp every later `append_stream/4` and `stop_stream/4` call must carry.
+
+  `opts` may include `:chunks` (initial content, so the message never appears
+  blank), `:recipient_user_id` and `:recipient_team_id` (required for streams
+  in channels — the in-progress message is visible only to that user until it
+  is finalized) and `:task_display_mode` (`"timeline"`, `"plan"` or `"dense"`).
+  """
+  @spec start_stream(String.t(), String.t(), String.t(), keyword()) ::
+          {:ok, String.t()} | {:error, term()}
+  def start_stream(token, channel, thread_ts, opts \\ []) do
+    body =
+      opts
+      |> Map.new()
+      |> Map.merge(%{channel: channel, thread_ts: thread_ts})
+
+    case post("chat.startStream", token, body) do
+      {:ok, %{"ts" => ts}} -> {:ok, ts}
+      {:ok, body} -> {:error, {:missing_ts, body}}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @doc """
+  Append chunks to a stream opened with `start_stream/4`.
+
+  Chunks are `markdown_text`, `task_update`, `plan_update` or `blocks` maps —
+  see `Manfrod.Slack.StreamSession` for the ones this app produces.
+  """
+  @spec append_stream(String.t(), String.t(), String.t(), [map()]) ::
+          {:ok, map()} | {:error, term()}
+  def append_stream(token, channel, ts, chunks) do
+    post("chat.appendStream", token, %{channel: channel, ts: ts, chunks: chunks})
+  end
+
+  @doc """
+  Finalize a stream. After this the message stops rendering as in-progress and
+  becomes visible to everyone in the channel.
+
+  `chunks` is appended as the last content before finalizing — this is how the
+  feedback buttons get attached without discarding what was streamed (passing
+  `blocks:` instead would replace the message body).
+  """
+  @spec stop_stream(String.t(), String.t(), String.t(), [map()]) ::
+          {:ok, map()} | {:error, term()}
+  def stop_stream(token, channel, ts, chunks \\ []) do
+    body =
+      %{channel: channel, ts: ts}
+      |> then(fn b -> if chunks == [], do: b, else: Map.put(b, :chunks, chunks) end)
+
+    post("chat.stopStream", token, body)
+  end
+
   @doc """
   Upload a binary as a file to Slack and share it into `channel`, via the
   current (non-deprecated) external-upload flow: `files.getUploadURLExternal`
