@@ -242,7 +242,7 @@ defmodule Manfrod.Slack.ActivityHandler do
       end
 
     if delivered == :not_streaming do
-      post_message(state, channel, thread_ts, content)
+      post_message(state, channel, thread_ts, content, activity.session_key)
     end
 
     state =
@@ -376,12 +376,7 @@ defmodule Manfrod.Slack.ActivityHandler do
   end
 
   defp finish_stream(channel, thread_ts, content, activity) do
-    chunks =
-      if feedback_supported?(channel) do
-        [Feedback.buttons_chunk(activity.session_key)]
-      else
-        []
-      end
+    chunks = [Feedback.buttons_chunk(activity.session_key)]
 
     case StreamSession.finish(channel, thread_ts, content, chunks) do
       :ok ->
@@ -402,25 +397,37 @@ defmodule Manfrod.Slack.ActivityHandler do
     end
   end
 
-  # The feedback element is part of the agent surface. Restricted to DMs
-  # rather than assumed everywhere, so an unsupported block can never make a
-  # channel reply fail to render.
-  defp feedback_supported?("D" <> _), do: true
-  defp feedback_supported?(_channel), do: false
-
   # ---------------------------------------------------------------------------
   # Non-streamed delivery
   # ---------------------------------------------------------------------------
 
-  defp post_message(state, channel, thread_ts, content) do
-    {text, blocks} = Mrkdwn.to_blocks(content)
+  # Slack caps a markdown block at 12k characters. Past that the reply goes out
+  # as plain text without the buttons — losing the rating beats losing the
+  # message to msg_too_long.
+  @markdown_block_limit 11_900
+
+  defp post_message(state, channel, thread_ts, content, session_key) do
+    {text, table_blocks} = Mrkdwn.to_blocks(content)
 
     message =
-      %{thread_ts: thread_ts, text: text}
-      |> then(fn m -> if blocks, do: Map.put(m, :blocks, blocks), else: m end)
+      case body_blocks(table_blocks, content) do
+        nil ->
+          %{thread_ts: thread_ts, text: text}
+
+        body ->
+          %{thread_ts: thread_ts, text: text, blocks: body ++ [Feedback.block(session_key)]}
+      end
 
     MessageServer.ensure_started(state.bot.token, channel)
     MessageServer.send_message(channel, message)
+  end
+
+  defp body_blocks(table_blocks, _content) when is_list(table_blocks), do: table_blocks
+
+  defp body_blocks(nil, content) do
+    if String.length(content) <= @markdown_block_limit do
+      [%{type: "markdown", text: content}]
+    end
   end
 
   # ---------------------------------------------------------------------------
