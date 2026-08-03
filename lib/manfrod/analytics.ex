@@ -16,6 +16,7 @@ defmodule Manfrod.Analytics do
   alias Manfrod.Accounts.User
   alias Manfrod.Analytics.ActivityRollup
   alias Manfrod.Analytics.UsageRollup
+  alias Manfrod.Feedback
   alias Manfrod.Pricing
   alias Manfrod.Repo
 
@@ -35,6 +36,11 @@ defmodule Manfrod.Analytics do
       by_user: by_user(days),
       model_timeline: model_timeline(days),
       adoption: adoption(days),
+      # Ratings come straight from `message_feedback`, not the rollups: a few
+      # clicks a day needs no pre-aggregation, and the negative list has to
+      # keep the individual rows anyway.
+      feedback: Feedback.stats(days),
+      negative_feedback: Feedback.list_negative(days),
       pricing: pricing_rows()
     }
   end

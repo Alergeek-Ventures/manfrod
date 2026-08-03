@@ -82,7 +82,7 @@ defmodule ManfrodWeb.Admin.AnalyticsLive do
         </header>
 
         <%!-- Headline numbers: no plot, so no hover layer --%>
-        <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 mb-8">
+        <div class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3 mb-8">
           <.stat
             label="Spend"
             value={"$#{money(@data.summary.cost_usd)}"}
@@ -112,6 +112,11 @@ defmodule ManfrodWeb.Admin.AnalyticsLive do
             label="LLM calls"
             value={format_number(@data.summary.calls)}
             sub={"#{@data.summary.failed_calls} failed / #{@data.summary.retries} retries"}
+          />
+          <.stat
+            label="Satisfaction"
+            value={satisfaction_value(@data.feedback)}
+            sub={satisfaction_sub(@data.feedback)}
           />
         </div>
 
@@ -187,6 +192,66 @@ defmodule ManfrodWeb.Admin.AnalyticsLive do
           <p :if={Enum.any?(@data.by_user, &(not &1.attributed?))} class="text-zinc-600 text-xs mt-3">
             "–" means those calls predate per-user cost attribution; totals above still include them.
           </p>
+        </.card>
+
+        <%!-- Negative feedback --%>
+        <h2 class="text-zinc-400 text-xs uppercase tracking-widest mb-3">feedback</h2>
+        <.card
+          title="Answers rated bad"
+          hint={"last #{@days} days, newest first"}
+          class="mb-8"
+        >
+          <p :if={@data.negative_feedback == []} class="text-zinc-500 text-xs py-2">
+            <%= if @data.feedback.total == 0 do %>
+              Nobody has rated an answer in this window.
+            <% else %>
+              <%= @data.feedback.good %> positive ratings, none negative.
+            <% end %>
+          </p>
+
+          <div :if={@data.negative_feedback != []} class="overflow-x-auto">
+            <table class="w-full text-xs">
+              <thead class="text-zinc-500 border-b border-zinc-700">
+                <tr>
+                  <th class="text-left font-normal py-2 pr-4">when</th>
+                  <th class="text-left font-normal py-2 pr-4">who</th>
+                  <th class="text-left font-normal py-2 pr-4">where</th>
+                  <th class="text-left font-normal py-2 pl-2">message</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr :for={f <- @data.negative_feedback} class="border-b border-zinc-800/60">
+                  <td class="py-2 pr-4 text-zinc-400 whitespace-nowrap tabular-nums">
+                    <%= format_datetime(f.inserted_at) %>
+                  </td>
+                  <td class="py-2 pr-4 text-zinc-200 whitespace-nowrap">
+                    <%= rater(f) %>
+                  </td>
+                  <td class="py-2 pr-4 text-zinc-400 whitespace-nowrap">
+                    <%= where(f) %>
+                  </td>
+                  <td class="py-2 pl-2">
+                    <a
+                      :if={f.permalink}
+                      href={f.permalink}
+                      target="_blank"
+                      rel="noopener"
+                      class="text-blue-400 hover:underline"
+                    >
+                      open in Slack
+                    </a>
+                    <span
+                      :if={is_nil(f.permalink)}
+                      class="text-zinc-600"
+                      title="The message was gone, or the link could not be resolved, when the rating came in"
+                    >
+                      no link
+                    </span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </.card>
 
         <%!-- Models --%>
@@ -480,6 +545,45 @@ defmodule ManfrodWeb.Admin.AnalyticsLive do
 
   defp format_date(nil), do: "–"
   defp format_date(date), do: Calendar.strftime(date, "%m/%d")
+
+  @timezone "Europe/Warsaw"
+
+  # Ratings are a handful of rows an admin reads one by one, so unlike the
+  # chart axes these get a real local timestamp rather than a compact label.
+  defp format_datetime(nil), do: "–"
+
+  defp format_datetime(%DateTime{} = at) do
+    at
+    |> DateTime.shift_zone!(@timezone)
+    |> Calendar.strftime("%m/%d %H:%M")
+  end
+
+  defp format_datetime(%NaiveDateTime{} = at) do
+    at
+    |> DateTime.from_naive!("Etc/UTC")
+    |> format_datetime()
+  end
+
+  # Nobody has to be a provisioned user to rate an answer, so fall back
+  # through the denormalized Slack name to the raw id.
+  defp satisfaction_value(%{score: nil}), do: "–"
+  defp satisfaction_value(%{score: score}), do: "#{score}%"
+
+  defp satisfaction_sub(%{total: 0}), do: "no ratings yet"
+
+  defp satisfaction_sub(%{good: good, bad: bad, total: total}) do
+    "#{good} good / #{bad} bad of #{total}"
+  end
+
+  defp rater(%{user: %{name: name}}) when is_binary(name) and name != "", do: name
+  defp rater(%{slack_user_name: name}) when is_binary(name) and name != "", do: name
+  defp rater(%{slack_user_id: id}) when is_binary(id), do: id
+  defp rater(_feedback), do: "unknown"
+
+  defp where(%{slack_channel_name: "DM"}), do: "DM"
+  defp where(%{slack_channel_name: name}) when is_binary(name) and name != "", do: "##{name}"
+  defp where(%{slack_channel_id: id}) when is_binary(id), do: id
+  defp where(_feedback), do: "–"
 
   defp format_number(n) when is_integer(n) and n >= 1_000_000,
     do: "#{Float.round(n / 1_000_000, 1)}M"

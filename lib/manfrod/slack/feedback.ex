@@ -98,11 +98,16 @@ defmodule Manfrod.Slack.Feedback do
   end
 
   @doc """
-  Record a click. Takes the raw `block_actions` payload and the action that was
-  matched on `action_id/0`.
+  Record a click. Takes the raw `block_actions` payload, the action that was
+  matched on `action_id/0`, and the bot token used to resolve the channel name
+  and permalink.
+
+  Written twice over, deliberately: an activity event so the rating shows up
+  live alongside everything else the agent did, and a `Manfrod.Feedback` row
+  that outlives the 7-day audit retention and backs the analytics page.
   """
-  @spec record(map(), map()) :: :ok
-  def record(payload, action) do
+  @spec record(map(), map(), String.t() | nil) :: :ok
+  def record(payload, action, bot_token \\ nil) do
     {rating, session_key} = decode(action["value"])
     slack_user_id = get_in(payload, ["user", "id"])
     channel_id = get_in(payload, ["channel", "id"])
@@ -122,12 +127,65 @@ defmodule Manfrod.Slack.Feedback do
       }
     })
 
+    persist(bot_token, %{
+      user_id: user && user.id,
+      slack_user_id: slack_user_id,
+      slack_user_name: rater_name(user, payload),
+      slack_channel_id: channel_id,
+      message_ts: message_ts,
+      session_key: session_key,
+      rating: rating
+    })
+
     Logger.info(
       "Slack feedback: #{rating} from #{slack_user_id} on #{channel_id}/#{message_ts} " <>
         "(session #{session_key || "unknown"})"
     )
 
     :ok
+  end
+
+  # The channel name and permalink are resolved now rather than when the
+  # analytics page is opened: the message may be deleted by then, and an admin
+  # looking at a complaint should not wait on two Slack round trips per row.
+  defp persist(bot_token, attrs) do
+    attrs =
+      attrs
+      |> Map.put(:slack_channel_name, channel_name(bot_token, attrs.slack_channel_id))
+      |> Map.put(:permalink, permalink(bot_token, attrs.slack_channel_id, attrs.message_ts))
+
+    case Manfrod.Feedback.record(attrs) do
+      {:ok, _feedback} ->
+        :ok
+
+      {:error, changeset} ->
+        Logger.warning("Slack feedback: failed to store rating: #{inspect(changeset.errors)}")
+    end
+  end
+
+  defp rater_name(%{name: name}, _payload) when is_binary(name) and name != "", do: name
+  defp rater_name(_user, payload), do: get_in(payload, ["user", "username"])
+
+  defp channel_name(nil, _channel_id), do: nil
+  defp channel_name(_bot_token, nil), do: nil
+  defp channel_name(_bot_token, "D" <> _), do: "DM"
+
+  defp channel_name(bot_token, channel_id) do
+    case API.get_channel_info(bot_token, channel_id) do
+      {:ok, %{"name" => name}} -> name
+      _ -> nil
+    end
+  end
+
+  defp permalink(nil, _channel_id, _message_ts), do: nil
+  defp permalink(_bot_token, nil, _message_ts), do: nil
+  defp permalink(_bot_token, _channel_id, nil), do: nil
+
+  defp permalink(bot_token, channel_id, message_ts) do
+    case API.get_permalink(bot_token, channel_id, message_ts) do
+      {:ok, permalink} -> permalink
+      {:error, _reason} -> nil
+    end
   end
 
   # "good"/"bad" prefixed onto the session so a rating can be traced back to
