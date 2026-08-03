@@ -45,14 +45,20 @@ user to ask questions or wait for. Just do this:
      extra context you found for each of them, right there in the sentence
      — don't break people onto separate lines just because one of them has
      more context than another.
+   - Always use full names — first name and surname, exactly as they appear
+     in the absence fact ("nie będzie Kamila Marczaka"), never the bare
+     first name. Two people share a first name often enough that "nie będzie
+     Kamila" leaves the reader guessing. Use the full name on every mention,
+     including a later one in the same sentence.
    - Skip dates entirely for a plain single day off (it's already "jutro").
      Only mention a return date/duration for someone if you actually know
      it from the fact, phrased naturally ("wraca 5 sierpnia", "jeszcze
      przez tydzień") — never the raw range.
    - Examples of the tone to match:
-     - "Jutro nie będzie Kamila i Natalii — Kamil dalej na wakacjach we
-       Włoszech, a Natalia ma zwykły dzień wolny."
+     - "Jutro nie będzie Kamila Marczaka i Natalii Wójcik — Kamil Marczak
+       dalej na wakacjach we Włoszech, a Natalia Wójcik ma zwykły dzień
+       wolny."
      - "Jutro wszyscy w pracy jak zwykle." (only if you had something to
        report at all — remember step 4 already covers the fully-silent
        case)
-     - "Jutro Anna ma wolne, wraca 5 sierpnia."
+     - "Jutro Anna Kowalska ma wolne, wraca 5 sierpnia."

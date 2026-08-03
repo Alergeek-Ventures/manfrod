@@ -245,22 +245,75 @@ defmodule Manfrod.Accounts do
   # ---------------------------------------------------------------------------
 
   @doc """
-  Backfill display names from Slack for users without names.
+  The user's name, with a surname, for anything that has to identify a
+  specific colleague rather than address them — an absence record read by the
+  whole company, a digest naming who is off.
 
-  Takes a Slack bot token. Iterates users where `name` is nil,
-  fetches their real name from Slack, and updates the user record.
+  A stored name is often just a first name: Slack's `real_name` is free text,
+  and plenty of people fill in only their first. When that is what we have,
+  this asks Slack for the profile's `first_name`/`last_name` and saves the
+  fuller answer, so the repair happens once per person rather than on every
+  call. Falls back to whatever is stored (and then to nil) — a first name is
+  still better than no name.
+
+  Accepts a user id, a `%User{}`, or nil.
+  """
+  @spec full_name(%User{} | String.t() | nil) :: String.t() | nil
+  def full_name(nil), do: nil
+
+  def full_name(user_id) when is_binary(user_id) do
+    user_id |> get_user() |> full_name()
+  end
+
+  def full_name(%User{} = user) do
+    if surname?(user.name) do
+      user.name
+    else
+      repair_name(user) || user.name
+    end
+  end
+
+  # "Kamil Marczak" has one; "Kamil" and the handle "kamil.m" do not.
+  defp surname?(name) when is_binary(name) do
+    name |> String.trim() |> String.split(~r/\s+/, trim: true) |> length() > 1
+  end
+
+  defp surname?(_name), do: false
+
+  defp repair_name(%User{slack_id: slack_id} = user) when is_binary(slack_id) do
+    with token when is_binary(token) <- Application.get_env(:manfrod, :slack_bot_token),
+         {:ok, name} <- Manfrod.Slack.API.fetch_user_name(token, slack_id),
+         true <- surname?(name),
+         {:ok, updated} <- user |> User.changeset(%{name: name}) |> Repo.update() do
+      updated.name
+    else
+      _ -> nil
+    end
+  end
+
+  defp repair_name(_user), do: nil
+
+  # ---------------------------------------------------------------------------
+  # Utilities
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  Backfill names from Slack for users whose stored name is missing or is a
+  bare first name.
+
+  Takes a Slack bot token. `full_name/1` repairs a user lazily the first time
+  it needs them, so this is only for fixing everyone up front rather than
+  waiting for each to come up.
 
   Intended for one-time use from IEx:
 
       Manfrod.Accounts.backfill_names_from_slack(System.get_env("SLACK_BOT_TOKEN"))
   """
   def backfill_names_from_slack(token) when is_binary(token) do
-    users_without_names =
-      User
-      |> where([u], is_nil(u.name))
-      |> Repo.all()
-
-    Enum.each(users_without_names, fn user ->
+    User
+    |> Repo.all()
+    |> Enum.reject(&surname?(&1.name))
+    |> Enum.each(fn user ->
       case Manfrod.Slack.API.fetch_user_name(token, user.slack_id) do
         {:ok, name} ->
           user
