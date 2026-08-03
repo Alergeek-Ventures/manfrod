@@ -332,6 +332,14 @@ defmodule Manfrod.Agent.Server do
       slack_ts: Map.get(message, :ts)
     }
 
+    # One event per inbound user message, before any batching/gating decides
+    # whether to answer — this is the raw "someone talked to the bot" signal
+    # that adoption metrics count.
+    Events.broadcast(
+      :message_received,
+      Map.put(event_ctx, :meta, Map.put(event_ctx.meta, :content, content))
+    )
+
     # Queue message
     state = %{
       state
@@ -506,7 +514,9 @@ defmodule Manfrod.Agent.Server do
                Manfrod.Tools.definitions(
                  tool_context(ctx.user_id, ctx.readable_levels, state.write_access, msg_ctx(ctx))
                ),
-             purpose: :agent
+             purpose: :agent,
+             user_id: ctx.user_id,
+             session_key: state.session_key
            ) do
         {:ok, response} ->
           handle_llm_response(response, ctx, iter, refresher_pid, state)

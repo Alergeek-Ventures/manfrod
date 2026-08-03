@@ -30,6 +30,7 @@ defmodule Manfrod.LLM do
   """
 
   alias Manfrod.Events
+  alias Manfrod.Pricing
 
   # Centralized configuration - not configurable per-call
   @timeout_ms 180_000
@@ -68,6 +69,10 @@ defmodule Manfrod.LLM do
     * `:tools` - List of `ReqLLM.Tool` structs for tool-calling
     * `:purpose` - Atom identifying the caller (:agent, :extractor, :retrospector)
       Used for event metadata only.
+    * `:user_id` - UUID of the user this call is made on behalf of. Attributes
+      token spend to a person in the usage analytics; omit for system-wide work.
+    * `:session_key` - Session (Slack thread) the call belongs to, for
+      per-conversation attribution.
 
   ## Returns
 
@@ -80,7 +85,23 @@ defmodule Manfrod.LLM do
     tools = Keyword.get(opts, :tools, [])
     purpose = Keyword.get(opts, :purpose, :unknown)
 
-    call_with_fallback(messages, tools, purpose, @fallback_chain)
+    call_with_fallback(messages, tools, purpose, attribution(opts), @fallback_chain)
+  end
+
+  # Top-level Activity fields (not meta) so usage events join to users the same
+  # way message/tool events already do.
+  defp attribution(opts) do
+    %{
+      user_id: Keyword.get(opts, :user_id),
+      session_key: Keyword.get(opts, :session_key)
+    }
+  end
+
+  # Merge attribution + source into an event payload.
+  defp event(attribution, meta) do
+    attribution
+    |> Map.put(:source, :llm)
+    |> Map.put(:meta, meta)
   end
 
   # Simple call retry config
@@ -101,6 +122,8 @@ defmodule Manfrod.LLM do
       * `:provider` - Provider key (:openrouter or :zen), defaults to :openrouter
       * `:purpose` - Atom for telemetry (defaults to :simple)
       * `:timeout_ms` - Request timeout in ms (defaults to 30_000)
+      * `:user_id` - UUID of the user this call is made on behalf of
+      * `:session_key` - Session the call belongs to
 
   ## Returns
 
@@ -113,10 +136,26 @@ defmodule Manfrod.LLM do
     purpose = Keyword.get(opts, :purpose, :simple)
     timeout_ms = Keyword.get(opts, :timeout_ms, 30_000)
 
-    do_generate_simple(model_id, messages, provider_key, purpose, timeout_ms, @simple_max_retries)
+    do_generate_simple(
+      model_id,
+      messages,
+      provider_key,
+      purpose,
+      attribution(opts),
+      timeout_ms,
+      @simple_max_retries
+    )
   end
 
-  defp do_generate_simple(model_id, messages, provider_key, purpose, timeout_ms, retries_left) do
+  defp do_generate_simple(
+         model_id,
+         messages,
+         provider_key,
+         purpose,
+         attribution,
+         timeout_ms,
+         retries_left
+       ) do
     provider = Map.fetch!(@providers, provider_key)
     api_key = Application.get_env(:manfrod, provider.api_key_config)
 
@@ -126,16 +165,16 @@ defmodule Manfrod.LLM do
     attempt = @simple_max_retries - retries_left + 1
     start_time = System.monotonic_time(:millisecond)
 
-    Events.broadcast(:llm_call_started, %{
-      source: :llm,
-      meta: %{
+    Events.broadcast(
+      :llm_call_started,
+      event(attribution, %{
         model: model_id,
         provider: provider_key,
         tier: :free,
         purpose: purpose,
         attempt: attempt
-      }
-    })
+      })
+    )
 
     result =
       ReqLLM.generate_text(model, context,
@@ -151,28 +190,20 @@ defmodule Manfrod.LLM do
       {:ok, response} ->
         usage = ReqLLM.Response.usage(response) || %{}
 
-        Events.broadcast(:llm_call_succeeded, %{
-          source: :llm,
-          meta: %{
-            model: model_id,
-            provider: provider_key,
-            tier: :free,
-            purpose: purpose,
-            latency_ms: latency_ms,
-            input_tokens: usage[:input_tokens],
-            output_tokens: usage[:output_tokens],
-            total_tokens: usage[:total_tokens],
-            cached_tokens: usage[:cached_tokens],
-            cache_creation_tokens: usage[:cache_creation_tokens]
-          }
-        })
+        Events.broadcast(
+          :llm_call_succeeded,
+          event(
+            attribution,
+            usage_meta(model_id, provider_key, :free, purpose, latency_ms, usage)
+          )
+        )
 
         {:ok, ReqLLM.Response.text(response)}
 
       {:error, reason} = error ->
-        Events.broadcast(:llm_call_failed, %{
-          source: :llm,
-          meta: %{
+        Events.broadcast(
+          :llm_call_failed,
+          event(attribution, %{
             model: model_id,
             provider: provider_key,
             tier: :free,
@@ -180,16 +211,16 @@ defmodule Manfrod.LLM do
             attempt: attempt,
             error: format_error(reason),
             latency_ms: latency_ms
-          }
-        })
+          })
+        )
 
         # Retry on retryable errors (429, 5xx, transport errors)
         if retries_left > 1 and retryable_error?(reason) do
           delay_ms = (@simple_initial_delay_ms * :math.pow(2, attempt - 1)) |> trunc()
 
-          Events.broadcast(:llm_retry, %{
-            source: :llm,
-            meta: %{
+          Events.broadcast(
+            :llm_retry,
+            event(attribution, %{
               model: model_id,
               provider: provider_key,
               tier: :free,
@@ -197,8 +228,8 @@ defmodule Manfrod.LLM do
               attempt: attempt,
               delay_ms: delay_ms,
               reason: format_error(reason)
-            }
-          })
+            })
+          )
 
           Process.sleep(delay_ms)
 
@@ -207,6 +238,7 @@ defmodule Manfrod.LLM do
             messages,
             provider_key,
             purpose,
+            attribution,
             timeout_ms,
             retries_left - 1
           )
@@ -218,12 +250,23 @@ defmodule Manfrod.LLM do
 
   # Fallback chain traversal
 
-  defp call_with_fallback(_messages, _tools, _purpose, []) do
+  defp call_with_fallback(_messages, _tools, _purpose, _attribution, []) do
     {:error, :all_models_failed}
   end
 
-  defp call_with_fallback(messages, tools, purpose, [{provider_key, model_id, tier} | rest]) do
-    case call_with_retries(messages, tools, purpose, provider_key, model_id, tier, @max_retries) do
+  defp call_with_fallback(messages, tools, purpose, attribution, [
+         {provider_key, model_id, tier} | rest
+       ]) do
+    case call_with_retries(
+           messages,
+           tools,
+           purpose,
+           attribution,
+           provider_key,
+           model_id,
+           tier,
+           @max_retries
+         ) do
       {:ok, _response} = success ->
         success
 
@@ -231,38 +274,47 @@ defmodule Manfrod.LLM do
         if rest != [] do
           {next_provider, next_model, _next_tier} = hd(rest)
 
-          Events.broadcast(:llm_fallback, %{
-            source: :llm,
-            meta: %{
+          Events.broadcast(
+            :llm_fallback,
+            event(attribution, %{
               from_model: model_id,
               from_provider: provider_key,
               to_model: next_model,
               to_provider: next_provider,
               reason: format_error(reason),
               purpose: purpose
-            }
-          })
+            })
+          )
         end
 
-        call_with_fallback(messages, tools, purpose, rest)
+        call_with_fallback(messages, tools, purpose, attribution, rest)
     end
   end
 
   # Retry loop with exponential backoff
 
-  defp call_with_retries(messages, tools, purpose, provider_key, model_id, tier, retries_left) do
+  defp call_with_retries(
+         messages,
+         tools,
+         purpose,
+         attribution,
+         provider_key,
+         model_id,
+         tier,
+         retries_left
+       ) do
     attempt = @max_retries - retries_left + 1
 
-    Events.broadcast(:llm_call_started, %{
-      source: :llm,
-      meta: %{
+    Events.broadcast(
+      :llm_call_started,
+      event(attribution, %{
         model: model_id,
         provider: provider_key,
         tier: tier,
         purpose: purpose,
         attempt: attempt
-      }
-    })
+      })
+    )
 
     start_time = System.monotonic_time(:millisecond)
 
@@ -271,30 +323,19 @@ defmodule Manfrod.LLM do
         latency_ms = System.monotonic_time(:millisecond) - start_time
         usage = ReqLLM.Response.usage(response) || %{}
 
-        Events.broadcast(:llm_call_succeeded, %{
-          source: :llm,
-          meta: %{
-            model: model_id,
-            provider: provider_key,
-            tier: tier,
-            purpose: purpose,
-            latency_ms: latency_ms,
-            input_tokens: usage[:input_tokens],
-            output_tokens: usage[:output_tokens],
-            total_tokens: usage[:total_tokens],
-            cached_tokens: usage[:cached_tokens],
-            cache_creation_tokens: usage[:cache_creation_tokens]
-          }
-        })
+        Events.broadcast(
+          :llm_call_succeeded,
+          event(attribution, usage_meta(model_id, provider_key, tier, purpose, latency_ms, usage))
+        )
 
         {:ok, response}
 
       {:error, reason} = error ->
         latency_ms = System.monotonic_time(:millisecond) - start_time
 
-        Events.broadcast(:llm_call_failed, %{
-          source: :llm,
-          meta: %{
+        Events.broadcast(
+          :llm_call_failed,
+          event(attribution, %{
             model: model_id,
             provider: provider_key,
             tier: tier,
@@ -302,15 +343,15 @@ defmodule Manfrod.LLM do
             attempt: attempt,
             error: format_error(reason),
             latency_ms: latency_ms
-          }
-        })
+          })
+        )
 
         if retries_left > 1 and retryable_error?(reason) do
           delay_ms = calculate_delay(attempt)
 
-          Events.broadcast(:llm_retry, %{
-            source: :llm,
-            meta: %{
+          Events.broadcast(
+            :llm_retry,
+            event(attribution, %{
               model: model_id,
               provider: provider_key,
               tier: tier,
@@ -318,8 +359,8 @@ defmodule Manfrod.LLM do
               attempt: attempt,
               delay_ms: delay_ms,
               reason: format_error(reason)
-            }
-          })
+            })
+          )
 
           Process.sleep(delay_ms)
 
@@ -327,6 +368,7 @@ defmodule Manfrod.LLM do
             messages,
             tools,
             purpose,
+            attribution,
             provider_key,
             model_id,
             tier,
@@ -363,6 +405,29 @@ defmodule Manfrod.LLM do
   defp maybe_add_tools(opts, tools), do: Keyword.put(opts, :tools, tools)
 
   # Helpers
+
+  # Usage meta for a succeeded call. `cost_usd` is stamped here, at the price
+  # in effect when the call was made, so re-pricing a model later never
+  # rewrites the cost of calls already billed at the old rate.
+  defp usage_meta(model_id, provider_key, tier, purpose, latency_ms, usage) do
+    tokens = %{
+      input_tokens: usage[:input_tokens] || 0,
+      output_tokens: usage[:output_tokens] || 0,
+      cached_tokens: usage[:cached_tokens] || 0,
+      cache_creation_tokens: usage[:cache_creation_tokens] || 0
+    }
+
+    %{
+      model: model_id,
+      provider: provider_key,
+      tier: tier,
+      purpose: purpose,
+      latency_ms: latency_ms,
+      total_tokens: usage[:total_tokens],
+      cost_usd: Pricing.cost(model_id, tokens)
+    }
+    |> Map.merge(tokens)
+  end
 
   defp calculate_delay(attempt) do
     (@initial_delay_ms * :math.pow(2, attempt - 1)) |> trunc()

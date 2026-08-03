@@ -87,6 +87,9 @@ config :manfrod, Oban,
        # with a `cron:` frontmatter field; none exist yet)
        {"0 * * * *", Manfrod.Workers.SkillSchedulerWorker},
        # Every hour - refresh/expire user MCP connections (Linear, Granola, ...)
-       {"15 * * * *", Manfrod.Workers.McpExpiryWorker}
+       {"15 * * * *", Manfrod.Workers.McpExpiryWorker},
+       # Every hour - roll raw events into the daily usage/adoption tables
+       # before the 7-day audit retention drops them
+       {"25 * * * *", Manfrod.Workers.RollupWorker}
      ]}
   ]
