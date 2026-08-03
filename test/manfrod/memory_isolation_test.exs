@@ -99,4 +99,85 @@ defmodule Manfrod.MemoryIsolationTest do
     refute ctx.ext_10bps.id in ids
     refute ctx.kenley.id in ids
   end
+
+  describe "private/<user_id>" do
+    setup ctx do
+      {:ok, private_node} =
+        Memory.create_node(ctx.uid, [Access.private_level(ctx.uid)], %{
+          content: "something told to the bot in a DM",
+          embedding: @embedding
+        })
+
+      %{private: private_node}
+    end
+
+    test "DM writes land in the author's private space" do
+      user = insert_user!()
+      assert Access.resolve_for_write("D0001", user.id) == {:ok, [Access.private_level(user.id)]}
+    end
+
+    test "a DM with no known author falls back to internal" do
+      assert Access.resolve_for_write("D0001", nil) == {:ok, ["internal"]}
+    end
+
+    test "a DM reader sees their own private space, nobody else's", ctx do
+      other = insert_user!()
+      {:ok, levels} = Access.resolve_for_read(ctx.uid, "D0001")
+
+      assert Access.private_level(ctx.uid) in levels
+      refute Access.private_level(other.id) in levels
+      assert "internal" in levels
+    end
+
+    test "private nodes are invisible to the team and to clients", ctx do
+      refute ctx.private.id in accessible_ids(ctx.uid, ["internal"])
+      refute ctx.private.id in accessible_ids(ctx.uid, ["external/all"])
+      assert ctx.private.id in accessible_ids(ctx.uid, [Access.private_level(ctx.uid)])
+    end
+
+    test "one person's private space is not readable by another person", ctx do
+      other = insert_user!()
+      refute ctx.private.id in accessible_ids(ctx.uid, [Access.private_level(other.id)])
+    end
+
+    test "escalating private → internal makes it visible to the team", ctx do
+      levels = [Access.private_level(ctx.uid), "internal"]
+
+      assert {:ok, node} = Memory.escalate_note_access(ctx.private.id, "internal", levels)
+      assert "internal" in node.access
+      # The owner keeps seeing it in their own space
+      assert Access.private_level(ctx.uid) in node.access
+      assert ctx.private.id in accessible_ids(ctx.uid, ["internal"])
+    end
+
+    test "escalating private → external/all works (absences shared with clients)", ctx do
+      levels = [Access.private_level(ctx.uid), "internal"]
+
+      assert {:ok, node} = Memory.escalate_note_access(ctx.private.id, "external/all", levels)
+      assert "external/all" in node.access
+      assert ctx.private.id in accessible_ids(ctx.uid, ["external/all"])
+    end
+
+    test "a context without internal access cannot escalate a private note", ctx do
+      assert {:error, :external_channel_escalation_not_allowed} =
+               Memory.escalate_note_access(ctx.private.id, "internal", ["external/10bps"])
+    end
+
+    test "escalating to a level the note already has is rejected", ctx do
+      levels = [Access.private_level(ctx.uid), "internal"]
+
+      assert {:ok, _node} = Memory.escalate_note_access(ctx.private.id, "internal", levels)
+
+      assert {:error, :already_accessible} =
+               Memory.escalate_note_access(ctx.private.id, "internal", levels)
+    end
+
+    test "private is not a valid escalation target", ctx do
+      other = insert_user!()
+      levels = [Access.private_level(ctx.uid), "internal"]
+
+      assert {:error, :invalid_escalation_level} =
+               Memory.escalate_note_access(ctx.private.id, Access.private_level(other.id), levels)
+    end
+  end
 end

@@ -1525,6 +1525,13 @@ defmodule Manfrod.Memory do
 
   defp validate_escalation_context(new_access_level, readable_levels) do
     cond do
+      # private/<user> → internal: leaving one person's own space for the
+      # team. Only meaningful from a context that can see internal at all.
+      new_access_level == "internal" ->
+        if "internal" in readable_levels,
+          do: :ok,
+          else: {:error, :external_channel_escalation_not_allowed}
+
       not String.starts_with?(new_access_level, "external/") ->
         {:error, :invalid_escalation_level}
 
@@ -1543,7 +1550,11 @@ defmodule Manfrod.Memory do
       new_access_level in current_access ->
         {:error, :already_accessible}
 
-      "internal" not in current_access ->
+      # Anything wider than a person's own private space is an escalation —
+      # private is the narrowest level there is, so it's always a valid base.
+      # The client-scope checks below still apply to a node that has already
+      # been escalated once.
+      "internal" not in current_access and not Access.private?(current_access) ->
         {:error, :downward_or_cross_scope_escalation}
 
       new_access_level == "external/all" and current_external != [] ->

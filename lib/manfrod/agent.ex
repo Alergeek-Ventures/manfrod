@@ -56,7 +56,7 @@ defmodule Manfrod.Agent do
 
   defp resolve_access(user_id, channel_id) do
     ensure_project_membership(user_id, channel_id)
-    {:ok, write} = Access.resolve_for_write(channel_id)
+    {:ok, write} = Access.resolve_for_write(channel_id, user_id)
     {:ok, readable} = Access.resolve_for_read(user_id, channel_id)
     {:ok, write, readable}
   end

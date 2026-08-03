@@ -11,13 +11,13 @@ defmodule Manfrod.Tools.Escalation do
       ReqLLM.Tool.new!(
         name: "escalate_note",
         description:
-          "Flag an existing note to have its visibility widened (e.g. internal → external/client); applied by the background memory. Use when the user explicitly asks to share it more widely.",
+          "Flag an existing note to have its visibility widened (private → internal, or internal → external/client); applied by the background memory. Use when the user explicitly asks to share it more widely. Notes from DMs start private to that person, so sharing one with the team means escalating it to 'internal'.",
         parameter_schema: [
           node_id: [type: :string, required: true, doc: "Note UUID"],
           new_access_level: [
             type: :string,
             required: true,
-            doc: "New access level to add, e.g. 'external/10bps' or 'external/all'"
+            doc: "New access level to add: 'internal', 'external/10bps' or 'external/all'"
           ]
         ],
         callback: fn args -> escalate_note(readable_levels, msg_ctx, args) end
