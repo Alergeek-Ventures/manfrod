@@ -118,9 +118,11 @@ defmodule Manfrod.Slack.ActivityHandler do
         state
       ) do
     # Skip if a placeholder already exists (e.g. from start_thread), or if the
-    # stream is already carrying the progress itself.
-    unless get_in(state, [:pending, {channel, thread_ts}]) or
-             streaming?(state, channel, thread_ts) do
+    # stream is already carrying the progress itself. `get_in` returns the
+    # entry or nil, never a boolean, so this must not go through `or`.
+    placeholder? = get_in(state, [:pending, {channel, thread_ts}]) != nil
+
+    if not placeholder? and not streaming?(state, channel, thread_ts) do
       set_status(state.bot.token, channel, thread_ts, "is thinking...")
     end
 
