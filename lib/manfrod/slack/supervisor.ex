@@ -19,7 +19,15 @@ defmodule Manfrod.Slack.Supervisor do
 
   require Logger
 
-  alias Manfrod.Slack.{API, Bot, ActivityHandler, EventDedup, EventHandler, Socket}
+  alias Manfrod.Slack.{
+    API,
+    Bot,
+    ActivityHandler,
+    EventDedup,
+    EventHandler,
+    Socket,
+    ThreadPermission
+  }
 
   @doc """
   Start the Slack supervisor.
@@ -52,6 +60,8 @@ defmodule Manfrod.Slack.Supervisor do
       # Once-only guard for duplicate event deliveries (message + app_mention
       # for the same @mention, Socket Mode redeliveries)
       EventDedup,
+      # Which channel threads the bot has been invited into (@mentioned in)
+      ThreadPermission,
       # Outbound: PubSub → Slack delivery
       {ActivityHandler, bot_token},
       # Inbound: Slack → Agent

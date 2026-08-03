@@ -114,8 +114,22 @@ defmodule Manfrod.Agent.Server do
 
   # Server Callbacks
 
-  # 1 minute debounce for testing (change back to 60 for production)
+  # How long a session may sit idle before it terminates and its messages go
+  # to memory extraction. Deliberately short: retrospection should run every
+  # few messages, not once an hour. Termination is no longer destructive —
+  # the next process replays this session's history from the DB (see init/1),
+  # so a short flush costs a rebuild, not the conversation.
   @flush_delay :timer.minutes(1)
+
+  # How much of a session's history is replayed into a fresh process. A DM
+  # thread gets all of it, with no age cutoff: it's one continuous
+  # conversation with one person, and the agent is expected to remember the
+  # whole thread it's replying in no matter how long the pause was. Channel
+  # threads get a recent tail instead — they're multi-author, noisier, and
+  # the older parts are usually irrelevant to a late reply.
+  @dm_restore_limit 400
+  @channel_restore_limit 60
+  @channel_restore_window_hours 24
 
   # How many recent transcript lines the response gate gets to see.
   @transcript_window 12
@@ -133,14 +147,18 @@ defmodule Manfrod.Agent.Server do
     # Subscribe to own PubSub topic for FlushHandler-like behavior
     Events.subscribe(user_id)
 
-    # Restore any pending messages from DB (survives crashes/restarts). Scoped
-    # to the session_key alone (not one user) so a shared multi-author thread
-    # restores everyone's pending messages, not just the seed author's.
-    pending = Memory.get_pending_messages_for_session(session_key)
-    restored_messages = Enum.map(pending, &message_to_context/1)
+    # Restore the recent history of this session from the DB. Scoped to the
+    # session_key alone (not one user) so a shared multi-author thread
+    # restores everyone's messages, not just the seed author's — and
+    # deliberately *not* limited to messages still pending extraction: a
+    # process that ended on idle timeout has had its messages folded into a
+    # closed conversation, and restoring only pending ones would make the bot
+    # forget a conversation the user is still in the middle of.
+    restored = Memory.get_recent_session_messages(session_key, restore_opts(session_key))
+    restored_messages = Enum.map(restored, &message_to_context/1)
 
     participants =
-      pending
+      restored
       |> Enum.map(& &1.user_id)
       |> MapSet.new()
       |> MapSet.put(user_id)
@@ -150,9 +168,11 @@ defmodule Manfrod.Agent.Server do
       if restored_messages != [] do
         restart_notice =
           ReqLLM.Context.user(
-            "[SYSTEM] Session was restarted (crash, update, or manual restart). " <>
-              "Restored #{length(pending)} messages from conversation. " <>
-              "Do not repeat actions already taken."
+            "[SYSTEM] This is a continuation of an ongoing conversation — the " <>
+              "#{length(restored)} messages above are its earlier history, restored " <>
+              "after an idle timeout, restart, or update. Treat them as your own " <>
+              "memory of this conversation: do not claim you lack context, and do " <>
+              "not repeat actions already taken."
           )
 
         [system_message | restored_messages] ++ [restart_notice]
@@ -170,11 +190,21 @@ defmodule Manfrod.Agent.Server do
        readable_levels: readable_levels,
        participants: participants,
        messages: messages,
-       transcript: [],
+       # Seed the response gate's view of the thread with the restored tail,
+       # so a rebuilt session judges replies in context instead of blind.
+       transcript: restored |> Enum.map(&transcript_line/1) |> Enum.take(-@transcript_window),
        inbox: [],
        flush_timer: nil,
        gate_debounce_timer: nil
      }}
+  end
+
+  defp restore_opts(session_key) do
+    if dm_session?(session_key) do
+      [limit: @dm_restore_limit, window_hours: nil]
+    else
+      [limit: @channel_restore_limit, window_hours: @channel_restore_window_hours]
+    end
   end
 
   defp build_system_prompt(user_id, session_key) do
@@ -489,6 +519,9 @@ defmodule Manfrod.Agent.Server do
   defp message_to_context(%{role: "assistant", content: content}) do
     ReqLLM.Context.assistant(content)
   end
+
+  defp transcript_line(%{role: "assistant", content: content}), do: "Manfrod: #{content}"
+  defp transcript_line(%{content: content}), do: content
 
   # Private
 

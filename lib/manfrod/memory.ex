@@ -76,6 +76,43 @@ defmodule Manfrod.Memory do
     |> Repo.all()
   end
 
+  @doc """
+  Get the recent history of a session across every author, regardless of
+  whether those messages were already folded into a closed conversation.
+
+  `get_pending_messages_for_session/1` returns only messages that memory
+  extraction has not claimed yet, which makes it useless for restoring
+  context: once a session goes idle the Extractor closes the conversation and
+  stamps `conversation_id` on every message, so the next process for the same
+  Slack thread would start with an empty history and no memory of what was
+  just discussed. This returns the thread's actual recent history instead.
+
+  Options:
+
+  - `:limit` — maximum number of messages, newest kept (default 60)
+  - `:window_hours` — how far back to look, or `nil` for the whole session
+    history regardless of age (default 24)
+  """
+  def get_recent_session_messages(session_key, opts \\ []) do
+    limit = Keyword.get(opts, :limit, 60)
+    window_hours = Keyword.get(opts, :window_hours, 24)
+
+    Message
+    |> where([m], m.session_key == ^session_key)
+    |> session_window(window_hours)
+    |> order_by([m], desc: m.received_at, desc: m.inserted_at)
+    |> limit(^limit)
+    |> Repo.all()
+    |> Enum.reverse()
+  end
+
+  defp session_window(query, nil), do: query
+
+  defp session_window(query, window_hours) do
+    since = DateTime.add(DateTime.utc_now(), -window_hours * 3600, :second)
+    where(query, [m], m.received_at >= ^since)
+  end
+
   # --- Conversations ---
 
   @doc """
