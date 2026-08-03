@@ -108,6 +108,44 @@ defmodule Manfrod.MemoryTest do
       pending = Memory.get_pending_messages_for_session(session_key)
       assert Enum.map(pending, & &1.content) == ["From A", "From B"]
     end
+
+    test "get_recent_session_messages/2 includes messages already closed into a conversation" do
+      user_id = test_user_id()
+      session_key = test_session_key()
+      now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+      m1 = insert_message!(%{received_at: DateTime.add(now, -120, :second)})
+      m2 = insert_message!(%{received_at: DateTime.add(now, -60, :second)})
+
+      # Simulate memory extraction closing the session
+      conv = insert_conversation!()
+      Repo.update!(Ecto.Changeset.change(m1, conversation_id: conv.id))
+      Repo.update!(Ecto.Changeset.change(m2, conversation_id: conv.id))
+
+      assert Memory.get_pending_messages_for_session(session_key) == []
+
+      restored = Memory.get_recent_session_messages(session_key)
+      assert Enum.map(restored, & &1.id) == [m1.id, m2.id]
+    end
+
+    test "get_recent_session_messages/2 honours limit and window, keeping the newest tail" do
+      session_key = test_session_key()
+      now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+      _old = insert_message!(%{content: "old", received_at: DateTime.add(now, -3, :day)})
+      _first = insert_message!(%{content: "first", received_at: DateTime.add(now, -120, :second)})
+      last = insert_message!(%{content: "last", received_at: DateTime.add(now, -60, :second)})
+
+      restored = Memory.get_recent_session_messages(session_key, limit: 1, window_hours: 24)
+      assert Enum.map(restored, & &1.id) == [last.id]
+
+      windowed = Memory.get_recent_session_messages(session_key, window_hours: 24)
+      assert Enum.map(windowed, & &1.content) == ["first", "last"]
+
+      # window_hours: nil — whole session history, however old (DM threads)
+      full = Memory.get_recent_session_messages(session_key, window_hours: nil)
+      assert Enum.map(full, & &1.content) == ["old", "first", "last"]
+    end
   end
 
   describe "conversations" do

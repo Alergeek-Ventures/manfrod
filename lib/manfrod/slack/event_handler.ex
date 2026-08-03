@@ -23,6 +23,7 @@ defmodule Manfrod.Slack.EventHandler do
   alias Manfrod.Repo
   alias Manfrod.Slack.API
   alias Manfrod.Slack.EventDedup
+  alias Manfrod.Slack.ThreadPermission
 
   @doc """
   Handle an incoming Slack event.
@@ -35,9 +36,11 @@ defmodule Manfrod.Slack.EventHandler do
     - **Channel mentions**: Some Slack surfaces send top-level mentions as
       plain `message` events instead of `app_mention`; those are forwarded to
       the Agent.
-    - **Channel thread replies**: Only forwarded if the user is known AND an
-      Agent session already exists for that thread (started by any
-      participant's earlier @mention, not necessarily this user's own).
+    - **Channel thread replies**: Only forwarded if the user is known AND the
+      bot has been @mentioned somewhere in that thread (root message or any
+      later reply, by anyone — see `Manfrod.Slack.ThreadPermission`). Without
+      that invitation the bot never speaks in a channel thread, regardless of
+      whether an Agent session happens to be alive for it.
       Top-level channel messages without @mention are ignored by the Agent
       path (they're still buffered for passive memory).
     - Any channel message that name-drops "manfrod" without an actual
@@ -245,6 +248,10 @@ defmodule Manfrod.Slack.EventHandler do
           })
 
         user ->
+          # An explicit @mention invites the bot into this thread for good —
+          # from now on it may also answer plain replies here.
+          ThreadPermission.allow(channel, thread_ts)
+
           channel_info = resolve_channel_info(bot.token, channel)
           channel_name = channel_info.name
 
@@ -287,11 +294,12 @@ defmodule Manfrod.Slack.EventHandler do
           )
 
         user ->
-          # Only forward if an Agent session already exists for this thread
-          # (i.e. the bot was @mentioned in this thread before, by anyone —
-          # not only by this specific user), so the bot doesn't barge into
-          # threads it was never invited into.
-          if session_exists?(session_key) do
+          # Only forward if the bot was @mentioned somewhere in this thread
+          # (by anyone — not only by this specific user), so it never barges
+          # into a thread it was not invited into. Deliberately not keyed on
+          # a live Agent session: sessions die on idle timeout, and proactive
+          # or cron posts can create one in a thread nobody invited it to.
+          if ThreadPermission.allowed?(bot, channel, thread_ts) do
             # Strip bot mention if present (user might @mention again in the thread)
             cleaned_text =
               text
@@ -324,7 +332,7 @@ defmodule Manfrod.Slack.EventHandler do
             end
           else
             Logger.debug(
-              "Slack EventHandler ignoring channel thread reply — no active session for #{session_key}"
+              "Slack EventHandler ignoring channel thread reply — bot not @mentioned in #{session_key}"
             )
           end
       end
