@@ -91,26 +91,20 @@ defmodule Manfrod.Slack.API do
   end
 
   @doc """
-  Fetch a user's full name from Slack.
+  Fetch a user's display name from Slack.
 
-  Returns `{:ok, name}` or `:error`. See `resolve_name/1` for which of Slack's
-  several name fields wins.
+  Returns `{:ok, name}` or `:error`. Prefers `real_name`, falls back to `name`.
   """
   def fetch_user_name(token, slack_user_id) do
     case get("users.info", token, %{user: slack_user_id}) do
-      {:ok, %{"user" => user}} ->
-        case resolve_name(user) do
-          nil -> :error
-          name -> {:ok, name}
-        end
-
-      _ ->
-        :error
+      {:ok, %{"user" => %{"real_name" => name}}} when name != "" -> {:ok, name}
+      {:ok, %{"user" => %{"name" => name}}} when name != "" -> {:ok, name}
+      _ -> :error
     end
   end
 
   @doc """
-  Fetch a user's full name and email from Slack.
+  Fetch a user's display name and email from Slack.
 
   Returns `{:ok, %{name: name, email: email}}` or `:error`.
   The email field requires the `users:read.email` bot token scope.
@@ -119,48 +113,21 @@ defmodule Manfrod.Slack.API do
   def fetch_user_info(token, slack_user_id) do
     case get("users.info", token, %{user: slack_user_id}) do
       {:ok, %{"user" => user}} ->
-        {:ok, %{name: resolve_name(user), email: get_in(user, ["profile", "email"])}}
+        name =
+          case user do
+            %{"real_name" => name} when name != "" -> name
+            %{"name" => name} when name != "" -> name
+            _ -> nil
+          end
+
+        email = get_in(user, ["profile", "email"])
+
+        {:ok, %{name: name, email: email}}
 
       _ ->
         :error
     end
   end
-
-  @doc """
-  Pick the fullest name Slack offers for a user.
-
-  `first_name` + `last_name` comes first, ahead of `real_name`, because
-  `real_name` is free text the person types themselves and is very often just
-  a first name — which is no good for anything that has to identify a specific
-  colleague, like an absence record. The remaining fallbacks descend towards
-  the handle, which is the last resort rather than a name.
-  """
-  @spec resolve_name(map()) :: String.t() | nil
-  def resolve_name(user) when is_map(user) do
-    profile = Map.get(user, "profile") || %{}
-
-    full_name(profile["first_name"], profile["last_name"]) ||
-      present(profile["real_name"]) ||
-      present(user["real_name"]) ||
-      present(profile["display_name"]) ||
-      present(user["name"])
-  end
-
-  defp full_name(first, last) do
-    case {present(first), present(last)} do
-      {first, last} when is_binary(first) and is_binary(last) -> first <> " " <> last
-      _ -> nil
-    end
-  end
-
-  defp present(value) when is_binary(value) do
-    case String.trim(value) do
-      "" -> nil
-      trimmed -> trimmed
-    end
-  end
-
-  defp present(_value), do: nil
 
   @doc """
   Add an emoji reaction to a message.
