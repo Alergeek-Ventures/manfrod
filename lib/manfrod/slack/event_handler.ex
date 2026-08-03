@@ -23,7 +23,10 @@ defmodule Manfrod.Slack.EventHandler do
   alias Manfrod.Repo
   alias Manfrod.Slack.API
   alias Manfrod.Slack.EventDedup
+  alias Manfrod.Slack.Feedback
+  alias Manfrod.Slack.SuggestedPrompts
   alias Manfrod.Slack.ThreadPermission
+  alias Manfrod.Slack.UserContext
 
   @doc """
   Handle an incoming Slack event.
@@ -123,6 +126,41 @@ defmodule Manfrod.Slack.EventHandler do
     :ok
   end
 
+  # A new agent thread was opened. Slack shows the suggested prompts before
+  # the user types anything, so this is the app's shop window — see
+  # `Manfrod.Slack.SuggestedPrompts` for how they are chosen.
+  def handle_event("assistant_thread_started", %{"assistant_thread" => thread}, bot) do
+    slack_user_id = thread["user_id"]
+    channel_id = thread["channel_id"]
+
+    # The thread's own context is fresher than anything cached — record it
+    # before building prompts that may refer to it.
+    UserContext.put(slack_user_id, thread["context"])
+
+    suggest_prompts(bot, slack_user_id, channel_id, thread["thread_ts"])
+
+    :ok
+  end
+
+  def handle_event("app_home_opened", %{"user" => slack_user_id} = event, bot) do
+    UserContext.put(slack_user_id, event["app_context"])
+
+    # Only the Messages tab has a composer to pin prompts above; the Home tab
+    # is a different surface with no thread to attach them to.
+    if event["tab"] in [nil, "messages"] do
+      suggest_prompts(bot, slack_user_id, event["channel"], event["thread_ts"])
+    end
+
+    :ok
+  end
+
+  # The user navigated somewhere else while the app was open. Recorded so a DM
+  # like "streść mi to" has a referent — see `Manfrod.Slack.UserContext`.
+  def handle_event("app_context_changed", %{"user" => slack_user_id} = event, _bot) do
+    UserContext.put(slack_user_id, event["app_context"])
+    :ok
+  end
+
   def handle_event("slash_commands", %{"command" => "/status-manfrod"} = payload, bot) do
     channel_id = payload["channel_id"]
     slack_user_id = payload["user_id"]
@@ -160,6 +198,12 @@ defmodule Manfrod.Slack.EventHandler do
 
     if channel_id && bot_msg_ts do
       case action["action_id"] do
+        "manfrod_feedback" ->
+          Feedback.record(payload, action)
+
+        "manfrod_feedback_remove" ->
+          Feedback.remove(payload, bot.token)
+
         "memory_escalation_save" ->
           levels = selected_escalation_levels(payload, bot_msg_ts)
           Classifier.resolve_escalation(:save, levels, channel_id, bot_msg_ts, bot.token)
@@ -230,9 +274,9 @@ defmodule Manfrod.Slack.EventHandler do
       user.id,
       session_key,
       %{
-        content: text,
+        content: with_viewing_context(text, bot.token, slack_user_id),
         source: :slack,
-        reply_to: %{channel: channel, thread_ts: thread_ts},
+        reply_to: %{channel: channel, thread_ts: thread_ts, slack_user_id: slack_user_id},
         ts: event["ts"],
         # A DM is unambiguous direct address — always respond.
         requires_gate: false
@@ -240,6 +284,34 @@ defmodule Manfrod.Slack.EventHandler do
       channel
     )
   end
+
+  # Prefix a DM with where the user is looking, when Slack has told us. Only
+  # DMs get this: in a channel thread the referent of "this" is the thread the
+  # message is already in, and prepending a different channel would confuse it.
+  defp with_viewing_context(text, bot_token, slack_user_id) do
+    case UserContext.describe(slack_user_id, &resolve_channel_name(bot_token, &1)) do
+      nil -> text
+      description -> "[#{description}]\n#{text}"
+    end
+  end
+
+  defp suggest_prompts(bot, slack_user_id, channel_id, thread_ts)
+       when is_binary(slack_user_id) and is_binary(channel_id) do
+    user = Accounts.get_user_by_slack_id(slack_user_id)
+    prompts = SuggestedPrompts.build(user, slack_user_id, &resolve_channel_name(bot.token, &1))
+
+    case API.set_suggested_prompts(bot.token, channel_id, thread_ts, prompts) do
+      {:ok, _body} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.debug(
+          "Slack EventHandler could not set suggested prompts in #{channel_id}: #{inspect(reason)}"
+        )
+    end
+  end
+
+  defp suggest_prompts(_bot, _slack_user_id, _channel_id, _thread_ts), do: :ok
 
   # -- Channel thread replies: only respond if bot is already in the thread ---
 
@@ -299,7 +371,7 @@ defmodule Manfrod.Slack.EventHandler do
             %{
               content: content_with_context,
               source: :slack,
-              reply_to: %{channel: channel, thread_ts: thread_ts},
+              reply_to: %{channel: channel, thread_ts: thread_ts, slack_user_id: slack_user_id},
               ts: event["ts"],
               # An explicit @mention is unambiguous direct address — always respond.
               requires_gate: false
@@ -354,7 +426,11 @@ defmodule Manfrod.Slack.EventHandler do
                 %{
                   content: tagged_text,
                   source: :slack,
-                  reply_to: %{channel: channel, thread_ts: thread_ts},
+                  reply_to: %{
+                    channel: channel,
+                    thread_ts: thread_ts,
+                    slack_user_id: slack_user_id
+                  },
                   ts: event["ts"],
                   # Plain thread reply, no @mention — goes through the
                   # response gate instead of always triggering a reply.

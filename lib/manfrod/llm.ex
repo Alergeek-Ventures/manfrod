@@ -23,6 +23,10 @@ defmodule Manfrod.LLM do
       # With tools (agent style)
       {:ok, response} = Manfrod.LLM.generate_text(messages, tools: tools, purpose: :agent)
 
+      # Streaming (same return value, plus incremental text via :on_chunk)
+      {:ok, response} =
+        Manfrod.LLM.stream_text(messages, tools: tools, on_chunk: &IO.write/1)
+
       # Access response
       ReqLLM.Response.text(response)
       ReqLLM.Response.tool_calls(response)
@@ -85,7 +89,62 @@ defmodule Manfrod.LLM do
     tools = Keyword.get(opts, :tools, [])
     purpose = Keyword.get(opts, :purpose, :unknown)
 
-    call_with_fallback(messages, tools, purpose, attribution(opts), @fallback_chain)
+    call_with_fallback(messages, tools, purpose, attribution(opts), &do_call/4, @fallback_chain)
+  end
+
+  # How much streamed text to accumulate before handing it to `:on_chunk`.
+  # Raw provider deltas are a few characters each; forwarding every one of
+  # them would put a PubSub broadcast (and a Slack API call downstream) behind
+  # every token. ~90 bytes lands a few times per sentence, which reads as
+  # continuous typing without flooding anything.
+  @chunk_min_bytes 90
+
+  @doc """
+  Same contract as `generate_text/2` — including tool calls, the fallback
+  chain and usage events — but consumes the response as a stream and hands
+  incremental text to `:on_chunk` as it arrives.
+
+  The returned `%ReqLLM.Response{}` is fully materialized, so callers that
+  only care about the final result can treat this exactly like
+  `generate_text/2`.
+
+  ## Options
+
+  All of `generate_text/2`, plus:
+
+    * `:on_chunk` - 1-arity fun called with each coalesced text fragment, in
+      order, in the calling process. Defaults to a no-op.
+    * `:chunk_min_bytes` - minimum fragment size handed to `:on_chunk`
+      (default `#{@chunk_min_bytes}`). The final fragment of a turn is always
+      flushed regardless of size.
+
+  ## Partial output and fallback
+
+  Once a fragment has been handed to `:on_chunk` it has, as far as this
+  module is concerned, already been shown to the user. Retrying or falling
+  back to another model at that point would replay the answer from the start,
+  so a mid-stream failure after the first fragment aborts the whole chain with
+  `{:error, :stream_already_emitted}` instead. Failures *before* the first
+  fragment retry and fall back exactly like `generate_text/2`.
+  """
+  @spec stream_text(list(), keyword()) :: {:ok, ReqLLM.Response.t()} | {:error, term()}
+  def stream_text(messages, opts \\ []) do
+    tools = Keyword.get(opts, :tools, [])
+    purpose = Keyword.get(opts, :purpose, :unknown)
+    on_chunk = Keyword.get(opts, :on_chunk) || fn _text -> :ok end
+    min_bytes = Keyword.get(opts, :chunk_min_bytes, @chunk_min_bytes)
+
+    emitted = :counters.new(1, [])
+
+    invoke = fn messages, tools, provider_key, model_id ->
+      if :counters.get(emitted, 1) > 0 do
+        {:error, :stream_already_emitted}
+      else
+        do_stream(messages, tools, provider_key, model_id, on_chunk, min_bytes, emitted)
+      end
+    end
+
+    stream_with_fallback(messages, tools, purpose, attribution(opts), invoke, @fallback_chain)
   end
 
   # Top-level Activity fields (not meta) so usage events join to users the same
@@ -250,11 +309,11 @@ defmodule Manfrod.LLM do
 
   # Fallback chain traversal
 
-  defp call_with_fallback(_messages, _tools, _purpose, _attribution, []) do
+  defp call_with_fallback(_messages, _tools, _purpose, _attribution, _invoke, []) do
     {:error, :all_models_failed}
   end
 
-  defp call_with_fallback(messages, tools, purpose, attribution, [
+  defp call_with_fallback(messages, tools, purpose, attribution, invoke, [
          {provider_key, model_id, tier} | rest
        ]) do
     case call_with_retries(
@@ -262,6 +321,7 @@ defmodule Manfrod.LLM do
            tools,
            purpose,
            attribution,
+           invoke,
            provider_key,
            model_id,
            tier,
@@ -287,7 +347,57 @@ defmodule Manfrod.LLM do
           )
         end
 
-        call_with_fallback(messages, tools, purpose, attribution, rest)
+        call_with_fallback(messages, tools, purpose, attribution, invoke, rest)
+    end
+  end
+
+  # Fallback chain traversal for streaming. Identical to `call_with_fallback/6`
+  # except that `:stream_already_emitted` ends the chain immediately — see
+  # `stream_text/2` for why a partially streamed answer must never be retried
+  # on another model.
+
+  defp stream_with_fallback(_messages, _tools, _purpose, _attribution, _invoke, []) do
+    {:error, :all_models_failed}
+  end
+
+  defp stream_with_fallback(messages, tools, purpose, attribution, invoke, [
+         {provider_key, model_id, tier} | rest
+       ]) do
+    case call_with_retries(
+           messages,
+           tools,
+           purpose,
+           attribution,
+           invoke,
+           provider_key,
+           model_id,
+           tier,
+           @max_retries
+         ) do
+      {:ok, _response} = success ->
+        success
+
+      {:error, :stream_already_emitted} = aborted ->
+        aborted
+
+      {:error, reason} ->
+        if rest != [] do
+          {next_provider, next_model, _next_tier} = hd(rest)
+
+          Events.broadcast(
+            :llm_fallback,
+            event(attribution, %{
+              from_model: model_id,
+              from_provider: provider_key,
+              to_model: next_model,
+              to_provider: next_provider,
+              reason: format_error(reason),
+              purpose: purpose
+            })
+          )
+        end
+
+        stream_with_fallback(messages, tools, purpose, attribution, invoke, rest)
     end
   end
 
@@ -298,6 +408,7 @@ defmodule Manfrod.LLM do
          tools,
          purpose,
          attribution,
+         invoke,
          provider_key,
          model_id,
          tier,
@@ -318,7 +429,7 @@ defmodule Manfrod.LLM do
 
     start_time = System.monotonic_time(:millisecond)
 
-    case do_call(messages, tools, provider_key, model_id) do
+    case invoke.(messages, tools, provider_key, model_id) do
       {:ok, response} ->
         latency_ms = System.monotonic_time(:millisecond) - start_time
         usage = ReqLLM.Response.usage(response) || %{}
@@ -369,6 +480,7 @@ defmodule Manfrod.LLM do
             tools,
             purpose,
             attribution,
+            invoke,
             provider_key,
             model_id,
             tier,
@@ -383,11 +495,63 @@ defmodule Manfrod.LLM do
   # Actual LLM call
 
   defp do_call(messages, tools, provider_key, model_id) do
+    {model, opts} = request(tools, provider_key, model_id)
+
+    ReqLLM.generate_text(model, ReqLLM.Context.new(messages), opts)
+  end
+
+  # Streaming variant of `do_call/4`. `ReqLLM.StreamResponse.process_stream/2`
+  # consumes the stream exactly once, firing `on_result` per provider delta
+  # while collecting the chunks it needs to build the same materialized
+  # `%ReqLLM.Response{}` (tool calls and usage included) that the non-streaming
+  # path returns.
+  defp do_stream(messages, tools, provider_key, model_id, on_chunk, min_bytes, emitted) do
+    {model, opts} = request(tools, provider_key, model_id)
+
+    case ReqLLM.stream_text(model, ReqLLM.Context.new(messages), opts) do
+      {:ok, stream_response} ->
+        # Deltas are coalesced across callbacks, and the callback runs in this
+        # process, so the buffer lives in the process dictionary under a key
+        # unique to this call rather than in a separate process.
+        buffer_key = {__MODULE__, :stream_buffer, make_ref()}
+        Process.put(buffer_key, "")
+
+        result =
+          ReqLLM.StreamResponse.process_stream(stream_response,
+            on_result: fn text ->
+              buffer = Process.get(buffer_key) <> text
+
+              if byte_size(buffer) >= min_bytes do
+                Process.put(buffer_key, "")
+                emit_chunk(buffer, on_chunk, emitted)
+              else
+                Process.put(buffer_key, buffer)
+              end
+            end
+          )
+
+        # Whatever is left is the tail of the turn — always flushed, however
+        # short, or the last sentence of every answer would go missing.
+        case Process.delete(buffer_key) do
+          "" -> :ok
+          tail -> emit_chunk(tail, on_chunk, emitted)
+        end
+
+        result
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp emit_chunk(text, on_chunk, emitted) do
+    :counters.add(emitted, 1, 1)
+    on_chunk.(text)
+  end
+
+  defp request(tools, provider_key, model_id) do
     provider = Map.fetch!(@providers, provider_key)
     api_key = Application.get_env(:manfrod, provider.api_key_config)
-
-    context = ReqLLM.Context.new(messages)
-    model = %{id: model_id, provider: :openai}
 
     opts =
       [
@@ -398,7 +562,7 @@ defmodule Manfrod.LLM do
       ]
       |> maybe_add_tools(tools)
 
-    ReqLLM.generate_text(model, context, opts)
+    {%{id: model_id, provider: :openai}, opts}
   end
 
   defp maybe_add_tools(opts, []), do: opts

@@ -30,7 +30,15 @@ defmodule Manfrod.Events.Persister do
     {:ok, %{}}
   end
 
+  # Live-rendering signals that would write one audit row per handful of
+  # tokens. The full text of the response is persisted once, on `:responding`.
+  @ephemeral_types [:response_chunk]
+
   @impl true
+  def handle_info({:activity, %Activity{type: type}}, state) when type in @ephemeral_types do
+    {:noreply, state}
+  end
+
   def handle_info({:activity, %Activity{} = activity}, state) do
     persist(activity)
     {:noreply, state}

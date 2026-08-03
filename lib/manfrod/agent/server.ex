@@ -25,6 +25,7 @@ defmodule Manfrod.Agent.Server do
 
   alias Manfrod.Accounts
   alias Manfrod.Agent.Init
+  alias Manfrod.Agent.PlanTitle
   alias Manfrod.Agent.ResponseGate
   alias Manfrod.Agent.TypingRefresher
   alias Manfrod.Events
@@ -206,7 +207,10 @@ defmodule Manfrod.Agent.Server do
        transcript: restored |> Enum.map(&transcript_line/1) |> Enum.take(-@transcript_window),
        inbox: [],
        flush_timer: nil,
-       gate_debounce_timer: nil
+       gate_debounce_timer: nil,
+       # The request the current turn is answering, kept for naming the
+       # progress card (see Manfrod.Agent.PlanTitle).
+       last_user_content: nil
      }}
   end
 
@@ -509,15 +513,17 @@ defmodule Manfrod.Agent.Server do
       send(self(), :loop)
       {:noreply, state}
     else
-      case LLM.generate_text(state.messages,
-             tools:
-               Manfrod.Tools.definitions(
-                 tool_context(ctx.user_id, ctx.readable_levels, state.write_access, msg_ctx(ctx))
-               ),
-             purpose: :agent,
-             user_id: ctx.user_id,
-             session_key: state.session_key
-           ) do
+      opts = [
+        tools:
+          Manfrod.Tools.definitions(
+            tool_context(ctx.user_id, ctx.readable_levels, state.write_access, msg_ctx(ctx))
+          ),
+        purpose: :agent,
+        user_id: ctx.user_id,
+        session_key: state.session_key
+      ]
+
+      case call_model(opts, ctx, state) do
         {:ok, response} ->
           handle_llm_response(response, ctx, iter, refresher_pid, state)
 
@@ -530,6 +536,24 @@ defmodule Manfrod.Agent.Server do
           send(self(), :loop)
           {:noreply, state}
       end
+    end
+  end
+
+  # Streaming and non-streaming return the same materialized response, so the
+  # rest of the loop is identical either way — only whether `:response_chunk`
+  # events are emitted along the way differs. The switch exists so a provider
+  # regression in streamed tool calls can be worked around in config without a
+  # deploy of this module.
+  defp call_model(opts, ctx, state) do
+    if Application.get_env(:manfrod, :llm_streaming, true) do
+      LLM.stream_text(
+        state.messages,
+        Keyword.put(opts, :on_chunk, fn text ->
+          Events.broadcast(:response_chunk, Map.put(ctx, :meta, %{text: text}))
+        end)
+      )
+    else
+      LLM.generate_text(state.messages, opts)
     end
   end
 
@@ -586,7 +610,17 @@ defmodule Manfrod.Agent.Server do
     transcript = Enum.take(state.transcript ++ new_contents, -@transcript_window)
 
     messages = state.messages ++ user_messages
-    state = cancel_gate_debounce(%{state | inbox: [], transcript: transcript})
+
+    state =
+      cancel_gate_debounce(%{
+        state
+        | inbox: [],
+          transcript: transcript,
+          # The raw text, before note context is prepended — that injected
+          # block is far longer than the question and would drown it out.
+          last_user_content: List.last(new_contents)
+      })
+
     {messages, last_ctx, state}
   end
 
@@ -639,6 +673,11 @@ defmodule Manfrod.Agent.Server do
         Logger.info(
           "Agent.Server executing #{length(tool_calls)} tool(s) for user #{ctx.user_id}"
         )
+
+        # The turn has become a piece of work worth showing progress for. Only
+        # on the first tool-calling round: later rounds are steps within the
+        # same job, not a new one.
+        if iter == 0, do: announce_plan(ctx, state.last_user_content)
 
         # Extract any narrative text the LLM sent alongside tool calls
         narrative_text = ReqLLM.Response.text(response) || ""
@@ -755,6 +794,23 @@ defmodule Manfrod.Agent.Server do
         send(self(), :loop)
         {:noreply, %{state | messages: messages}}
     end
+  end
+
+  # Name the work for the progress card, off the critical path. The card is
+  # already open by the time this returns (transports show a provisional
+  # title from the first tool), so this only ever renames it — which is why it
+  # is fire-and-forget and silently skipped when there is nothing to name.
+  defp announce_plan(_ctx, nil), do: :ok
+
+  defp announce_plan(ctx, request) do
+    Task.start(fn ->
+      case PlanTitle.generate(request) do
+        {:ok, title} -> Events.broadcast(:plan_titled, Map.put(ctx, :meta, %{title: title}))
+        :error -> :ok
+      end
+    end)
+
+    :ok
   end
 
   defp timed_execute_tool(user_id, readable_levels, write_access, ctx, tool_call) do

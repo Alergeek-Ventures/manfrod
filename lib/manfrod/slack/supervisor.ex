@@ -26,7 +26,8 @@ defmodule Manfrod.Slack.Supervisor do
     EventDedup,
     EventHandler,
     Socket,
-    ThreadPermission
+    ThreadPermission,
+    UserContext
   }
 
   @doc """
@@ -52,6 +53,8 @@ defmodule Manfrod.Slack.Supervisor do
     children = [
       # Infrastructure
       {Registry, keys: :unique, name: Manfrod.Slack.MessageServerRegistry},
+      # Streaming replies in progress, keyed by {channel, thread_ts}
+      {Registry, keys: :unique, name: Manfrod.Slack.StreamRegistry},
       {DynamicSupervisor, strategy: :one_for_one, name: Manfrod.Slack.DynamicSupervisor},
       {PartitionSupervisor, child_spec: Task.Supervisor, name: Manfrod.Slack.TaskSupervisors},
       # Passive memory buffer infrastructure
@@ -62,8 +65,10 @@ defmodule Manfrod.Slack.Supervisor do
       EventDedup,
       # Which channel threads the bot has been invited into (@mentioned in)
       ThreadPermission,
+      # Where each user is currently looking (app_context_changed)
+      UserContext,
       # Outbound: PubSub → Slack delivery
-      {ActivityHandler, bot_token},
+      {ActivityHandler, bot},
       # Inbound: Slack → Agent
       {Socket, {app_token, bot, EventHandler}}
     ]

@@ -36,6 +36,32 @@ If you need to work offline temporarily, skip only the Infisical load:
 AV_SKIP_INFISICAL=1 mix phx.server
 ```
 
+## Slack app configuration
+
+The agent surface (streamed replies, task cards, suggested prompts, feedback
+buttons) is configured in the Slack app itself, not in this repo. In
+[api.slack.com/apps](https://api.slack.com/apps) → your app:
+
+**Features → Agents & AI Apps** — enable it. This adds the `assistant:write`
+bot scope, without which `assistant.threads.*` returns `not_allowed_token_type`.
+
+**OAuth & Permissions → Bot Token Scopes** — beyond what the bot already
+needs, streaming requires `chat:write` (already present for `chat.postMessage`).
+
+**Event Subscriptions → Subscribe to bot events**:
+
+| Event | What it drives |
+| --- | --- |
+| `assistant_thread_started` | Suggested prompts on a new thread |
+| `app_home_opened` | Suggested prompts when the Messages tab is opened |
+| `app_context_changed` | "Streść mi to" resolving to the channel being viewed |
+
+Everything degrades rather than breaks if a piece is missing: without
+`assistant:write` there are no prompts, titles or shimmer, but replies still
+stream; if `chat.startStream` fails the answer is posted as one message. Both
+layers can also be turned off outright — see `:llm_streaming` and
+`:slack_streaming` in `config/config.exs`.
+
 ## Learn more
 
 * Official website: https://www.phoenixframework.org/
