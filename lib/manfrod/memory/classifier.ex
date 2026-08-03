@@ -9,14 +9,27 @@ defmodule Manfrod.Memory.Classifier do
   - ignore        → do nothing
   - create_memory → embed + store as memory node
   - create_absence → save fact + node at the channel's default access, then
-                     post Accept/Deny buttons proposing external/all — the
+                     post the escalation prompt proposing external/all — the
                      escalation is never applied without confirmation
   - create_meeting → store as fact with channel write_access
   - flag_sensitive → log silently, no write, no reply
   - ask_human     → save at default access immediately, then post a thread
-                    reply with Accept/Deny buttons proposing wider access;
-                    Accept widens the already-saved node, Deny/timeout leave
-                    it at the default level (nothing is lost)
+                    reply proposing wider access; Save applies the levels the
+                    person ticked, Cancel/timeout leave it at the default
+                    level (nothing is lost)
+
+  ## Default access, and the escalation prompt
+
+  Writes take the channel's access level, except in a DM: there everything is
+  written to the author's own `private/<user_id>` space. Nothing said
+  one-on-one reaches the team on its own.
+
+  Widening is proposed, never assumed. The prompt is a checkbox list of the
+  levels on offer with the bot's own proposal pre-ticked (`internal` for an
+  ordinary note; `internal` + `external/all` for something client-facing like
+  an absence), plus Save/Cancel. The person can tick and untick freely before
+  anything goes out — Save applies exactly what's ticked, Cancel keeps the
+  note where it already is.
   """
 
   require Logger
@@ -116,7 +129,9 @@ defmodule Manfrod.Memory.Classifier do
                 "Classifier [#{channel_id}] msg #{idx}: #{action}#{flagged} — #{reasoning}"
               )
 
-              dispatch_action(action, result, message, channel_id, kind, write_access, bot_token)
+              msg_access = message_write_access(channel_id, message, write_access)
+
+              dispatch_action(action, result, message, channel_id, kind, msg_access, bot_token)
               run_ops(pending.ops)
             end)
 
@@ -132,6 +147,20 @@ defmodule Manfrod.Memory.Classifier do
 
     :ok
   end
+
+  # In a DM the channel has no shared access level to inherit: the write goes
+  # to the author's own private space. Resolved per message rather than per
+  # batch, since access is a property of who said it, not of the channel.
+  # An unknown author (not provisioned yet) falls back to the channel default
+  # — nothing gets filed under a private space that has no owner.
+  defp message_write_access("D" <> _ = _channel_id, message, fallback) do
+    case find_user_id(message["user"]) do
+      nil -> fallback
+      user_id -> [Access.private_level(user_id)]
+    end
+  end
+
+  defp message_write_access(_channel_id, _message, fallback), do: fallback
 
   # -- Action dispatch ---------------------------------------------------------
 
@@ -285,7 +314,7 @@ defmodule Manfrod.Memory.Classifier do
     original_ts = message["ts"]
     user_id = find_user_id(message["user"])
 
-    with {:ok, target_level} <- escalation_target(channel_id, kind, write_access),
+    with {:ok, proposal} <- escalation_proposal(channel_id, kind, write_access, :note),
          {:user, uid} when not is_nil(uid) <- {:user, user_id},
          {:ok, embedding} <- Voyage.embed_query(note),
          {:ok, node} <-
@@ -298,7 +327,7 @@ defmodule Manfrod.Memory.Classifier do
         channel_id,
         original_ts,
         node,
-        target_level,
+        proposal,
         write_access,
         bot_token
       )
@@ -414,8 +443,8 @@ defmodule Manfrod.Memory.Classifier do
     )
   end
 
-  # Absence escalation to external/all is proposed from any channel except
-  # client channels (cross-client leak risk) — never applied automatically.
+  # Absence escalation is proposed from any channel except client channels
+  # (cross-client leak risk) — never applied automatically.
   defp maybe_propose_absence_escalation(
          channel_id,
          kind,
@@ -425,58 +454,106 @@ defmodule Manfrod.Memory.Classifier do
          write_access,
          bot_token
        ) do
-    cond do
-      kind == "project_external" ->
-        :ok
-
-      "external/all" in write_access ->
-        :ok
-
-      true ->
+    case escalation_proposal(channel_id, kind, write_access, :absence) do
+      {:ok, proposal} ->
         post_escalation_question(
           channel_id,
           original_ts,
           node,
-          "external/all",
+          proposal,
           write_access,
           bot_token,
           fact_key: fact_key
         )
+
+      {:error, _reason} ->
+        :ok
     end
   end
+
+  # -- Escalation proposal -----------------------------------------------------
+
+  # What the bot offers, and what it ticks by default. `options` are the
+  # levels the person may pick from; `preselected` is the bot's own proposal,
+  # ticked on arrival so the common case is one click — but every box can be
+  # ticked and unticked before anything is applied. Returns
+  # {:ok, %{options: [level], preselected: [level]}} or {:error, reason}.
+  defp escalation_proposal(_channel_id, "project_external", _write_access, _purpose),
+    do: {:error, :external_channel}
+
+  defp escalation_proposal(channel_id, kind, write_access, purpose) do
+    cond do
+      # DM / private space: the note is nobody's but the author's until they
+      # say otherwise. `internal` is the natural next step and is ticked;
+      # client-facing things (absences) additionally propose external/all.
+      Access.private?(write_access) and purpose == :absence ->
+        {:ok, %{options: ["internal", "external/all"], preselected: ["internal", "external/all"]}}
+
+      Access.private?(write_access) ->
+        {:ok, %{options: ["internal", "external/all"], preselected: ["internal"]}}
+
+      purpose == :absence ->
+        if "external/all" in write_access,
+          do: {:error, :already_external_all},
+          else: {:ok, %{options: ["external/all"], preselected: ["external/all"]}}
+
+      true ->
+        note_proposal(channel_id, kind)
+    end
+  end
+
+  defp note_proposal(_channel_id, "priv_channel") do
+    {:ok, %{options: ["external/all"], preselected: ["external/all"]}}
+  end
+
+  defp note_proposal(channel_id, "project_internal") do
+    case Access.client_id_for_channel(channel_id) do
+      nil ->
+        {:error, :missing_client_mapping}
+
+      client_id ->
+        {:ok, %{options: ["external/#{client_id}"], preselected: ["external/#{client_id}"]}}
+    end
+  end
+
+  defp note_proposal(_channel_id, _kind), do: {:error, :missing_client_target}
+
+  @levels_block_id "memory_escalation_levels_block"
+  @levels_action_id "memory_escalation_levels"
 
   defp post_escalation_question(
          channel_id,
          original_ts,
          node,
-         target_level,
+         %{options: options, preselected: preselected},
          write_access,
          bot_token,
          opts \\ []
        ) do
     prompt =
       "Zapisałem notatkę:\n> #{node.content}\n" <>
-        "Poziom: `#{Enum.join(write_access, ", ")}`. Czy zapisać ją też jako `#{target_level}`?"
+        "Teraz jest #{current_level_text(write_access)}. Gdzie jeszcze ma trafić?"
 
-    blocks = [
-      %{type: "section", text: %{type: "mrkdwn", text: prompt}},
-      %{
-        type: "actions",
-        elements: [
-          %{
-            type: "button",
-            action_id: "memory_escalation_accept",
-            style: "primary",
-            text: %{type: "plain_text", text: "Tak, zapisz szerzej", emoji: true}
-          },
-          %{
-            type: "button",
-            action_id: "memory_escalation_deny",
-            text: %{type: "plain_text", text: "Nie, zostaw", emoji: true}
-          }
-        ]
-      }
-    ]
+    blocks =
+      [
+        levels_block(prompt, options, preselected),
+        %{
+          type: "actions",
+          elements: [
+            %{
+              type: "button",
+              action_id: "memory_escalation_save",
+              style: "primary",
+              text: %{type: "plain_text", text: "Zapisz", emoji: true}
+            },
+            %{
+              type: "button",
+              action_id: "memory_escalation_cancel",
+              text: %{type: "plain_text", text: "Anuluj", emoji: true}
+            }
+          ]
+        }
+      ]
 
     case API.post("chat.postMessage", bot_token, %{
            channel: channel_id,
@@ -487,13 +564,15 @@ defmodule Manfrod.Memory.Classifier do
       {:ok, %{"ts" => bot_ts}} ->
         PendingConfirmations.put(bot_ts, channel_id, %{
           node_id: node.id,
-          target_level: target_level,
+          options: options,
+          preselected: preselected,
           write_access: write_access,
           fact_key: Keyword.get(opts, :fact_key)
         })
 
         Logger.info(
-          "Classifier ask_human: posted escalation buttons on #{channel_id}/#{original_ts}"
+          "Classifier ask_human: posted escalation prompt on #{channel_id}/#{original_ts} " <>
+            "(options: #{Enum.join(options, ", ")})"
         )
 
       {:error, reason} ->
@@ -501,40 +580,81 @@ defmodule Manfrod.Memory.Classifier do
     end
   end
 
-  @doc """
-  Resolve an escalation confirmation from a button click.
+  defp levels_block(prompt, options, preselected) do
+    checkbox_options = Enum.map(options, &checkbox_option/1)
 
-  `:accept` widens the already-saved node's access to the proposed target
-  level; `:deny` leaves it at the default. Either way the pending entry is
-  removed and the question message is updated to reflect the outcome.
+    initial =
+      options
+      |> Enum.filter(&(&1 in preselected))
+      |> Enum.map(&checkbox_option/1)
+
+    checkboxes =
+      %{
+        type: "checkboxes",
+        action_id: @levels_action_id,
+        options: checkbox_options
+      }
+      # Slack rejects an empty initial_options array — omit it entirely when
+      # the bot proposes nothing by default.
+      |> then(fn cb -> if initial == [], do: cb, else: Map.put(cb, :initial_options, initial) end)
+
+    %{
+      type: "section",
+      block_id: @levels_block_id,
+      text: %{type: "mrkdwn", text: prompt},
+      accessory: checkboxes
+    }
+  end
+
+  defp checkbox_option(level) do
+    %{
+      text: %{type: "mrkdwn", text: "*#{level}*"},
+      description: %{type: "mrkdwn", text: level_description(level)},
+      value: level
+    }
+  end
+
+  defp level_description("internal"), do: "Cały zespół Manfrod — bez klientów"
+  defp level_description("external/all"), do: "Zespół + wszyscy klienci (urlopy, nieobecności)"
+
+  defp level_description("external/" <> client), do: "Zespół + klient #{client}"
+  defp level_description(level), do: level
+
+  defp current_level_text(write_access) do
+    if Access.private?(write_access) do
+      "tylko u Ciebie (`private`)"
+    else
+      "na poziomie `#{Enum.join(write_access, ", ")}`"
+    end
+  end
+
+  @doc """
+  Resolve an escalation prompt from a button click.
+
+  `:save` widens the already-saved node to every level the person ticked
+  (`selected_levels`, taken from the checkbox state at click time); `:cancel`
+  leaves it exactly where it is. Either way the pending entry is removed and
+  the prompt is replaced with the outcome, so it can't be answered twice.
+
+  `selected_levels` is filtered against the options actually offered — a
+  client can post arbitrary values, and access is never widened to a level
+  this prompt didn't put on the table. Ticking nothing and pressing Save is
+  the same as cancelling.
   """
-  @spec resolve_confirmation(:accept | :deny, String.t(), String.t(), String.t()) :: :ok
-  def resolve_confirmation(decision, channel_id, bot_ts, bot_token) do
+  @spec resolve_escalation(:save | :cancel, [String.t()], String.t(), String.t(), String.t()) ::
+          :ok
+  def resolve_escalation(decision, selected_levels, channel_id, bot_ts, bot_token) do
     case PendingConfirmations.get(bot_ts) do
-      {:ok, ^channel_id,
-       %{node_id: node_id, target_level: target, write_access: write_access} = payload} ->
+      {:ok, ^channel_id, %{node_id: node_id, write_access: write_access} = payload} ->
         PendingConfirmations.delete(bot_ts)
 
-        outcome =
+        levels =
           case decision do
-            :accept ->
-              widen_fact_access(Map.get(payload, :fact_key), target)
-
-              case Memory.escalate_note_access(node_id, target, write_access) do
-                {:ok, _node} ->
-                  "✅ Zapisane też jako `#{target}`."
-
-                {:error, reason} ->
-                  Logger.warning(
-                    "Classifier escalation failed for #{node_id}: #{inspect(reason)}"
-                  )
-
-                  "⚠️ Nie udało się rozszerzyć dostępu (#{inspect(reason)}) — notatka zostaje na poziomie standardowym."
-              end
-
-            :deny ->
-              "👌 OK, notatka zostaje na poziomie `#{Enum.join(write_access, ", ")}`."
+            :save -> allowed_levels(selected_levels, payload)
+            :cancel -> []
           end
+
+        outcome = apply_escalation(levels, node_id, write_access, Map.get(payload, :fact_key))
 
         API.post("chat.update", bot_token, %{
           channel: channel_id,
@@ -546,9 +666,80 @@ defmodule Manfrod.Memory.Classifier do
         :ok
 
       _ ->
-        Logger.debug("Classifier resolve_confirmation: no pending entry for #{bot_ts}")
+        Logger.debug("Classifier resolve_escalation: no pending entry for #{bot_ts}")
         :ok
     end
+  end
+
+  @doc """
+  Levels the bot pre-ticked for a pending prompt, or `[]` if it's unknown.
+
+  Used as the fallback selection when a click arrives without checkbox state
+  (an older prompt still in flight, or a Slack payload without `state`).
+  """
+  @spec preselected_levels(String.t()) :: [String.t()]
+  def preselected_levels(bot_ts) do
+    case PendingConfirmations.get(bot_ts) do
+      {:ok, _channel_id, payload} -> Map.get(payload, :preselected, [])
+      _ -> []
+    end
+  end
+
+  defp allowed_levels(selected_levels, payload) do
+    offered = Map.get(payload, :options, [])
+    Enum.filter(selected_levels, &(&1 in offered))
+  end
+
+  defp apply_escalation([], _node_id, write_access, _fact_key) do
+    "👌 OK, notatka zostaje #{current_level_text(write_access)}."
+  end
+
+  defp apply_escalation(levels, node_id, write_access, fact_key) do
+    # "internal" first: a node leaving a private space has to reach the team
+    # before it can be widened to clients, and escalation validation enforces
+    # exactly that ordering.
+    {applied, failed} =
+      levels
+      |> Enum.sort_by(&if(&1 == "internal", do: 0, else: 1))
+      |> Enum.reduce({[], []}, fn level, {applied, failed} ->
+        widen_fact_access(fact_key, level)
+
+        case Memory.escalate_note_access(node_id, level, escalation_levels(write_access, applied)) do
+          {:ok, _node} ->
+            {applied ++ [level], failed}
+
+          {:error, reason} ->
+            Logger.warning(
+              "Classifier escalation to #{level} failed for #{node_id}: #{inspect(reason)}"
+            )
+
+            {applied, failed ++ [level]}
+        end
+      end)
+
+    case {applied, failed} do
+      {[], _} ->
+        "⚠️ Nie udało się rozszerzyć dostępu — notatka zostaje #{current_level_text(write_access)}."
+
+      {applied, []} ->
+        "✅ Zapisane też jako #{format_levels(applied)}."
+
+      {applied, failed} ->
+        "✅ Zapisane też jako #{format_levels(applied)}.\n" <>
+          "⚠️ Nie udało się: #{format_levels(failed)}."
+    end
+  end
+
+  defp format_levels(levels), do: levels |> Enum.map(&"`#{&1}`") |> Enum.join(", ")
+
+  # Levels the escalation is performed *from*: the node's own level plus what
+  # this run has already applied. A private note carries "internal" too — its
+  # owner is a team member, and reaching the team is precisely the step being
+  # confirmed here. Channel notes keep their channel levels, so a client
+  # channel still can't escalate anything.
+  defp escalation_levels(write_access, applied) do
+    base = if Access.private?(write_access), do: write_access ++ ["internal"], else: write_access
+    Enum.uniq(base ++ applied)
   end
 
   defp widen_fact_access(nil, _target), do: :ok
@@ -563,20 +754,6 @@ defmodule Manfrod.Memory.Classifier do
         :ok
     end
   end
-
-  defp escalation_target(_channel_id, "project_external", _write_access),
-    do: {:error, :external_channel}
-
-  defp escalation_target(_channel_id, "priv_channel", _write_access), do: {:ok, "external/all"}
-
-  defp escalation_target(channel_id, "project_internal", _write_access) do
-    case Access.client_id_for_channel(channel_id) do
-      nil -> {:error, :missing_client_mapping}
-      client_id -> {:ok, "external/#{client_id}"}
-    end
-  end
-
-  defp escalation_target(_channel_id, _kind, _write_access), do: {:error, :missing_client_target}
 
   # -- Helpers -----------------------------------------------------------------
 
@@ -605,7 +782,9 @@ defmodule Manfrod.Memory.Classifier do
   defp channel_type_description("priv_channel"), do: "direct message / private channel (priv)"
   defp channel_type_description(_), do: "unknown"
 
-  defp resolved_scope("priv_channel"), do: "internal (v1; secret/<id> in v2)"
+  defp resolved_scope("priv_channel"),
+    do: "private/<user_id> — the author's own space; sharing wider is confirmed by them"
+
   defp resolved_scope("company_channel"), do: "internal"
   defp resolved_scope("project_internal"), do: "internal"
   defp resolved_scope("project_external"), do: "internal + external/<client_id>"

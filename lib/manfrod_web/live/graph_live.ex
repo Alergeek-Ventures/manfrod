@@ -13,8 +13,8 @@ defmodule ManfrodWeb.GraphLive do
 
   import Ecto.Query
 
-  alias Manfrod.{Memory, Repo, Voyage}
-  alias Manfrod.Memory.ChannelMapping
+  alias Manfrod.{Accounts, Memory, Repo, Voyage}
+  alias Manfrod.Memory.{Access, ChannelMapping}
 
   @impl true
   def mount(_params, _session, socket) do
@@ -32,7 +32,10 @@ defmodule ManfrodWeb.GraphLive do
       |> assign(search_results: [])
       |> assign(stats: stats)
       |> assign(access_filter: "internal")
-      |> assign(available_access_levels: load_access_levels())
+      |> assign(access_scope: "internal")
+      |> assign(access_target: nil)
+      |> assign(access_users: Accounts.list_users())
+      |> assign(access_clients: load_client_ids())
       |> assign(project_filter: "all")
       |> assign(editing_node: false)
       |> assign(node_edit_content: "")
@@ -172,18 +175,33 @@ defmodule ManfrodWeb.GraphLive do
     end
   end
 
-  def handle_event("filter_access", %{"level" => level}, socket) do
+  def handle_event("filter_access", params, socket) do
+    scope = params["scope"] || socket.assigns.access_scope
+    # The target select only exists for the scope it belongs to, so a change
+    # of scope arrives without one — and a stale target from the previous
+    # scope must not be carried over.
+    target = if scope == socket.assigns.access_scope, do: params["target"], else: nil
+
+    {scope, target, level} = resolve_access(scope, target, socket)
+
+    # Project filtering is an internal-scope concern; leaving it applied to a
+    # private or client view would silently hide notes.
+    project_filter = if scope == "internal", do: socket.assigns.project_filter, else: "all"
+
     graph_data =
       Memory.get_graph_data(
         filter: socket.assigns.filter,
         access_level: level,
-        project_id: project_id_param(socket.assigns.project_filter)
+        project_id: project_id_param(project_filter)
       )
 
     socket =
       socket
       |> assign(
+        access_scope: scope,
+        access_target: target,
         access_filter: level,
+        project_filter: project_filter,
         search_results: [],
         search_query: "",
         graph_data: graph_data
@@ -390,34 +408,64 @@ defmodule ManfrodWeb.GraphLive do
               </button>
             </div>
 
-            <%!-- Access filter --%>
+            <%!-- Access filter: scope, plus a target for private/external --%>
             <form phx-change="filter_access" class="flex items-center gap-2 text-xs">
               <span class="text-zinc-500">Access:</span>
               <select
-                name="level"
+                name="scope"
                 class="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-200 focus:outline-none focus:border-blue-500"
               >
-                <%= for level <- @available_access_levels do %>
-                  <option value={level} selected={@access_filter == level}><%= level %></option>
+                <%= for scope <- ~w(private internal external) do %>
+                  <option value={scope} selected={@access_scope == scope}><%= scope %></option>
                 <% end %>
               </select>
+
+              <%= if @access_scope == "private" do %>
+                <select
+                  name="target"
+                  class="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-200 focus:outline-none focus:border-blue-500"
+                >
+                  <%= for user <- @access_users do %>
+                    <option value={user.id} selected={@access_target == user.id}>
+                      <%= user_label(user) %>
+                    </option>
+                  <% end %>
+                </select>
+              <% end %>
+
+              <%= if @access_scope == "external" do %>
+                <select
+                  name="target"
+                  class="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-200 focus:outline-none focus:border-blue-500"
+                >
+                  <option value="all" selected={@access_target == "all"}>all</option>
+                  <%= for client_id <- @access_clients do %>
+                    <option value={client_id} selected={@access_target == client_id}>
+                      <%= client_id %>
+                    </option>
+                  <% end %>
+                </select>
+              <% end %>
             </form>
 
-            <%!-- Project filter --%>
-            <form phx-change="filter_project" class="flex items-center gap-2 text-xs">
-              <span class="text-zinc-500">Project:</span>
-              <select
-                name="project_id"
-                class="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-200 focus:outline-none focus:border-blue-500"
-              >
-                <option value="all" selected={@project_filter == "all"}>all</option>
-                <%= for project <- @projects do %>
-                  <option value={project.id} selected={@project_filter == project.id}>
-                    <%= project.name %>
-                  </option>
-                <% end %>
-              </select>
-            </form>
+            <%!-- Project filter — internal only; private and external are
+                 already narrowed by their own target select --%>
+            <%= if @access_scope == "internal" do %>
+              <form phx-change="filter_project" class="flex items-center gap-2 text-xs">
+                <span class="text-zinc-500">Project:</span>
+                <select
+                  name="project_id"
+                  class="bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-200 focus:outline-none focus:border-blue-500"
+                >
+                  <option value="all" selected={@project_filter == "all"}>all</option>
+                  <%= for project <- @projects do %>
+                    <option value={project.id} selected={@project_filter == project.id}>
+                      <%= project.name %>
+                    </option>
+                  <% end %>
+                </select>
+              </form>
+            <% end %>
 
           </div>
 
@@ -643,16 +691,44 @@ defmodule ManfrodWeb.GraphLive do
     Calendar.strftime(dt, "%Y-%m-%d %H:%M")
   end
 
-  defp load_access_levels do
-    external =
-      Repo.all(
-        from cm in ChannelMapping,
-          where: not is_nil(cm.client_id) and cm.status == "active",
-          select: cm.client_id,
-          distinct: true
-      )
-      |> Enum.map(&"external/#{&1}")
-
-    ["internal", "external/all"] ++ external
+  defp load_client_ids do
+    Repo.all(
+      from cm in ChannelMapping,
+        where: not is_nil(cm.client_id) and cm.status == "active",
+        select: cm.client_id,
+        distinct: true
+    )
   end
+
+  # The access filter is two selects: a scope (private / internal / external)
+  # and — for the two scopes that need one — a target. `private` is per
+  # person, `external` per client, and `internal` has neither. Switching the
+  # scope without picking a target yet falls back to a sensible default, so
+  # the graph always has a concrete level to query.
+  defp resolve_access(scope, target, socket)
+
+  defp resolve_access("private", target, socket) do
+    case target || default_private_target(socket) do
+      nil -> {"internal", nil, "internal"}
+      user_id -> {"private", user_id, Access.private_level(user_id)}
+    end
+  end
+
+  defp resolve_access("external", target, _socket) do
+    client = target || "all"
+    {"external", client, "external/#{client}"}
+  end
+
+  defp resolve_access(_scope, _target, _socket), do: {"internal", nil, "internal"}
+
+  defp default_private_target(socket) do
+    case socket.assigns[:current_scope] do
+      %{user: %{id: user_id}} -> user_id
+      _ -> socket.assigns.access_users |> List.first() |> then(&(&1 && &1.id))
+    end
+  end
+
+  defp user_label(%{name: name}) when is_binary(name) and name != "", do: name
+  defp user_label(%{email: email}) when is_binary(email) and email != "", do: email
+  defp user_label(user), do: user.id
 end

@@ -54,6 +54,8 @@ defmodule Manfrod.Agent.Server do
     inherently a list/steps/code that can't be shortened.
   - One question at a time if you need to ask something — don't front-load
     a checklist of clarifying questions.
+  - Never use an em dash or en dash (— or –). Use a plain hyphen "-" instead,
+    or rewrite the sentence. This applies to every message you send.
 
   ## MANDATORY tool usage rules (NEVER skip these)
 
@@ -76,6 +78,15 @@ defmodule Manfrod.Agent.Server do
   user to sign in at the web app to connect their Google Calendar.
 
   Note context is scoped to your current channel's access level — you only see notes you're allowed to see in this context.
+
+  ## Privacy
+
+  Everything said to you in a DM is stored in that person's own private space
+  (`private/<user_id>`) — the team does not see it. It only goes wider when
+  that person confirms it, either by asking you to share it (use
+  escalate_note) or by ticking a level on the sharing prompt the memory posts
+  on its own. Never claim something told to you in a DM is visible to the
+  team, and never treat one person's private notes as team knowledge.
   """
 
   # Tool definitions live under lib/manfrod/tools/ (one module per domain,

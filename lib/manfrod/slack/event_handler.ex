@@ -160,11 +160,17 @@ defmodule Manfrod.Slack.EventHandler do
 
     if channel_id && bot_msg_ts do
       case action["action_id"] do
-        "memory_escalation_accept" ->
-          Classifier.resolve_confirmation(:accept, channel_id, bot_msg_ts, bot.token)
+        "memory_escalation_save" ->
+          levels = selected_escalation_levels(payload, bot_msg_ts)
+          Classifier.resolve_escalation(:save, levels, channel_id, bot_msg_ts, bot.token)
 
-        "memory_escalation_deny" ->
-          Classifier.resolve_confirmation(:deny, channel_id, bot_msg_ts, bot.token)
+        "memory_escalation_cancel" ->
+          Classifier.resolve_escalation(:cancel, [], channel_id, bot_msg_ts, bot.token)
+
+        # Ticking a checkbox is not a decision — the prompt stays open until
+        # Save or Cancel. Slack still delivers it, so swallow it quietly.
+        "memory_escalation_levels" ->
+          :ok
 
         other ->
           Logger.debug("Slack EventHandler ignoring interactive action: #{inspect(other)}")
@@ -177,6 +183,33 @@ defmodule Manfrod.Slack.EventHandler do
   def handle_event(type, _event, _bot) do
     Logger.debug("Slack EventHandler ignoring event type: #{type}")
     :ok
+  end
+
+  @escalation_levels_block "memory_escalation_levels_block"
+  @escalation_levels_action "memory_escalation_levels"
+
+  # Which access levels were ticked when Save was pressed. Slack ships the
+  # whole message's input state with every block_actions payload, so the
+  # checkbox selection arrives on the button click itself. A payload without
+  # state (an older prompt, an unexpected shape) falls back to what the bot
+  # had pre-ticked — never to "everything on offer".
+  defp selected_escalation_levels(payload, bot_msg_ts) do
+    case get_in(payload, [
+           "state",
+           "values",
+           @escalation_levels_block,
+           @escalation_levels_action,
+           "selected_options"
+         ]) do
+      options when is_list(options) ->
+        Enum.flat_map(options, fn
+          %{"value" => value} when is_binary(value) -> [value]
+          _ -> []
+        end)
+
+      _ ->
+        Classifier.preselected_levels(bot_msg_ts)
+    end
   end
 
   # -- DM messages: create user on first interaction, forward to Agent ---------

@@ -51,7 +51,7 @@ defmodule Manfrod.Memory.Retrospector do
 
   alias Manfrod.{Events, LLM, Memory, Repo, Voyage}
   alias Manfrod.Accounts.User
-  alias Manfrod.Memory.{Link, Node}
+  alias Manfrod.Memory.{Access, Link, Node}
   alias Manfrod.Tools.WebSearch
 
   # Embed zettelkasten guide at compile time
@@ -205,7 +205,7 @@ defmodule Manfrod.Memory.Retrospector do
       Logger.info("Retrospector: processing #{length(buckets)} access bucket(s)")
 
       Enum.each(buckets, fn access_bucket ->
-        readable_levels = Enum.uniq(["internal" | access_bucket])
+        readable_levels = bucket_readable_levels(access_bucket)
         write_access = access_bucket
         user_id = find_bucket_user_id(access_bucket)
 
@@ -286,7 +286,7 @@ defmodule Manfrod.Memory.Retrospector do
       Logger.info("Retrospector: deep-reviewing #{length(buckets)} access bucket(s)")
 
       Enum.each(buckets, fn access_bucket ->
-        readable_levels = Enum.uniq(["internal" | access_bucket])
+        readable_levels = bucket_readable_levels(access_bucket)
         user_id = find_bucket_user_id(access_bucket)
         review_sample = user_id && build_review_sample(access_bucket, budget)
 
@@ -387,6 +387,24 @@ defmodule Manfrod.Memory.Retrospector do
   # ---------------------------------------------------------------------------
   # Bucket processing
   # ---------------------------------------------------------------------------
+
+  # What a retrospection run over this bucket is allowed to read.
+  #
+  # An external bucket is a widening of team knowledge, so it needs "internal"
+  # as context — a client-facing note only makes sense next to the internal
+  # ones it came from. A private bucket is the opposite: one person's own
+  # space, integrated against itself and nothing else. Adding "internal"
+  # there would hand the retrospection agent (which links, merges and
+  # deletes) the entire team graph from inside a private run, and let a
+  # private note be dropped as a "duplicate" of an internal one — losing
+  # something the person never shared.
+  defp bucket_readable_levels(access_bucket) do
+    if Access.private?(access_bucket) do
+      access_bucket
+    else
+      Enum.uniq(["internal" | access_bucket])
+    end
+  end
 
   defp find_bucket_user_id(access_bucket) do
     Repo.one(

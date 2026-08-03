@@ -3,7 +3,7 @@ defmodule Manfrod.Memory.Access do
   Single source of truth for access resolution.
 
   Access levels (ordered most-restricted → most-open):
-    "secret/<user_id>"  — specific person(s) only (phase 2)
+    "private/<user_id>" — one person's own space; nobody else, not even the team
     "internal"          — all Manfrod employees, no clients
     "external/<slug>"   — team + specific client, e.g. "external/10bps"
     "external/all"      — team + ALL clients (vacations, absences)
@@ -16,6 +16,14 @@ defmodule Manfrod.Memory.Access do
   Write access is derived deterministically from the Slack channel — never
   from LLM judgment. Read access depends on the channel context the reader
   is currently in.
+
+  ## Private is the default for DMs
+
+  Anything said in a DM is written at `private/<user_id>` — the author's own
+  space. Nothing a person tells the bot one-on-one reaches the team until
+  they say so: the bot may *propose* widening it (to `internal`, and for
+  things like absences also to `external/all`), but the escalation is only
+  applied when the person confirms it (see `Manfrod.Memory.Classifier`).
   """
 
   import Ecto.Query
@@ -28,17 +36,40 @@ defmodule Manfrod.Memory.Access do
   # ---------------------------------------------------------------------------
 
   @doc """
+  The access level naming one person's own private space.
+  """
+  @spec private_level(user_id :: binary()) :: String.t()
+  def private_level(user_id), do: "private/#{user_id}"
+
+  @doc """
+  Whether an access level (or array) is private to a single person.
+  """
+  @spec private?(String.t() | [String.t()]) :: boolean()
+  def private?(levels) when is_list(levels), do: Enum.any?(levels, &private?/1)
+  def private?(level) when is_binary(level), do: String.starts_with?(level, "private/")
+
+  @doc """
   Resolve the access array to write on a new node based on the Slack channel.
+
+  A DM writes to the author's own private space — pass `author_user_id` so it
+  can be named. Without a known author the write falls back to `internal`,
+  since an unattributable note can't be filed under anyone's private space.
 
   Returns {:ok, access_list}. Unmapped channels default to internal.
   """
-  @spec resolve_for_write(slack_channel_id :: String.t()) :: {:ok, [String.t()]}
-  def resolve_for_write("D" <> _ = _dm_channel) do
-    # DMs: internal in v1 (secret/<user_id> in v2)
+  @spec resolve_for_write(slack_channel_id :: String.t(), author_user_id :: binary() | nil) ::
+          {:ok, [String.t()]}
+  def resolve_for_write(slack_channel_id, author_user_id \\ nil)
+
+  def resolve_for_write("D" <> _ = _dm_channel, author_user_id) when is_binary(author_user_id) do
+    {:ok, [private_level(author_user_id)]}
+  end
+
+  def resolve_for_write("D" <> _ = _dm_channel, nil) do
     {:ok, ["internal"]}
   end
 
-  def resolve_for_write(channel_id) do
+  def resolve_for_write(channel_id, _author_user_id) do
     case get_active_mapping(channel_id) do
       nil -> {:ok, ["internal"]}
       mapping -> {:ok, ChannelMapping.write_access(mapping)}
@@ -57,10 +88,12 @@ defmodule Manfrod.Memory.Access do
   @spec resolve_for_read(user_id :: binary(), slack_channel_id :: String.t()) ::
           {:ok, [String.t()]}
   def resolve_for_read(user_id, "D" <> _ = _dm_channel) do
-    # DMs: see everything the user is a member of
+    # DMs: the user's own private space plus everything they're a member of.
+    # Only their own private level — one person's private notes are never
+    # readable by anyone else, in any context.
     client_ids = client_ids_for_user(user_id)
     external_levels = Enum.map(client_ids, &"external/#{&1}")
-    {:ok, ["internal"] ++ external_levels ++ ["external/all"]}
+    {:ok, [private_level(user_id), "internal"] ++ external_levels ++ ["external/all"]}
   end
 
   def resolve_for_read(user_id, channel_id) do
