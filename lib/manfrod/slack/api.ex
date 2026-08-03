@@ -373,6 +373,19 @@ defmodule Manfrod.Slack.API do
   end
 
   @doc """
+  A permanent link to a specific message, for referring to it from outside
+  Slack. Returns `{:ok, permalink}` or `{:error, reason}`.
+  """
+  @spec get_permalink(String.t(), String.t(), String.t()) :: {:ok, String.t()} | {:error, term()}
+  def get_permalink(token, channel, message_ts) do
+    case get("chat.getPermalink", token, %{channel: channel, message_ts: message_ts}) do
+      {:ok, %{"permalink" => permalink}} -> {:ok, permalink}
+      {:ok, body} -> {:error, {:missing_permalink, body}}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @doc """
   Delete a message from a channel. Slack only allows deleting messages
   posted by the same bot token (without extra admin scopes), so `channel`
   and `ts` must identify a message this bot itself posted.

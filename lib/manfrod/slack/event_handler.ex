@@ -199,7 +199,7 @@ defmodule Manfrod.Slack.EventHandler do
     if channel_id && bot_msg_ts do
       case action["action_id"] do
         "manfrod_feedback" ->
-          Feedback.record(payload, action)
+          Feedback.record(payload, action, bot.token)
 
         "manfrod_feedback_remove" ->
           Feedback.remove(payload, bot.token)
