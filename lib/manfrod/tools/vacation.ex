@@ -70,9 +70,12 @@ defmodule Manfrod.Tools.Vacation do
     "#{user_name(user_id)} bierze urlop #{dates}"
   end
 
+  # Full name, not a first name: an absence record is read by the whole
+  # company (and by the leave digest that announces it), where "Kamil bierze
+  # urlop" is ambiguous the moment there are two of them.
   defp user_name(user_id) do
-    case Accounts.get_user(user_id) do
-      %{name: name} when is_binary(name) and name != "" -> name
+    case Accounts.full_name(user_id) do
+      name when is_binary(name) and name != "" -> name
       _ -> "User"
     end
   end
