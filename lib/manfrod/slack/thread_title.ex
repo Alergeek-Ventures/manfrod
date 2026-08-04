@@ -12,8 +12,8 @@ defmodule Manfrod.Slack.ThreadTitle do
 
   alias Manfrod.LLM
 
-  @model "llama-3.1-8b-instant"
-  @provider :groq
+  @model "deepseek/deepseek-v4-flash"
+  @provider :openrouter
 
   @system_message """
   You write a short Slack thread title (3-8 words, under 60 characters) for
