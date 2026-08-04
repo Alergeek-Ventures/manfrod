@@ -18,8 +18,8 @@ defmodule Manfrod.Agent.PlanTitle do
 
   alias Manfrod.LLM
 
-  @model "llama-3.1-8b-instant"
-  @provider :groq
+  @model "deepseek/deepseek-v4-flash"
+  @provider :openrouter
 
   # Slack truncates plan titles at 256 characters, but a progress card is read
   # at a glance — anything approaching that is already too long to be useful.

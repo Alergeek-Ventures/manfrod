@@ -2,7 +2,7 @@ defmodule Manfrod.Memory.QueryExpander do
   @moduledoc """
   Expands user queries into multiple search queries for improved retrieval.
 
-  Uses Groq's llama-3.1-8b-instant for fast, reliable query expansion.
+  Uses DeepSeek V4 Flash for fast, reliable query expansion.
   Generates query variations that capture different phrasings and semantic
   angles of the original query, improving recall in semantic search.
 
@@ -18,9 +18,10 @@ defmodule Manfrod.Memory.QueryExpander do
 
   alias Manfrod.LLM
 
-  # Groq with llama-3.1-8b-instant: fast, reliable, generous free tier (14.4K req/day)
-  @model "llama-3.1-8b-instant"
-  @provider :groq
+  # DeepSeek V4 Flash over OpenRouter: fast and cheap enough for a call that
+  # sits in front of every memory search.
+  @model "deepseek/deepseek-v4-flash"
+  @provider :openrouter
 
   @system_message "You are a query expansion assistant. Rewrite search queries into multiple variations to improve retrieval. Always output valid JSON arrays only, no other text."
 

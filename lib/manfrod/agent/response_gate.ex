@@ -15,10 +15,10 @@ defmodule Manfrod.Agent.ResponseGate do
 
   alias Manfrod.LLM
 
-  # Groq with llama-3.1-8b-instant: fast, reliable, generous free tier —
-  # same choice as Manfrod.Memory.QueryExpander for lightweight decisions.
-  @model "llama-3.1-8b-instant"
-  @provider :groq
+  # DeepSeek V4 Flash over OpenRouter — same choice as
+  # Manfrod.Memory.QueryExpander for lightweight decisions.
+  @model "deepseek/deepseek-v4-flash"
+  @provider :openrouter
 
   @reaction_emojis ~w(thumbsup joy thinking_face fire heart smiling_face_with_3_hearts white_check_mark eyes tada)
 
