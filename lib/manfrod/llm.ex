@@ -45,8 +45,8 @@ defmodule Manfrod.LLM do
   # Each tuple: {provider_key, model_id, tier}
   @fallback_chain [
     # {:openrouter, "moonshotai/kimi-k2.5", :paid}
-    # {:openrouter, "deepseek/deepseek-v4-flash", :paid}
-    {:openrouter, "openai/gpt-5.6-luna", :paid}
+    {:openrouter, "openai/gpt-5.6-luna", :paid},
+    {:openrouter, "deepseek/deepseek-v4-flash", :paid}
   ]
 
   # Provider configuration
