@@ -9,6 +9,10 @@ defmodule Manfrod.Agent.ResponseGate do
   full response, since those are unambiguous direct address. This only
   applies to plain thread replies, so a busy multi-person channel thread
   doesn't get a bot reply to every single message.
+
+  Being asked to leave is the one message the gate must not swallow: only a
+  full turn can call `Manfrod.Tools.Kick`'s `leave_thread`, so anything short
+  of `:respond` there silently ignores the request.
   """
 
   require Logger
@@ -42,6 +46,13 @@ defmodule Manfrod.Agent.ResponseGate do
   - "ignore" - do nothing. Still the right choice for ordinary
     back-and-forth between people that isn't directed at or about the
     assistant and doesn't call for any acknowledgement.
+
+  One case overrides all of the above: if the message asks the assistant to
+  stop replying in this thread, to leave, or to butt out (e.g. "przestań się
+  tu udzielać", "zostaw nas", "nie odzywaj się więcej w tym wątku", "stop
+  replying here"), always choose "respond" — never react or ignore. Acting
+  on that request is something only a full turn can do, so a silent nod
+  would quietly refuse it.
 
   For "react:<emoji>" and "react_and_respond:<emoji>", <emoji> must be
   exactly one of: #{Enum.join(@reaction_emojis, ", ")}.
