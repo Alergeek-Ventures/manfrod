@@ -5,6 +5,12 @@ This is a web application written using the Phoenix web framework.
 - Run `mix compile --warnings-as-errors && mix format --check-formatted` when done with changes
 - Use the already included and available `:req` (`Req`) library for HTTP requests, **avoid** `:httpoison`, `:tesla`, and `:httpc`. Req is included by default and is the preferred HTTP client for Phoenix apps
 
+### Pull requests
+
+- Write PR titles and descriptions in **English**, even when the conversation that produced the change was in another language
+- Keep the description minimal: a sentence or two per change, no section headings, no test-plan boilerplate
+- **Never** put a Claude session link in the PR body
+
 ### Phoenix v1.8 guidelines
 
 - **Always** begin your LiveView templates with `<Layouts.app flash={@flash} ...>` which wraps all inner content
