@@ -50,3 +50,4 @@ deployment/remote/ansible/.ansible_cache/
 deployment/remote/ansible/*.retry
 manfrod-av-secret-service
 manfrod-av-secret-service.pub
+.DS_Store
