@@ -93,9 +93,10 @@ defmodule Manfrod.Agent.Server do
   # Tool definitions live under lib/manfrod/tools/ (one module per domain,
   # auto-discovered by Manfrod.Tools — see its moduledoc). user_id/
   # readable_levels/write_access are baked into closures at call time;
-  # `msg_ctx` (%{channel, ts}) identifies the inbound Slack message so
-  # mutating tools can flag it for the passive memory batch instead of
-  # writing directly.
+  # `msg_ctx` (%{channel, ts, thread_ts, slack_user_id}) identifies the
+  # inbound Slack message so mutating tools can flag it for the passive
+  # memory batch instead of writing directly, and locates the thread for
+  # thread-scoped tools like leave_thread.
   defp tool_context(user_id, readable_levels, write_access, msg_ctx) do
     %{
       user_id: user_id,
@@ -254,7 +255,9 @@ defmodule Manfrod.Agent.Server do
   # yet at prompt-build time, and don't need to be — they only feed tool
   # *callbacks*, never a tool's name/description, so placeholders are safe.
   defp full_system_prompt(user_id) do
-    ctx = tool_context(user_id, nil, nil, %{channel: nil, ts: nil})
+    ctx =
+      tool_context(user_id, nil, nil, %{channel: nil, ts: nil, thread_ts: nil, slack_user_id: nil})
+
     capabilities = Manfrod.Tools.capabilities_text(ctx)
 
     @system_prompt_intro <>
@@ -887,9 +890,16 @@ defmodule Manfrod.Agent.Server do
   # Identify the inbound Slack message for memory flagging. Only Slack messages
   # (map reply_to with a channel, plus a ts) are flaggable; other sources fall
   # back to direct writes in the mutating tools.
-  defp msg_ctx(%{reply_to: %{channel: channel}} = ctx) when is_binary(channel) do
-    %{channel: channel, ts: Map.get(ctx, :slack_ts)}
+  defp msg_ctx(%{reply_to: %{channel: channel} = reply_to} = ctx) when is_binary(channel) do
+    %{
+      channel: channel,
+      ts: Map.get(ctx, :slack_ts),
+      # The thread the turn is happening in, as opposed to `ts` (the single
+      # message that triggered it) — what `Manfrod.Tools.Kick` acts on.
+      thread_ts: Map.get(reply_to, :thread_ts),
+      slack_user_id: Map.get(reply_to, :slack_user_id)
+    }
   end
 
-  defp msg_ctx(_ctx), do: %{channel: nil, ts: nil}
+  defp msg_ctx(_ctx), do: %{channel: nil, ts: nil, thread_ts: nil, slack_user_id: nil}
 end

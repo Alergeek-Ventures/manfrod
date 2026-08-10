@@ -33,7 +33,9 @@ defmodule Manfrod.SkillRunner do
         user_id: system_user_id(),
         readable_levels: ["internal"],
         write_access: ["internal"],
-        msg_ctx: %{channel: channel, ts: nil}
+        # No thread: a skill run posts into the channel, so there is nothing
+        # for thread-scoped tools (e.g. leave_thread) to act on.
+        msg_ctx: %{channel: channel, ts: nil, thread_ts: nil, slack_user_id: nil}
       }
 
       messages = [
