@@ -16,9 +16,9 @@ questions or wait for. Just do this:
    prompt.
 2. Call `show_desk_map` with tomorrow's date and `channel_id` set to
    `C087QF130R3` — the map image goes to that channel, not to this one.
-3. Reply with one short sentence confirming what you posted (e.g.
-   "Wysłałem plan biurek na jutro."). That reply gets posted to this
-   channel.
+3. Reply with exactly the single word `EMPTY` (nothing else, no
+   punctuation) — the map is the whole digest, so a "wysłałem plan biurek"
+   confirmation on top of it would just be noise in this channel.
 
 Don't call `list_desk_reservations` as well — the map already shows who has
 what; a separate text list would just repeat it.
