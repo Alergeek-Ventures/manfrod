@@ -19,13 +19,31 @@ defmodule Manfrod.Slack.ThreadPermission do
   permission survives restarts and is re-derivable from Slack itself — the
   source of truth. `allow/2` records permission immediately when a mention
   arrives, so no API round-trip is needed in the common case.
+
+  ## Kicks
+
+  `kick/3` is the one verdict Slack cannot be asked about. Someone can tell
+  the bot to leave a thread (via the "Wyrzuć Manfroda" message shortcut, or
+  by simply asking it), but the `<@bot>` mention that invited it is still
+  sitting in the thread — so a re-derivation would invite it straight back.
+  Kicks are therefore persisted in `thread_kicks` (`Manfrod.Slack.ThreadKick`)
+  and consulted *before* the Slack scan, which makes them survive both the
+  cache TTL and a restart.
+
+  A kick is undone by @mentioning the bot again: `allow/2` drops the row. An
+  explicit mention is how a thread invites the bot in the first place, so
+  re-inviting it needs no separate gesture.
   """
 
   use GenServer
 
   require Logger
 
+  import Ecto.Query
+
+  alias Manfrod.Repo
   alias Manfrod.Slack.API
+  alias Manfrod.Slack.ThreadKick
 
   @table __MODULE__
   # Allowed verdicts are re-derived from Slack once a day, denied ones every
@@ -44,11 +62,60 @@ defmodule Manfrod.Slack.ThreadPermission do
   @doc """
   Record that the bot was @mentioned in this thread — it may speak here from
   now on.
+
+  An explicit mention also lifts any earlier kick: being @mentioned is how a
+  thread invites the bot, and there is no reason for a re-invite to mean
+  something weaker than the first one.
   """
   @spec allow(String.t(), String.t()) :: :ok
   def allow(channel, thread_ts) do
+    unkick(channel, thread_ts)
     put(key(channel, thread_ts), :allowed)
     :ok
+  end
+
+  @doc """
+  Bar the bot from speaking in this thread until someone @mentions it again.
+
+  Persisted, because the mention that first invited the bot is still in the
+  thread and would otherwise win the next re-derivation. Kicking a thread
+  that is already kicked is a no-op.
+
+  `attrs` records who did it and how — `:user_id`, `:slack_user_id` and
+  `:source` (`"shortcut"` or `"tool"`).
+  """
+  @spec kick(String.t(), String.t(), map()) :: :ok | {:error, Ecto.Changeset.t()}
+  def kick(channel, thread_ts, attrs \\ %{}) do
+    result =
+      attrs
+      |> Map.merge(%{slack_channel_id: channel, thread_ts: thread_ts})
+      |> then(&ThreadKick.changeset(%ThreadKick{}, &1))
+      |> Repo.insert(on_conflict: :nothing, conflict_target: [:slack_channel_id, :thread_ts])
+
+    case result do
+      {:ok, _kick} ->
+        put(key(channel, thread_ts), :kicked)
+        :ok
+
+      {:error, changeset} ->
+        Logger.error(
+          "ThreadPermission: failed to kick #{channel}/#{thread_ts}: #{inspect(changeset)}"
+        )
+
+        {:error, changeset}
+    end
+  end
+
+  @doc """
+  Whether this thread is currently kicked. Cheap enough for the hot path —
+  answered from ETS unless the entry has aged out.
+  """
+  @spec kicked?(String.t(), String.t()) :: boolean()
+  def kicked?(channel, thread_ts) do
+    case lookup(key(channel, thread_ts)) do
+      {:ok, verdict} -> verdict == :kicked
+      :miss -> kick_row?(channel, thread_ts)
+    end
   end
 
   @doc """
@@ -65,10 +132,35 @@ defmodule Manfrod.Slack.ThreadPermission do
         verdict == :allowed
 
       :miss ->
-        verdict = if mentioned_in_thread?(bot, channel, thread_ts), do: :allowed, else: :denied
+        verdict = derive(bot, channel, thread_ts)
         put(key(channel, thread_ts), verdict)
         verdict == :allowed
     end
+  end
+
+  # A kick outranks the Slack scan: the mention that invited the bot is still
+  # in the thread, so asking Slack would always undo it.
+  defp derive(bot, channel, thread_ts) do
+    cond do
+      kick_row?(channel, thread_ts) -> :kicked
+      mentioned_in_thread?(bot, channel, thread_ts) -> :allowed
+      true -> :denied
+    end
+  end
+
+  defp kick_row?(channel, thread_ts) do
+    Repo.exists?(
+      from(k in ThreadKick,
+        where: k.slack_channel_id == ^channel and k.thread_ts == ^thread_ts
+      )
+    )
+  end
+
+  defp unkick(channel, thread_ts) do
+    from(k in ThreadKick,
+      where: k.slack_channel_id == ^channel and k.thread_ts == ^thread_ts
+    )
+    |> Repo.delete_all()
   end
 
   defp mentioned_in_thread?(bot, channel, thread_ts) do
@@ -116,8 +208,10 @@ defmodule Manfrod.Slack.ThreadPermission do
     ArgumentError -> :miss
   end
 
+  # A kicked entry ageing out costs one query, not a wrong answer: the
+  # re-derivation reads `thread_kicks` before it asks Slack.
   defp fresh?(verdict, inserted_at) do
-    ttl = if verdict == :allowed, do: @allowed_ttl_ms, else: @denied_ttl_ms
+    ttl = if verdict in [:allowed, :kicked], do: @allowed_ttl_ms, else: @denied_ttl_ms
     System.monotonic_time(:millisecond) - inserted_at < ttl
   end
 
@@ -134,6 +228,7 @@ defmodule Manfrod.Slack.ThreadPermission do
 
     :ets.select_delete(@table, [
       {{:_, :allowed, :"$1"}, [{:<, :"$1", now - @allowed_ttl_ms}], [true]},
+      {{:_, :kicked, :"$1"}, [{:<, :"$1", now - @allowed_ttl_ms}], [true]},
       {{:_, :denied, :"$1"}, [{:<, :"$1", now - @denied_ttl_ms}], [true]}
     ])
 

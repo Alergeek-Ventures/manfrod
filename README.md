@@ -56,6 +56,15 @@ needs, streaming requires `chat:write` (already present for `chat.postMessage`).
 | `app_home_opened` | Suggested prompts when the Messages tab is opened |
 | `app_context_changed` | "Streść mi to" resolving to the channel being viewed |
 
+**Interactivity & Shortcuts → Shortcuts → Create New Shortcut → On messages** —
+name it "Wyrzuć Manfroda" with callback ID `kick_manfrod`. This is what lets
+someone evict the bot from a thread (`Manfrod.Slack.Kick`). It is a message
+shortcut rather than a slash command because Slack refuses to run app slash
+commands inside threads, and their payload carries no `thread_ts` — a message
+action is the only surface that works in a thread and identifies which one.
+Socket Mode covers the transport, so no Request URL is needed, but the app has
+to be reinstalled to the workspace before the item shows up in the ⋮ menu.
+
 Everything degrades rather than breaks if a piece is missing: without
 `assistant:write` there are no prompts, titles or shimmer, but replies still
 stream; if `chat.startStream` fails the answer is posted as one message. Both

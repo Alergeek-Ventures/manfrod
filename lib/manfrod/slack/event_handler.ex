@@ -24,9 +24,14 @@ defmodule Manfrod.Slack.EventHandler do
   alias Manfrod.Slack.API
   alias Manfrod.Slack.EventDedup
   alias Manfrod.Slack.Feedback
+  alias Manfrod.Slack.Kick
   alias Manfrod.Slack.SuggestedPrompts
   alias Manfrod.Slack.ThreadPermission
   alias Manfrod.Slack.UserContext
+
+  # Must match the shortcut's Callback ID in the Slack app config
+  # (Interactivity & Shortcuts → Shortcuts → On messages).
+  @kick_callback_id "kick_manfrod"
 
   @doc """
   Handle an incoming Slack event.
@@ -97,8 +102,11 @@ defmodule Manfrod.Slack.EventHandler do
       # Name-dropped without an actual @mention ("manfrod, could you...") —
       # acknowledge with an eyes reaction without starting a full
       # conversation. Independent of the routing below, and of session state.
+      # A kicked thread gets no reaction either: "stop chiming in" covers
+      # emoji, not just words.
       if not dm_channel?(channel) and not bot_mentioned?(text, bot.user_id) and
-           name_dropped?(text) do
+           name_dropped?(text) and
+           not kicked_thread?(channel, event["thread_ts"]) do
         API.add_reaction(bot.token, channel, event["ts"], "eyes")
       end
 
@@ -198,6 +206,28 @@ defmodule Manfrod.Slack.EventHandler do
     :ok
   end
 
+  # "Wyrzuć Manfroda" — a message shortcut rather than a slash command,
+  # because Slack refuses to run app slash commands inside threads at all
+  # (and their payload carries no thread_ts). A message action is the only
+  # surface that both works in a thread and says which thread it means.
+  def handle_event(
+        "interactive",
+        %{"type" => "message_action", "callback_id" => @kick_callback_id} = payload,
+        bot
+      ) do
+    channel = get_in(payload, ["channel", "id"])
+    message = payload["message"] || %{}
+    slack_user_id = get_in(payload, ["user", "id"])
+
+    # Set on a reply; absent when the shortcut is used on the thread's root
+    # message, where the root's own ts is the thread id.
+    thread_ts = message["thread_ts"] || message["ts"]
+
+    kick_thread(bot, channel, thread_ts, slack_user_id, "shortcut")
+
+    :ok
+  end
+
   def handle_event("interactive", %{"type" => "block_actions"} = payload, bot) do
     action = List.first(payload["actions"] || []) || %{}
     channel_id = get_in(payload, ["channel", "id"])
@@ -233,6 +263,52 @@ defmodule Manfrod.Slack.EventHandler do
 
   def handle_event(type, _event, _bot) do
     Logger.debug("Slack EventHandler ignoring event type: #{type}")
+    :ok
+  end
+
+  defp kicked_thread?(channel, thread_ts) when is_binary(thread_ts),
+    do: ThreadPermission.kicked?(channel, thread_ts)
+
+  defp kicked_thread?(_channel, _thread_ts), do: false
+
+  # Shared by the message shortcut above and, via `Manfrod.Tools.Kick`, by the
+  # agent asking to leave. The Manfrod account is looked up but not required:
+  # anyone in the thread may evict the bot, including someone who has never
+  # DMed it.
+  defp kick_thread(bot, channel, thread_ts, slack_user_id, source)
+       when is_binary(channel) and is_binary(thread_ts) do
+    user = slack_user_id && Accounts.get_user_by_slack_id(slack_user_id)
+
+    attrs = %{
+      user_id: user && user.id,
+      slack_user_id: slack_user_id,
+      source: source
+    }
+
+    case Kick.run(bot.token, channel, thread_ts, attrs) do
+      :already_kicked ->
+        # Don't post a second farewell into a thread already left — tell only
+        # the person who clicked, so the thread stays quiet.
+        API.post("chat.postEphemeral", bot.token, %{
+          channel: channel,
+          thread_ts: thread_ts,
+          user: slack_user_id,
+          text: "Już mnie tu nie ma — oznacz mnie `@Manfrod`, jeśli mam wrócić."
+        })
+
+        :ok
+
+      other ->
+        other
+    end
+  end
+
+  defp kick_thread(_bot, channel, thread_ts, _slack_user_id, _source) do
+    Logger.warning(
+      "Slack EventHandler: kick without a thread (channel=#{inspect(channel)}, " <>
+        "thread_ts=#{inspect(thread_ts)})"
+    )
+
     :ok
   end
 
@@ -368,11 +444,24 @@ defmodule Manfrod.Slack.EventHandler do
             "Slack EventHandler: unknown user #{slack_user_id} in channel, sending DM-first message"
           )
 
-          API.post("chat.postMessage", bot.token, %{
-            channel: channel,
-            thread_ts: thread_ts,
-            text: "DM me first to get started!"
-          })
+          # Ephemeral in a kicked thread: the person still needs to hear why
+          # they got no answer, but a thread the bot was thrown out of is not
+          # a place for it to post — and their mention did not lift the kick,
+          # since only a known user's mention does that.
+          if kicked_thread?(channel, thread_ts) do
+            API.post("chat.postEphemeral", bot.token, %{
+              channel: channel,
+              thread_ts: thread_ts,
+              user: slack_user_id,
+              text: "DM me first to get started!"
+            })
+          else
+            API.post("chat.postMessage", bot.token, %{
+              channel: channel,
+              thread_ts: thread_ts,
+              text: "DM me first to get started!"
+            })
+          end
 
         user ->
           # An explicit @mention invites the bot into this thread for good —
