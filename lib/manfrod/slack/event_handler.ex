@@ -22,6 +22,7 @@ defmodule Manfrod.Slack.EventHandler do
   alias Manfrod.Memory.{Admin, Buffer, ChannelDetector, ChannelMapping, Classifier, Project}
   alias Manfrod.Repo
   alias Manfrod.Slack.API
+  alias Manfrod.Slack.Celebration
   alias Manfrod.Slack.EventDedup
   alias Manfrod.Slack.Feedback
   alias Manfrod.Slack.Kick
@@ -48,7 +49,9 @@ defmodule Manfrod.Slack.EventHandler do
       bot has been @mentioned somewhere in that thread (root message or any
       later reply, by anyone — see `Manfrod.Slack.ThreadPermission`). Without
       that invitation the bot never speaks in a channel thread, regardless of
-      whether an Agent session happens to be alive for it.
+      whether an Agent session happens to be alive for it — with one
+      exception: a thread where people are congratulating someone gets
+      Manfrod's own congratulations, uninvited (`Manfrod.Slack.Celebration`).
       Top-level channel messages without @mention are ignored by the Agent
       path (they're still buffered for passive memory).
     - Any channel message that name-drops "manfrod" without an actual
@@ -554,6 +557,17 @@ defmodule Manfrod.Slack.EventHandler do
             Logger.debug(
               "Slack EventHandler ignoring channel thread reply — bot not @mentioned in #{session_key}"
             )
+
+            # One exception to "never speak uninvited": a thread where people
+            # are congratulating a colleague — see `Manfrod.Slack.Celebration`.
+            channel_info = resolve_channel_info(bot.token, channel)
+
+            unless private_conversation?(event, channel, channel_info) do
+              access_channel_id =
+                resolve_agent_channel(event, channel, channel_info.name, channel_info)
+
+              Celebration.maybe_join(bot, event, channel, thread_ts, user, access_channel_id)
+            end
           end
       end
     else
