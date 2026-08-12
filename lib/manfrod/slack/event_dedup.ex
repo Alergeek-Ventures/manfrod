@@ -30,11 +30,6 @@ defmodule Manfrod.Slack.EventDedup do
   @spec first?(term()) :: boolean()
   def first?(key) do
     :ets.insert_new(@table, {key, System.monotonic_time(:millisecond)})
-  rescue
-    # Table not started (e.g. Slack integration disabled in tests) — with no
-    # Slack socket there are no redeliveries to guard against, so treat every
-    # call as the first rather than crashing the caller.
-    ArgumentError -> true
   end
 
   @impl true
