@@ -1,14 +1,17 @@
-defmodule ManfrodWeb.McpLive do
+defmodule ManfrodWeb.IntegrationsLive do
   @moduledoc """
-  Top-level "mcp" page — lets any authenticated user (anyone who's ever
-  messaged the bot on Slack, since that's the login prerequisite) connect
-  their own Linear / Granola accounts, plus any custom MCP server by URL.
+  Top-level "integrations" page — lets any authenticated user (anyone
+  who's ever messaged the bot on Slack, since that's the login
+  prerequisite) connect their own accounts: MCP servers (Linear, Granola,
+  any custom server by URL) and other app logins like Kalafiornia.
   Connections are per-person; the agent picks them up automatically in DMs
-  and channel threads with that person (see `Manfrod.Tools.Mcp`).
+  and channel threads with that person (see `Manfrod.Tools.Mcp`,
+  `Manfrod.Tools.Kalafiornia`).
   """
 
   use ManfrodWeb, :live_view
 
+  alias Manfrod.Kalafiornia
   alias Manfrod.Mcp
 
   @impl true
@@ -75,6 +78,84 @@ defmodule ManfrodWeb.McpLive do
     {:noreply, socket |> load_data() |> put_flash(:info, "Disconnected")}
   end
 
+  # ---------------------------------------------------------------------------
+  # Kalafiornia — email + emailed-PIN login (no OAuth), see `Manfrod.Kalafiornia`.
+  # ---------------------------------------------------------------------------
+
+  def handle_event("kalafiornia_start_login", _params, socket) do
+    email =
+      (socket.assigns.kalafiornia_connection && socket.assigns.kalafiornia_connection.email) ||
+        socket.assigns.current_scope.user.email || ""
+
+    {:noreply, assign(socket, kalafiornia_step: :email, kalafiornia_email: email)}
+  end
+
+  def handle_event("kalafiornia_cancel", _params, socket) do
+    {:noreply, assign(socket, kalafiornia_step: :status, kalafiornia_pin: "")}
+  end
+
+  def handle_event("kalafiornia_update_email", %{"value" => value}, socket) do
+    {:noreply, assign(socket, kalafiornia_email: value)}
+  end
+
+  def handle_event("kalafiornia_update_pin", %{"value" => value}, socket) do
+    {:noreply, assign(socket, kalafiornia_pin: value)}
+  end
+
+  def handle_event("kalafiornia_send_pin", _params, socket) do
+    email = socket.assigns.kalafiornia_email
+
+    if email in [nil, ""] do
+      {:noreply, put_flash(socket, :error, "Email is required")}
+    else
+      socket = assign(socket, kalafiornia_sending: true)
+
+      case Kalafiornia.request_pin(email) do
+        :ok ->
+          {:noreply,
+           socket
+           |> assign(kalafiornia_step: :pin, kalafiornia_sending: false, kalafiornia_pin: "")
+           |> put_flash(:info, "PIN sent to #{email}")}
+
+        {:error, reason} ->
+          {:noreply,
+           socket
+           |> assign(kalafiornia_sending: false)
+           |> put_flash(:error, "Could not send PIN: #{inspect(reason)}")}
+      end
+    end
+  end
+
+  def handle_event("kalafiornia_verify_pin", _params, socket) do
+    user_id = socket.assigns.current_scope.user.id
+    email = socket.assigns.kalafiornia_email
+    pin = socket.assigns.kalafiornia_pin
+
+    socket = assign(socket, kalafiornia_sending: true)
+
+    case Kalafiornia.login_with_pin(user_id, email, pin) do
+      {:ok, _connection} ->
+        {:noreply,
+         socket
+         |> assign(kalafiornia_step: :status, kalafiornia_sending: false, kalafiornia_pin: "")
+         |> load_kalafiornia()
+         |> put_flash(:info, "Kalafiornia connected")}
+
+      {:error, _reason} ->
+        {:noreply,
+         socket
+         |> assign(kalafiornia_sending: false)
+         |> put_flash(:error, "Wrong PIN, try again")}
+    end
+  end
+
+  def handle_event("kalafiornia_disconnect", _params, socket) do
+    user_id = socket.assigns.current_scope.user.id
+    Kalafiornia.disconnect(user_id)
+
+    {:noreply, socket |> load_kalafiornia() |> put_flash(:info, "Kalafiornia disconnected")}
+  end
+
   defp load_data(socket) do
     user_id = socket.assigns.current_scope.user.id
     providers = Mcp.providers_for_user(user_id)
@@ -83,6 +164,21 @@ defmodule ManfrodWeb.McpLive do
     |> assign(builtin_providers: Enum.reject(providers, & &1.custom))
     |> assign(custom_providers: Enum.filter(providers, & &1.custom))
     |> assign(mcp_connections: Mcp.list_connections(user_id))
+    |> load_kalafiornia()
+  end
+
+  defp load_kalafiornia(socket) do
+    user_id = socket.assigns.current_scope.user.id
+    connection = Kalafiornia.get_connection(user_id)
+
+    socket
+    |> assign(kalafiornia_connection: connection)
+    |> assign_new(:kalafiornia_step, fn -> :status end)
+    |> assign_new(:kalafiornia_email, fn ->
+      (connection && connection.email) || socket.assigns.current_scope.user.email || ""
+    end)
+    |> assign_new(:kalafiornia_pin, fn -> "" end)
+    |> assign_new(:kalafiornia_sending, fn -> false end)
   end
 
   # ---------------------------------------------------------------------------

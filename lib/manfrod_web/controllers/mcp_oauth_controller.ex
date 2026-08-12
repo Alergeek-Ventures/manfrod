@@ -19,12 +19,12 @@ defmodule ManfrodWeb.McpOauthController do
       %{mock: true} ->
         conn
         |> put_flash(:error, "#{provider} is not available yet.")
-        |> redirect(to: ~p"/mcp")
+        |> redirect(to: ~p"/integrations")
 
       nil ->
         conn
         |> put_flash(:error, "Unknown provider.")
-        |> redirect(to: ~p"/mcp")
+        |> redirect(to: ~p"/integrations")
 
       mcp_provider ->
         redirect_uri = url(conn, ~p"/mcp/#{provider}/callback")
@@ -40,7 +40,7 @@ defmodule ManfrodWeb.McpOauthController do
           {:error, reason} ->
             conn
             |> put_flash(:error, "Failed to start #{provider} connection: #{inspect(reason)}")
-            |> redirect(to: ~p"/mcp")
+            |> redirect(to: ~p"/integrations")
         end
     end
   end
@@ -61,13 +61,13 @@ defmodule ManfrodWeb.McpOauthController do
       params["error"] ->
         conn
         |> put_flash(:error, "#{provider} authorization was denied.")
-        |> redirect(to: ~p"/mcp")
+        |> redirect(to: ~p"/integrations")
 
       session_provider != provider or is_nil(code_verifier) or
           params["state"] != expected_state ->
         conn
         |> put_flash(:error, "Invalid OAuth session, please try connecting again.")
-        |> redirect(to: ~p"/mcp")
+        |> redirect(to: ~p"/integrations")
 
       true ->
         redirect_uri = url(conn, ~p"/mcp/#{provider}/callback")
@@ -93,12 +93,12 @@ defmodule ManfrodWeb.McpOauthController do
 
             conn
             |> put_flash(:info, "#{provider} connected.")
-            |> redirect(to: ~p"/mcp")
+            |> redirect(to: ~p"/integrations")
 
           {:error, reason} ->
             conn
             |> put_flash(:error, "Failed to connect #{provider}: #{inspect(reason)}")
-            |> redirect(to: ~p"/mcp")
+            |> redirect(to: ~p"/integrations")
         end
     end
   end
@@ -110,6 +110,6 @@ defmodule ManfrodWeb.McpOauthController do
 
     conn
     |> put_flash(:info, "#{provider} disconnected.")
-    |> redirect(to: ~p"/mcp")
+    |> redirect(to: ~p"/integrations")
   end
 end

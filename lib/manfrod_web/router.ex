@@ -73,13 +73,14 @@ defmodule ManfrodWeb.Router do
     get "/impersonate", DevImpersonationController, :create
   end
 
-  # MCP page - any authenticated user (non-admins are funneled here)
+  # Integrations page (MCP connections + other app logins) - any
+  # authenticated user (non-admins are funneled here)
   scope "/", ManfrodWeb do
     pipe_through [:browser, :require_auth]
 
-    live_session :mcp,
+    live_session :integrations,
       on_mount: [{ManfrodWeb.UserAuth, :require_authenticated}] do
-      live "/mcp", McpLive
+      live "/integrations", IntegrationsLive
     end
   end
 
