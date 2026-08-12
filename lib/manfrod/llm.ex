@@ -497,8 +497,28 @@ defmodule Manfrod.LLM do
   defp do_call(messages, tools, provider_key, model_id) do
     {model, opts} = request(tools, provider_key, model_id)
 
-    ReqLLM.generate_text(model, ReqLLM.Context.new(messages), opts)
+    case ReqLLM.generate_text(model, ReqLLM.Context.new(messages), opts) do
+      {:ok, response} = success ->
+        # A text-only call (no tools) that comes back with a blank body is a
+        # dead response, not a usable one — some models occasionally return
+        # empty content instead of an HTTP error. Surface it as a retryable
+        # error so the existing retry/fallback chain kicks in instead of the
+        # caller silently getting nothing back. Tool-calling responses can
+        # legitimately have blank text alongside tool_calls, so this only
+        # applies when no tools were requested.
+        if tools == [] and blank?(ReqLLM.Response.text(response)) do
+          {:error, :empty_response}
+        else
+          success
+        end
+
+      error ->
+        error
+    end
   end
+
+  defp blank?(nil), do: true
+  defp blank?(text), do: String.trim(text) == ""
 
   # Streaming variant of `do_call/4`. `ReqLLM.StreamResponse.process_stream/2`
   # consumes the stream exactly once, firing `on_result` per provider delta
@@ -602,6 +622,7 @@ defmodule Manfrod.LLM do
   defp retryable_error?(%Mint.TransportError{}), do: true
   defp retryable_error?(:timeout), do: true
   defp retryable_error?({:timeout, _}), do: true
+  defp retryable_error?(:empty_response), do: true
   defp retryable_error?(_), do: false
 
   defp format_error(%{status: status, body: body}) when is_map(body) do
@@ -623,5 +644,6 @@ defmodule Manfrod.LLM do
 
   defp format_error(:timeout), do: "Request timeout"
   defp format_error({:timeout, _}), do: "Request timeout"
+  defp format_error(:empty_response), do: "Model returned an empty response"
   defp format_error(other), do: inspect(other)
 end
