@@ -143,9 +143,14 @@ rule above wins:
 
 ── OUTPUT ───────────────────────────────────────────────────────────────
 For a batch of messages I send you, respond ONLY as a JSON array (no extra text), one object per message in the same order:
-[{"action": "<action>", "reasoning": "<max 1 sentence>", "note": "<string or null>", "start_date": "YYYY-MM-DD or null", "end_date": "YYYY-MM-DD or null"}, ...]
+[{"action": "<action>", "reasoning": "<max 1 sentence>", "note": "<string or null>", "start_date": "YYYY-MM-DD or null", "end_date": "YYYY-MM-DD or null", "lang": "<ISO 639-1 code>"}, ...]
 
 Valid actions: "ignore", "create_memory", "create_absence", "create_meeting", "flag_sensitive", "ask_human"
+
+"lang" — REQUIRED for every message. The language the message itself is written in, as a lowercase
+ISO 639-1 code ("pl", "en", ...). This drives the language of any bot-generated UI text about this
+message (e.g. the escalation prompt), so it must reflect the message's actual language, not the
+language of your reasoning.
 
 "note" — REQUIRED for create_memory, create_absence and ask_human (null otherwise).
 A self-contained, third-person reformulation of the fact, in the same language as the message.
