@@ -277,7 +277,8 @@ defmodule Manfrod.Memory.Classifier do
                   node,
                   key,
                   write_access,
-                  bot_token
+                  bot_token,
+                  lang(result)
                 )
 
               {:error, reason} ->
@@ -329,7 +330,8 @@ defmodule Manfrod.Memory.Classifier do
         node,
         proposal,
         write_access,
-        bot_token
+        bot_token,
+        lang(result)
       )
     else
       {:user, nil} ->
@@ -416,6 +418,17 @@ defmodule Manfrod.Memory.Classifier do
     end
   end
 
+  # Language the source message was written in, as detected by the classifier
+  # LLM ("pl", "en", ...). Drives which language bot-generated escalation UI
+  # text is shown in. Anything other than "pl" falls back to English, since
+  # that's the only other language these prompts are translated into.
+  defp lang(result) do
+    case Map.get(result, "lang") do
+      "pl" -> :pl
+      _ -> :en
+    end
+  end
+
   defp absence_dates(result) do
     today = local_today() |> Date.to_iso8601()
     start_date = valid_iso_date(result["start_date"]) || today
@@ -452,7 +465,8 @@ defmodule Manfrod.Memory.Classifier do
          node,
          fact_key,
          write_access,
-         bot_token
+         bot_token,
+         lang
        ) do
     case escalation_proposal(channel_id, kind, write_access, :absence) do
       {:ok, proposal} ->
@@ -463,6 +477,7 @@ defmodule Manfrod.Memory.Classifier do
           proposal,
           write_access,
           bot_token,
+          lang,
           fact_key: fact_key
         )
 
@@ -528,15 +543,15 @@ defmodule Manfrod.Memory.Classifier do
          %{options: options, preselected: preselected},
          write_access,
          bot_token,
+         lang,
          opts \\ []
        ) do
     prompt =
-      "Zapisałem notatkę:\n> #{node.content}\n" <>
-        "Teraz jest #{current_level_text(write_access)}. Gdzie jeszcze ma trafić?"
+      escalation_prompt_text(lang, node.content, current_level_text(lang, write_access))
 
     blocks =
       [
-        levels_block(prompt, options, preselected),
+        levels_block(prompt, options, preselected, lang),
         %{
           type: "actions",
           elements: [
@@ -544,12 +559,12 @@ defmodule Manfrod.Memory.Classifier do
               type: "button",
               action_id: "memory_escalation_save",
               style: "primary",
-              text: %{type: "plain_text", text: "Zapisz", emoji: true}
+              text: %{type: "plain_text", text: t(lang, :save), emoji: true}
             },
             %{
               type: "button",
               action_id: "memory_escalation_cancel",
-              text: %{type: "plain_text", text: "Anuluj", emoji: true}
+              text: %{type: "plain_text", text: t(lang, :cancel), emoji: true}
             }
           ]
         }
@@ -567,7 +582,8 @@ defmodule Manfrod.Memory.Classifier do
           options: options,
           preselected: preselected,
           write_access: write_access,
-          fact_key: Keyword.get(opts, :fact_key)
+          fact_key: Keyword.get(opts, :fact_key),
+          lang: lang
         })
 
         Logger.info(
@@ -580,13 +596,13 @@ defmodule Manfrod.Memory.Classifier do
     end
   end
 
-  defp levels_block(prompt, options, preselected) do
-    checkbox_options = Enum.map(options, &checkbox_option/1)
+  defp levels_block(prompt, options, preselected, lang) do
+    checkbox_options = Enum.map(options, &checkbox_option(&1, lang))
 
     initial =
       options
       |> Enum.filter(&(&1 in preselected))
-      |> Enum.map(&checkbox_option/1)
+      |> Enum.map(&checkbox_option(&1, lang))
 
     checkboxes =
       %{
@@ -606,27 +622,57 @@ defmodule Manfrod.Memory.Classifier do
     }
   end
 
-  defp checkbox_option(level) do
+  defp checkbox_option(level, lang) do
     %{
       text: %{type: "mrkdwn", text: "*#{level}*"},
-      description: %{type: "mrkdwn", text: level_description(level)},
+      description: %{type: "mrkdwn", text: level_description(lang, level)},
       value: level
     }
   end
 
-  defp level_description("internal"), do: "Cały zespół Manfrod — bez klientów"
-  defp level_description("external/all"), do: "Zespół + wszyscy klienci (urlopy, nieobecności)"
+  defp level_description(:pl, "internal"), do: "Cały zespół Manfrod — bez klientów"
 
-  defp level_description("external/" <> client), do: "Zespół + klient #{client}"
-  defp level_description(level), do: level
+  defp level_description(:pl, "external/all"),
+    do: "Zespół + wszyscy klienci (urlopy, nieobecności)"
 
-  defp current_level_text(write_access) do
+  defp level_description(:pl, "external/" <> client), do: "Zespół + klient #{client}"
+  defp level_description(:pl, level), do: level
+
+  defp level_description(:en, "internal"), do: "The whole Manfrod team — no clients"
+  defp level_description(:en, "external/all"), do: "Team + all clients (vacations, absences)"
+  defp level_description(:en, "external/" <> client), do: "Team + client #{client}"
+  defp level_description(:en, level), do: level
+
+  defp current_level_text(:pl, write_access) do
     if Access.private?(write_access) do
       "tylko u Ciebie (`private`)"
     else
       "na poziomie `#{Enum.join(write_access, ", ")}`"
     end
   end
+
+  defp current_level_text(:en, write_access) do
+    if Access.private?(write_access) do
+      "only visible to you (`private`)"
+    else
+      "at the `#{Enum.join(write_access, ", ")}` level"
+    end
+  end
+
+  defp escalation_prompt_text(:pl, content, level_text) do
+    "Zapisałem notatkę:\n> #{content}\n" <>
+      "Teraz jest #{level_text}. Gdzie jeszcze ma trafić?"
+  end
+
+  defp escalation_prompt_text(:en, content, level_text) do
+    "I saved a note:\n> #{content}\n" <>
+      "It's currently #{level_text}. Where else should it go?"
+  end
+
+  defp t(:pl, :save), do: "Zapisz"
+  defp t(:pl, :cancel), do: "Anuluj"
+  defp t(:en, :save), do: "Save"
+  defp t(:en, :cancel), do: "Cancel"
 
   @doc """
   Resolve an escalation prompt from a button click.
@@ -654,7 +700,10 @@ defmodule Manfrod.Memory.Classifier do
             :cancel -> []
           end
 
-        outcome = apply_escalation(levels, node_id, write_access, Map.get(payload, :fact_key))
+        lang = Map.get(payload, :lang, :en)
+
+        outcome =
+          apply_escalation(levels, node_id, write_access, Map.get(payload, :fact_key), lang)
 
         API.post("chat.update", bot_token, %{
           channel: channel_id,
@@ -690,11 +739,15 @@ defmodule Manfrod.Memory.Classifier do
     Enum.filter(selected_levels, &(&1 in offered))
   end
 
-  defp apply_escalation([], _node_id, write_access, _fact_key) do
-    "👌 OK, notatka zostaje #{current_level_text(write_access)}."
+  defp apply_escalation([], _node_id, write_access, _fact_key, :pl) do
+    "👌 OK, notatka zostaje #{current_level_text(:pl, write_access)}."
   end
 
-  defp apply_escalation(levels, node_id, write_access, fact_key) do
+  defp apply_escalation([], _node_id, write_access, _fact_key, :en) do
+    "👌 OK, the note stays #{current_level_text(:en, write_access)}."
+  end
+
+  defp apply_escalation(levels, node_id, write_access, fact_key, lang) do
     # "internal" first: a node leaving a private space has to reach the team
     # before it can be widened to clients, and escalation validation enforces
     # exactly that ordering.
@@ -717,16 +770,26 @@ defmodule Manfrod.Memory.Classifier do
         end
       end)
 
-    case {applied, failed} do
-      {[], _} ->
-        "⚠️ Nie udało się rozszerzyć dostępu — notatka zostaje #{current_level_text(write_access)}."
+    case {applied, failed, lang} do
+      {[], _, :pl} ->
+        "⚠️ Nie udało się rozszerzyć dostępu — notatka zostaje #{current_level_text(:pl, write_access)}."
 
-      {applied, []} ->
+      {[], _, :en} ->
+        "⚠️ Couldn't widen access — the note stays #{current_level_text(:en, write_access)}."
+
+      {applied, [], :pl} ->
         "✅ Zapisane też jako #{format_levels(applied)}."
 
-      {applied, failed} ->
+      {applied, [], :en} ->
+        "✅ Also saved as #{format_levels(applied)}."
+
+      {applied, failed, :pl} ->
         "✅ Zapisane też jako #{format_levels(applied)}.\n" <>
           "⚠️ Nie udało się: #{format_levels(failed)}."
+
+      {applied, failed, :en} ->
+        "✅ Also saved as #{format_levels(applied)}.\n" <>
+          "⚠️ Couldn't save: #{format_levels(failed)}."
     end
   end
 
