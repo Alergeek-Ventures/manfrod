@@ -16,6 +16,7 @@ defmodule Manfrod.Analytics.Rollup do
   require Logger
 
   alias Manfrod.Analytics.ActivityRollup
+  alias Manfrod.Analytics.ToolRollup
   alias Manfrod.Analytics.UsageRollup
   alias Manfrod.Events.AuditEvent
   alias Manfrod.Pricing
@@ -32,18 +33,19 @@ defmodule Manfrod.Analytics.Rollup do
   ]
 
   @doc """
-  Roll up a single UTC date into both rollup tables.
+  Roll up a single UTC date into all rollup tables.
 
-  Returns `{usage_rows, activity_rows}` written.
+  Returns `{usage_rows, activity_rows, tool_rows}` written.
   """
-  @spec run_for_date(Date.t()) :: {non_neg_integer(), non_neg_integer()}
+  @spec run_for_date(Date.t()) :: {non_neg_integer(), non_neg_integer(), non_neg_integer()}
   def run_for_date(%Date{} = date) do
     {day_start, day_end} = day_bounds(date)
 
     usage = rollup_usage(date, day_start, day_end)
     activity = rollup_activity(date, day_start, day_end)
+    tool = rollup_tool(date, day_start, day_end)
 
-    {usage, activity}
+    {usage, activity, tool}
   end
 
   @doc """
@@ -58,8 +60,11 @@ defmodule Manfrod.Analytics.Rollup do
 
     for offset <- 0..(days - 1) do
       date = Date.add(today, -offset)
-      {usage, activity} = run_for_date(date)
-      Logger.debug("Rollup #{date}: #{usage} usage rows, #{activity} activity rows")
+      {usage, activity, tool} = run_for_date(date)
+
+      Logger.debug(
+        "Rollup #{date}: #{usage} usage rows, #{activity} activity rows, #{tool} tool rows"
+      )
     end
 
     :ok
@@ -82,8 +87,11 @@ defmodule Manfrod.Analytics.Rollup do
     Logger.info("Analytics backfill: #{length(dates)} day(s) with raw events")
 
     for date <- Enum.sort(dates, Date) do
-      {usage, activity} = run_for_date(date)
-      Logger.info("Analytics backfill #{date}: #{usage} usage rows, #{activity} activity rows")
+      {usage, activity, tool} = run_for_date(date)
+
+      Logger.info(
+        "Analytics backfill #{date}: #{usage} usage rows, #{activity} activity rows, #{tool} tool rows"
+      )
     end
 
     :ok
@@ -176,6 +184,22 @@ defmodule Manfrod.Analytics.Rollup do
       end)
 
     upsert(ActivityRollup, rows, [:date, :user_id], ActivityRollup.upsert_fields())
+  end
+
+  # Tool grain: date x tool name
+
+  defp rollup_tool(date, day_start, day_end) do
+    rows =
+      AuditEvent
+      |> where([e], e.timestamp >= ^day_start and e.timestamp < ^day_end)
+      |> where([e], e.type == "action_started")
+      |> Repo.all()
+      |> Enum.group_by(&(meta(&1, "action") || "unknown"))
+      |> Enum.map(fn {tool, group} ->
+        %{date: date, tool: tool, calls: length(group)}
+      end)
+
+    upsert(ToolRollup, rows, [:date, :tool], ToolRollup.upsert_fields())
   end
 
   # Shared helpers

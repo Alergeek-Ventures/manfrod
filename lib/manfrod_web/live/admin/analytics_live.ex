@@ -194,6 +194,48 @@ defmodule ManfrodWeb.Admin.AnalyticsLive do
           </p>
         </.card>
 
+        <%!-- Tools --%>
+        <h2 class="text-zinc-400 text-xs uppercase tracking-widest mb-3">tools</h2>
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-8">
+          <.card
+            title="Everyday use"
+            hint="reads, listings, memory fetches — routine calls on the way to an answer"
+          >
+            <p :if={@data.by_tool.everyday == []} class="text-zinc-500 text-xs py-2">
+              No tool calls in this window.
+            </p>
+            <.bars
+              :if={@data.by_tool.everyday != []}
+              rows={
+                Enum.map(@data.by_tool.everyday, fn t ->
+                  %{label: t.tool, value: t.calls, display: format_number(t.calls)}
+                end)
+              }
+              color="#3987e5"
+              label_width="w-36"
+            />
+          </.card>
+
+          <.card
+            title="User intent"
+            hint="an action the user asked for by name — booking a desk, opening the door, a reminder"
+          >
+            <p :if={@data.by_tool.intent == []} class="text-zinc-500 text-xs py-2">
+              No intent-driven tool calls in this window.
+            </p>
+            <.bars
+              :if={@data.by_tool.intent != []}
+              rows={
+                Enum.map(@data.by_tool.intent, fn t ->
+                  %{label: t.tool, value: t.calls, display: format_number(t.calls)}
+                end)
+              }
+              color="#d95926"
+              label_width="w-36"
+            />
+          </.card>
+        </div>
+
         <%!-- Negative feedback --%>
         <h2 class="text-zinc-400 text-xs uppercase tracking-widest mb-3">feedback</h2>
         <.card
