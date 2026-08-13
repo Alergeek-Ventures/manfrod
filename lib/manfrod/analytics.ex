@@ -15,12 +15,38 @@ defmodule Manfrod.Analytics do
 
   alias Manfrod.Accounts.User
   alias Manfrod.Analytics.ActivityRollup
+  alias Manfrod.Analytics.ToolRollup
   alias Manfrod.Analytics.UsageRollup
   alias Manfrod.Feedback
   alias Manfrod.Pricing
   alias Manfrod.Repo
 
   @system_slack_id_prefix "system:"
+
+  # Tools that carry out a real-world action the user asked for by name —
+  # booking a desk, opening a door, setting a reminder. Anything not listed
+  # here (reads, listings, memory search, admin upkeep) defaults to
+  # `:everyday`: the routine calls the agent makes on the way to answering,
+  # not something a person would describe as "I asked it to do X".
+  @intent_tools MapSet.new([
+                  "reserve_desk",
+                  "cancel_desk_reservation",
+                  "open_office_door",
+                  "set_reminder",
+                  "cancel_reminder",
+                  "create_recurring_reminder",
+                  "update_recurring_reminder",
+                  "delete_recurring_reminder",
+                  "escalate_note",
+                  "ask_user_about_holiday",
+                  "record_holiday_plan",
+                  "report_vacation",
+                  "create_note",
+                  "delete_note",
+                  "link_notes",
+                  "unlink_notes",
+                  "delete_slack_message"
+                ])
 
   @doc """
   Everything the analytics page needs, in one call.
@@ -34,6 +60,7 @@ defmodule Manfrod.Analytics do
       by_model: by_model(days),
       by_purpose: by_purpose(days),
       by_user: by_user(days),
+      by_tool: by_tool(days),
       model_timeline: model_timeline(days),
       adoption: adoption(days),
       # Ratings come straight from `message_feedback`, not the rollups: a few
@@ -232,6 +259,32 @@ defmodule Manfrod.Analytics do
     |> Repo.all()
     |> Enum.map(&normalize_usage_row/1)
     |> Enum.sort_by(& &1.cost_usd, {:desc, Decimal})
+  end
+
+  @doc """
+  Which tools actually get called, most frequent first, split into two
+  groups: `:everyday` (reads, listings, memory fetches — the routine calls
+  the agent makes on the way to answering) and `:intent` (an action the user
+  asked for by name — booking a desk, opening the door, setting a reminder).
+  """
+  def by_tool(days) do
+    rows =
+      ToolRollup
+      |> where([r], r.date >= ^start_date(days))
+      |> group_by([r], r.tool)
+      |> select([r], %{tool: r.tool, calls: sum(r.calls)})
+      |> Repo.all()
+      |> Enum.map(fn row ->
+        %{tool: row.tool, calls: int(row.calls), category: tool_category(row.tool)}
+      end)
+      |> Enum.sort_by(& &1.calls, :desc)
+
+    %{
+      all: rows,
+      everyday: Enum.filter(rows, &(&1.category == :everyday)),
+      intent: Enum.filter(rows, &(&1.category == :intent)),
+      total_calls: Enum.sum(Enum.map(rows, & &1.calls))
+    }
   end
 
   @doc """
@@ -456,6 +509,10 @@ defmodule Manfrod.Analytics do
     do: String.starts_with?(slack_id, @system_slack_id_prefix)
 
   defp system_user?(_user), do: false
+
+  defp tool_category(tool) do
+    if MapSet.member?(@intent_tools, tool), do: :intent, else: :everyday
+  end
 
   defp normalize_usage_row(row) do
     row

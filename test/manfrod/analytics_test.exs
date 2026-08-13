@@ -3,6 +3,7 @@ defmodule Manfrod.AnalyticsTest do
 
   alias Manfrod.Analytics
   alias Manfrod.Analytics.Rollup
+  alias Manfrod.Analytics.ToolRollup
   alias Manfrod.Analytics.UsageRollup
   alias Manfrod.Events.Activity
   alias Manfrod.Events.Store
@@ -123,6 +124,28 @@ defmodule Manfrod.AnalyticsTest do
       assert row.failed_calls == 1
       assert row.retries == 1
     end
+
+    test "counts action_started events per tool, across users" do
+      user = insert_user!()
+      other = insert_user!()
+
+      record(:action_started, %{source: :agent, user_id: user.id, meta: %{action: "reserve_desk"}})
+
+      record(:action_started, %{
+        source: :agent,
+        user_id: other.id,
+        meta: %{action: "reserve_desk"}
+      })
+
+      record(:action_started, %{source: :agent, user_id: user.id, meta: %{action: "search_notes"}})
+
+      Rollup.run_for_date(Date.utc_today())
+
+      rows = Repo.all(ToolRollup) |> Map.new(&{&1.tool, &1.calls})
+
+      assert rows["reserve_desk"] == 2
+      assert rows["search_notes"] == 1
+    end
   end
 
   describe "adoption" do
@@ -147,7 +170,10 @@ defmodule Manfrod.AnalyticsTest do
       person = insert_user!(%{name: "Person"})
 
       system =
-        insert_user!(%{name: "Retrospector", slack_id: "system:retrospector-#{:rand.uniform(999)}"})
+        insert_user!(%{
+          name: "Retrospector",
+          slack_id: "system:retrospector-#{:rand.uniform(999)}"
+        })
 
       record(:message_received, %{source: :slack, user_id: person.id, meta: %{content: "hi"}})
       record(:message_received, %{source: :slack, user_id: system.id, meta: %{content: "sys"}})
@@ -202,6 +228,30 @@ defmodule Manfrod.AnalyticsTest do
 
       assert length(series) == 14
       assert List.last(series).date == Date.utc_today()
+    end
+  end
+
+  describe "by_tool" do
+    test "splits tools into everyday reads and user-intent actions" do
+      user = insert_user!()
+
+      record(:action_started, %{source: :agent, user_id: user.id, meta: %{action: "reserve_desk"}})
+
+      record(:action_started, %{source: :agent, user_id: user.id, meta: %{action: "reserve_desk"}})
+
+      record(:action_started, %{source: :agent, user_id: user.id, meta: %{action: "search_notes"}})
+
+      Rollup.run_for_date(Date.utc_today())
+
+      result = Analytics.by_tool(7)
+
+      assert %{tool: "reserve_desk", calls: 2, category: :intent} =
+               Enum.find(result.intent, &(&1.tool == "reserve_desk"))
+
+      assert %{tool: "search_notes", calls: 1, category: :everyday} =
+               Enum.find(result.everyday, &(&1.tool == "search_notes"))
+
+      assert result.total_calls == 3
     end
   end
 end
