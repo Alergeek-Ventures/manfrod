@@ -29,7 +29,7 @@ defmodule ManfrodWeb.McpOauthController do
       mcp_provider ->
         redirect_uri = url(conn, ~p"/mcp/#{provider}/callback")
 
-        case OAuth.authorize_url(provider, mcp_provider.mcp_url, redirect_uri) do
+        case OAuth.authorize_url(provider, mcp_provider.mcp_url, redirect_uri, mcp_provider.scope) do
           {:ok, %{url: url, code_verifier: code_verifier, state: state}} ->
             conn
             |> put_session(:mcp_oauth_provider, provider)

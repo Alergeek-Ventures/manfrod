@@ -7,7 +7,9 @@ defmodule Manfrod.Mcp do
   adds a given user's own custom providers on top. Everything else (the
   MCP page, the OAuth controller, agent tool wiring) reads from these
   instead of hardcoding provider lists — a "provider" is always the same
-  shape: `%{id:, name:, mcp_url:, mock:, logo_url:, custom:}`.
+  shape: `%{id:, name:, mcp_url:, mock:, logo_url:, custom:, scope:}`.
+  `scope` is nil unless the provider's authorize endpoint requires an
+  explicit `scope` param (e.g. Firmowid rejects requests without one).
   """
 
   import Ecto.Query
@@ -29,7 +31,8 @@ defmodule Manfrod.Mcp do
         mcp_url: "https://mcp.linear.app/mcp",
         mock: false,
         logo_url: nil,
-        custom: false
+        custom: false,
+        scope: nil
       },
       %{
         id: "granola",
@@ -37,7 +40,8 @@ defmodule Manfrod.Mcp do
         mcp_url: "https://mcp.granola.ai/mcp",
         mock: false,
         logo_url: nil,
-        custom: false
+        custom: false,
+        scope: nil
       },
       %{
         id: "firmowid",
@@ -45,7 +49,8 @@ defmodule Manfrod.Mcp do
         mcp_url: "https://firmowid.pl/mcp",
         mock: false,
         logo_url: nil,
-        custom: false
+        custom: false,
+        scope: "mcp"
       }
     ]
   end
@@ -71,7 +76,8 @@ defmodule Manfrod.Mcp do
         mcp_url: cp.url,
         mock: false,
         logo_url: cp.logo_url,
-        custom: true
+        custom: true,
+        scope: nil
       }
     end)
   end
