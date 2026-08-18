@@ -39,7 +39,14 @@ defmodule Manfrod.Mcp do
         logo_url: nil,
         custom: false
       },
-      %{id: "firmowid", name: "Firmowid", mcp_url: nil, mock: true, logo_url: nil, custom: false}
+      %{
+        id: "firmowid",
+        name: "Firmowid",
+        mcp_url: "https://firmowid.pl/mcp",
+        mock: false,
+        logo_url: nil,
+        custom: false
+      }
     ]
   end
 
