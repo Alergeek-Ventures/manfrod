@@ -106,26 +106,32 @@ defmodule Manfrod.Mcp.OAuth do
   end
 
   @doc """
-  Builds a PKCE authorization URL for `provider` (id) at `mcp_url`.
+  Builds a PKCE authorization URL for `provider` (id) at `mcp_url`. Some
+  providers (e.g. Firmowid) reject the authorize request without an
+  explicit `scope` param — pass it through `scope` when the provider
+  declares one.
 
   Returns `{:ok, %{url:, code_verifier:, state:}}` — the caller stashes
   `code_verifier` and `state` in the browser session for the callback.
   """
-  def authorize_url(provider, mcp_url, redirect_uri) do
+  def authorize_url(provider, mcp_url, redirect_uri, scope \\ nil) do
     with {:ok, client} <- ensure_client(provider, mcp_url, redirect_uri) do
       code_verifier = random_url_safe(64)
       code_challenge = code_challenge(code_verifier)
       state = random_url_safe(24)
 
-      query =
-        URI.encode_query(%{
+      params =
+        %{
           response_type: "code",
           client_id: client.client_id,
           redirect_uri: redirect_uri,
           code_challenge: code_challenge,
           code_challenge_method: "S256",
           state: state
-        })
+        }
+        |> maybe_put_scope(scope)
+
+      query = URI.encode_query(params)
 
       {:ok,
        %{
@@ -189,6 +195,9 @@ defmodule Manfrod.Mcp.OAuth do
         {:error, reason}
     end
   end
+
+  defp maybe_put_scope(params, nil), do: params
+  defp maybe_put_scope(params, scope), do: Map.put(params, :scope, scope)
 
   defp random_url_safe(byte_size) do
     :crypto.strong_rand_bytes(byte_size) |> Base.url_encode64(padding: false)
