@@ -56,7 +56,7 @@ defmodule ManfrodWeb.Router do
     delete "/logout", LogoutController, :delete
   end
 
-  # MCP connection OAuth (Linear, Granola, ...) - any authenticated user
+  # MCP connection OAuth (Granola, Firmowid, ...) - any authenticated user
   # can connect their own account
   scope "/mcp", ManfrodWeb do
     pipe_through [:browser, :require_auth]

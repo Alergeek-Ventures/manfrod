@@ -2,7 +2,7 @@ defmodule ManfrodWeb.IntegrationsLive do
   @moduledoc """
   Top-level "integrations" page — lets any authenticated user (anyone
   who's ever messaged the bot on Slack, since that's the login
-  prerequisite) connect their own accounts: MCP servers (Linear, Granola,
+  prerequisite) connect their own accounts: MCP servers (Granola, Firmowid,
   any custom server by URL) and other app logins like Kalafiornia.
   Connections are per-person; the agent picks them up automatically in DMs
   and channel threads with that person (see `Manfrod.Tools.Mcp`,
@@ -267,12 +267,6 @@ defmodule ManfrodWeb.IntegrationsLive do
   # ---------------------------------------------------------------------------
 
   attr :provider, :map, required: true
-
-  def provider_logo(%{provider: %{id: "linear"}} = assigns) do
-    ~H"""
-    <img src="/images/mcp/linear.png" class="w-10 h-10 rounded-lg object-cover" />
-    """
-  end
 
   def provider_logo(%{provider: %{id: "granola"}} = assigns) do
     ~H"""

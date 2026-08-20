@@ -1,6 +1,6 @@
 defmodule Manfrod.Mcp.Connection do
   @moduledoc """
-  A user's OAuth connection to a remote MCP server (Linear, Granola, ...).
+  A user's OAuth connection to a remote MCP server (Granola, Firmowid, ...).
 
   `status` is one of `"connected"`, `"expired"`, `"disconnected"`. Tokens
   are stored in plaintext, matching the precedent set by

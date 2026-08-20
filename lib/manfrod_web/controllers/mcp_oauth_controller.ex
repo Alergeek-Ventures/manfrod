@@ -1,7 +1,7 @@
 defmodule ManfrodWeb.McpOauthController do
   @moduledoc """
   OAuth 2.1 + PKCE connect/callback for user-owned MCP connections
-  (Linear, Granola, ...). Mirrors the shape of `GoogleAuthController` but
+  (Granola, Firmowid, ...). Mirrors the shape of `GoogleAuthController` but
   is generic over `provider` and uses Dynamic Client Registration instead
   of a static client_id/secret.
   """

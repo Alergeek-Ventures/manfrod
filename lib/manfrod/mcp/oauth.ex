@@ -1,8 +1,8 @@
 defmodule Manfrod.Mcp.OAuth do
   @moduledoc """
   Generic OAuth 2.1 + PKCE client for remote MCP servers, with RFC 7591
-  Dynamic Client Registration so any MCP-spec-compliant provider (Linear,
-  Granola, ...) can be connected without a pre-issued client_id/secret.
+  Dynamic Client Registration so any MCP-spec-compliant provider (Granola,
+  Firmowid, ...) can be connected without a pre-issued client_id/secret.
 
   Flow per provider, done once and cached in `mcp_oauth_clients`:
   1. Discover authorization server metadata (RFC 8414) from the MCP
