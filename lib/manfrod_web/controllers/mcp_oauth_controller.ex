@@ -1,9 +1,9 @@
 defmodule ManfrodWeb.McpOauthController do
   @moduledoc """
-  OAuth 2.1 + PKCE connect/callback for user-owned MCP connections
-  (Granola, Firmowid, ...). Mirrors the shape of `GoogleAuthController` but
-  is generic over `provider` and uses Dynamic Client Registration instead
-  of a static client_id/secret.
+  OAuth 2.1 + PKCE connect/callback for user-owned MCP connections.
+  Mirrors the shape of `GoogleAuthController` but is generic over
+  `provider` and uses Dynamic Client Registration instead of a static
+  client_id/secret.
   """
 
   use ManfrodWeb, :controller
