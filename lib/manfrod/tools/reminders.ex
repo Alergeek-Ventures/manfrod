@@ -23,6 +23,29 @@ defmodule Manfrod.Tools.Reminders do
         callback: fn args -> set_reminder(user_id, args) end
       ),
       ReqLLM.Tool.new!(
+        name: "schedule_followup_check",
+        description:
+          "Schedule a follow-up check for YOURSELF at a specific time — for when you (not " <>
+            "the user) need to re-verify something later, e.g. checking back after being " <>
+            "told 'still working' or 'not done yet'. Unlike set_reminder, this isn't a " <>
+            "user-facing reminder: `instructions` is what you should actually do when it " <>
+            "fires (call tools, decide whether there's anything worth saying), written as " <>
+            "if telling your future self what to do — not as a message to relay verbatim.",
+        parameter_schema: [
+          instructions: [
+            type: :string,
+            required: true,
+            doc: "Full instructions for that future turn — what to check and how to react"
+          ],
+          at: [
+            type: :string,
+            required: true,
+            doc: "When to trigger (ISO8601 UTC datetime, e.g., '2026-02-04T14:00:00Z')"
+          ]
+        ],
+        callback: fn args -> schedule_followup_check(user_id, args) end
+      ),
+      ReqLLM.Tool.new!(
         name: "list_reminders",
         description: "List all pending reminders you have scheduled.",
         parameter_schema: [],
@@ -114,6 +137,28 @@ defmodule Manfrod.Tools.Reminders do
       {:error, _} -> {:ok, "Invalid datetime. Use ISO8601 UTC like '2026-02-04T14:00:00Z'"}
       :lt -> {:ok, "Cannot set reminder in the past. Provide a future datetime."}
       :eq -> {:ok, "Cannot set reminder in the past. Provide a future datetime."}
+    end
+  end
+
+  # Unlike set_reminder, the prompt is fired as-is — no "this is the user's
+  # own reminder, relay it" framing — since the point is for a future turn
+  # to actually act (re-run a check, decide whether to say anything), not
+  # recite fixed text. Uses a distinct trigger_id prefix so it stays out of
+  # list_reminders/cancel_reminder, which are user-facing.
+  defp schedule_followup_check(user_id, %{instructions: instructions, at: at_string}) do
+    with {:ok, scheduled_at, _offset} <- DateTime.from_iso8601(at_string),
+         :gt <- DateTime.compare(scheduled_at, DateTime.utc_now()),
+         args = %{
+           prompt: instructions,
+           trigger_id: "followup_#{:erlang.phash2({instructions, scheduled_at})}",
+           user_id: user_id
+         },
+         {:ok, job} <- TriggerWorker.new(args, scheduled_at: scheduled_at) |> Oban.insert() do
+      {:ok, "Follow-up check scheduled (job ##{job.id}) for #{scheduled_at}."}
+    else
+      {:error, _} -> {:ok, "Invalid datetime. Use ISO8601 UTC like '2026-02-04T14:00:00Z'"}
+      :lt -> {:ok, "Cannot schedule a follow-up in the past. Provide a future datetime."}
+      :eq -> {:ok, "Cannot schedule a follow-up in the past. Provide a future datetime."}
     end
   end
 
