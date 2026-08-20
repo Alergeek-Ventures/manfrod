@@ -100,7 +100,7 @@ config :manfrod, Oban,
        # Every hour - schedule cron-skill triggers for next 12h (skills
        # with a `cron:` frontmatter field; none exist yet)
        {"0 * * * *", Manfrod.Workers.SkillSchedulerWorker},
-       # Every hour - refresh/expire user MCP connections (Granola, Firmowid, ...)
+       # Every hour - refresh/expire user MCP connections
        {"15 * * * *", Manfrod.Workers.McpExpiryWorker},
        # Every hour - roll raw events into the daily usage/adoption tables
        # before the 7-day audit retention drops them

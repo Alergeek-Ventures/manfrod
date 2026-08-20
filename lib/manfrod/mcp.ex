@@ -1,7 +1,8 @@
 defmodule Manfrod.Mcp do
   @moduledoc """
-  User-owned connections to remote MCP servers (Granola, Firmowid, or any
-  custom server a user adds by URL).
+  User-owned connections to remote MCP servers — either a built-in
+  provider (see `builtin_providers/0`) or any custom server a user adds
+  by URL.
 
   `builtin_providers/0` lists the app's known providers; `providers_for_user/1`
   adds a given user's own custom providers on top. Everything else (the
@@ -9,7 +10,7 @@ defmodule Manfrod.Mcp do
   instead of hardcoding provider lists — a "provider" is always the same
   shape: `%{id:, name:, mcp_url:, mock:, logo_url:, custom:, scope:}`.
   `scope` is nil unless the provider's authorize endpoint requires an
-  explicit `scope` param (e.g. Firmowid rejects requests without one).
+  explicit `scope` param.
   """
 
   import Ecto.Query
@@ -25,15 +26,6 @@ defmodule Manfrod.Mcp do
   """
   def builtin_providers do
     [
-      %{
-        id: "granola",
-        name: "Granola",
-        mcp_url: "https://mcp.granola.ai/mcp",
-        mock: false,
-        logo_url: nil,
-        custom: false,
-        scope: nil
-      },
       %{
         id: "firmowid",
         name: "Firmowid",
@@ -149,7 +141,7 @@ defmodule Manfrod.Mcp do
   All connections for a single provider in a given status (default
   `"connected"`). Unlike `list_all_connections_with_provider/0`, this
   doesn't resolve provider info — callers who already know the provider
-  (e.g. a per-user cron-skill declaring `requires_mcp: "firmowid"`) just
+  (e.g. a per-user cron-skill declaring `requires_mcp: "<provider>"`) just
   need the list of user ids/tokens to fan out over.
   """
   def list_connections_for_provider(provider_id, status \\ "connected") do

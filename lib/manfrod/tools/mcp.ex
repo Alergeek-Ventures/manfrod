@@ -1,7 +1,7 @@
 defmodule Manfrod.Tools.Mcp do
   @moduledoc """
-  Exposes each user's connected remote MCP servers (Granola, Firmowid, ...) as
-  agent tools, namespaced by provider (`granola__list_notes`, ...).
+  Exposes each user's connected remote MCP servers as agent tools,
+  namespaced by provider (`<provider>__<tool_name>`).
 
   Connections are per-user (`Manfrod.Mcp`) — a tool only appears for the
   user who actually connected that provider. If a provider is unreachable
