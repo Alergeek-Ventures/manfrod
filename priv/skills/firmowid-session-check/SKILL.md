@@ -17,4 +17,4 @@ report about the check you just ran.
 2. If there's no active session, reply with exactly `EMPTY`.
 3. If there is an active session, compute how long it's been running (now - start_datetime).
 4. If it's been running 60 minutes or less, reply `EMPTY` (still plausibly a real, ongoing work session).
-5. If it's been running more than 60 minutes, write the user a DM **in Polish** (the user communicates in Polish): mention since when the session has been running, that it looks like it might have been forgotten, and offer to end it (`stop_current_session`) and/or edit it (`edit_session`) to the correct end time if they tell you when they actually stopped working.
+5. If it's been running more than 60 minutes, write the user a DM: mention since when the session has been running, that it looks like it might have been forgotten, and offer to end it (`stop_current_session`) and/or edit it (`edit_session`) to the correct end time if they tell you when they actually stopped working. Write it in whatever language this user's own notes/context are in — same as any normal DM to them.
