@@ -34,7 +34,7 @@ defmodule Manfrod.Memory.Classifier do
 
   require Logger
 
-  alias Manfrod.{Accounts, Events, Facts, LLM, Memory, Voyage}
+  alias Manfrod.{Accounts, Events, Facts, LLM, Mcp, Memory, Proactive, Voyage}
   alias Manfrod.Memory.{Access, ChannelDetector, PendingConfirmations, PendingOps}
   alias Manfrod.Slack.API
 
@@ -281,6 +281,8 @@ defmodule Manfrod.Memory.Classifier do
                   lang(result)
                 )
 
+                maybe_offer_firmowid_leave_request(user_id, start_date, end_date)
+
               {:error, reason} ->
                 Logger.error("Classifier create_absence node error: #{inspect(reason)}")
             end
@@ -483,6 +485,59 @@ defmodule Manfrod.Memory.Classifier do
 
       {:error, _reason} ->
         :ok
+    end
+  end
+
+  # Independent of the access-level escalation above (and fires regardless
+  # of channel type — this is a personal offer, not a client-visibility
+  # decision): if this user has Firmowid connected, proactively DM them
+  # asking whether to also submit this absence as a Firmowid leave request.
+  # Guarded by the same `already_recorded_absence?/3` check the caller
+  # already did, so this only fires once per newly-detected absence.
+  defp maybe_offer_firmowid_leave_request(user_id, start_date, end_date) do
+    case Mcp.get_connection(user_id, "firmowid") do
+      nil ->
+        :ok
+
+      %{status: "disconnected"} ->
+        :ok
+
+      connection ->
+        case Mcp.ensure_valid_token(connection) do
+          {:ok, _access_token} ->
+            send_firmowid_leave_request_offer(user_id, start_date, end_date)
+
+          {:error, _reason} ->
+            :ok
+        end
+    end
+  end
+
+  defp send_firmowid_leave_request_offer(user_id, start_date, end_date) do
+    prompt = """
+    [Proaktywna propozycja: wniosek w Firmowidzie]
+    User właśnie zgłosił nieobecność #{start_date}..#{end_date}. Ma podłączony
+    Firmowid (masz dostęp do jego narzędzi firmowid__*). Zapytaj krótko, czy
+    chce, żebyś od razu wysłał to jako wniosek w Firmowidzie.
+
+    Jeśli tak: zapytaj, co to za rodzaj nieobecności — niedyspozycja, wakacje/
+    odpoczynek, czy coś innego — i na tej podstawie wywołaj
+    firmowid__create_leave_request z reason odpowiednio "indisposition",
+    "rest" albo "other", starts_on: "#{start_date}", ends_on: "#{end_date}".
+    Firmowid nie ma osobnego powodu "vacation"/"sick" — "rest" to najbliższy
+    odpowiednik urlopu wypoczynkowego.
+
+    Jeśli user odmówi, po prostu to zanotuj i nie naciskaj.
+    """
+
+    case Proactive.send(user_id, prompt) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Logger.debug(
+          "Classifier: failed to offer Firmowid leave request to #{user_id}: #{inspect(reason)}"
+        )
     end
   end
 
