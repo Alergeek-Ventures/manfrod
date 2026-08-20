@@ -8,8 +8,13 @@ requires_mcp: firmowid
 
 # Firmowid session check (per-user cron skill)
 
+You're running on a schedule, not replying to a message — there's no user
+watching this turn yet. Your final reply becomes a new DM thread the user
+will actually read, so write it as a normal message to them, not a status
+report about the check you just ran.
+
 1. Call `firmowid__get_current_session`.
 2. If there's no active session, reply with exactly `EMPTY`.
 3. If there is an active session, compute how long it's been running (now - start_datetime).
 4. If it's been running 60 minutes or less, reply `EMPTY` (still plausibly a real, ongoing work session).
-5. If it's been running more than 60 minutes, DM the user: mention since when the session has been running, that it looks like it might have been forgotten, and offer to end it (`stop_current_session`) and/or edit it (`edit_session`) to the correct end time if they tell you when they actually stopped working.
+5. If it's been running more than 60 minutes, write the user a DM **in Polish** (the user communicates in Polish): mention since when the session has been running, that it looks like it might have been forgotten, and offer to end it (`stop_current_session`) and/or edit it (`edit_session`) to the correct end time if they tell you when they actually stopped working.

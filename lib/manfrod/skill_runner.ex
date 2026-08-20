@@ -15,7 +15,7 @@ defmodule Manfrod.SkillRunner do
 
   alias Manfrod.Accounts
   alias Manfrod.Accounts.User
-  alias Manfrod.Slack.{API, Mrkdwn}
+  alias Manfrod.Slack.{API, ActivityHandler, Mrkdwn, ThreadTitle}
   alias Manfrod.{LLM, Repo, Skills, Tools}
 
   @timezone "Europe/Warsaw"
@@ -52,7 +52,7 @@ defmodule Manfrod.SkillRunner do
 
       case run_loop(ctx, messages, 0) do
         {:ok, final_text} ->
-          post_final_text(target.post_channel, final_text)
+          post_final_text(target, final_text)
           Logger.info("SkillRunner: '#{skill_name}' completed")
           :ok
 
@@ -69,14 +69,14 @@ defmodule Manfrod.SkillRunner do
 
   defp resolve_target(skill, nil) do
     with {:ok, channel} <- require_channel(skill) do
-      {:ok, %{ctx_user_id: system_user_id(), post_channel: channel}}
+      {:ok, %{ctx_user_id: system_user_id(), post_channel: channel, kind: :channel}}
     end
   end
 
   defp resolve_target(_skill, user_id) do
     case Accounts.get_user!(user_id) do
       %User{slack_dm_channel_id: dm_channel} when is_binary(dm_channel) and dm_channel != "" ->
-        {:ok, %{ctx_user_id: user_id, post_channel: dm_channel}}
+        {:ok, %{ctx_user_id: user_id, post_channel: dm_channel, kind: :user}}
 
       _ ->
         {:error, {:no_dm_channel, user_id}}
@@ -172,19 +172,47 @@ defmodule Manfrod.SkillRunner do
   @spec empty_reply?(String.t()) :: boolean()
   def empty_reply?(text), do: Regex.match?(~r/\bEMPTY\b/, text)
 
-  defp post_final_text(_channel, ""), do: :ok
+  defp post_final_text(_target, ""), do: :ok
 
-  defp post_final_text(channel, text) do
+  defp post_final_text(target, text) do
     if empty_reply?(text) do
       :ok
     else
-      do_post_final_text(channel, text)
+      do_post_final_text(target, text)
     end
   end
 
-  defp do_post_final_text(channel, text) do
+  # scope: "channel" — a single flat message into the fixed channel, as
+  # always.
+  defp do_post_final_text(%{kind: :channel, post_channel: channel}, text) do
     bot_token = Application.get_env(:manfrod, :slack_bot_token)
     API.post("chat.postMessage", bot_token, %{channel: channel, text: Mrkdwn.from_markdown(text)})
+  end
+
+  # scope: "user" — must look like any other proactive DM (a titled thread,
+  # not a bare top-level message), so this mirrors Manfrod.Proactive +
+  # Manfrod.Slack.ActivityHandler's own delivery instead of a flat post:
+  # open a thread (posts a "Thinking..." placeholder as its root), reply
+  # into it with the real content, then rewrite that placeholder and set
+  # the thread's title from the same generated title.
+  defp do_post_final_text(%{kind: :user, post_channel: channel}, text) do
+    bot_token = Application.get_env(:manfrod, :slack_bot_token)
+
+    case ActivityHandler.start_thread(channel) do
+      {:ok, thread_ts} ->
+        API.post("chat.postMessage", bot_token, %{
+          channel: channel,
+          thread_ts: thread_ts,
+          text: Mrkdwn.from_markdown(text)
+        })
+
+        title = ThreadTitle.generate(text)
+        API.post("chat.update", bot_token, %{channel: channel, ts: thread_ts, text: title})
+        API.set_title(bot_token, channel, thread_ts, title)
+
+      {:error, reason} ->
+        Logger.error("SkillRunner: failed to start DM thread in #{channel}: #{inspect(reason)}")
+    end
   end
 
   # Lazily creates a shared system identity for every cron-skill run, same
