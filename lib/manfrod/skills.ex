@@ -17,16 +17,27 @@ defmodule Manfrod.Skills do
   callers like `Manfrod.Memory.Classifier` that always use their prompt in
   full.
 
-  A skill's frontmatter may also declare a `cron` field (a standard 5-field
-  cron expression) alongside `name`/`description`. That's the signal that the
-  skill isn't just reactive material for `use_skill` — it's a recurring job:
+  A skill's frontmatter may also declare a `cron` field alongside
+  `name`/`description`. That's the signal that the skill isn't just reactive
+  material for `use_skill` — it's a recurring job:
   `Manfrod.Workers.SkillSchedulerWorker` picks it up (see `list_cron_skills/0`)
   and `Manfrod.SkillRunner` runs it proactively on schedule — the skill's
   body becomes the instructions for a full autonomous agent turn (same
-  tools as the live agent), exactly as if a user had typed them. A cron
-  skill also needs a `channel` field (Slack channel ID) — that's where the
-  agent's tool calls and final reply land, since there's no live message to
-  reply to.
+  tools as the live agent), exactly as if a user had typed them.
+
+  `cron` is either a standard 5-field cron expression, or a
+  `RAND(HH:MM-HH:MM) <dom> <month> <dow>` fusion — the first token picks one
+  random instant inside that time window (frozen once scheduled, not
+  re-rolled) instead of a fixed minute/hour, while the remaining 3 fields
+  are a standard cron day-of-month/month/day-of-week selector. See
+  `Manfrod.Workers.SkillSchedulerWorker.parse_cron/1` for parsing.
+
+  By default (`scope` absent or `"channel"`) a cron skill is a single global
+  run as a synthetic system user, posting to a fixed `channel` (Slack
+  channel ID). With `scope: "user"` + `requires_mcp: "<provider id>"`, it
+  instead runs once per user connected to that MCP provider
+  (`Manfrod.Mcp.list_connections_for_provider/1`), scoped to that real
+  user's own tools/context, posting to their Slack DM instead of a channel.
   """
 
   @doc """
@@ -109,6 +120,8 @@ defmodule Manfrod.Skills do
          description: frontmatter["description"] || "",
          cron: frontmatter["cron"],
          channel: frontmatter["channel"],
+         scope: frontmatter["scope"] || "channel",
+         requires_mcp: frontmatter["requires_mcp"],
          body: body
        }}
     else
@@ -152,7 +165,9 @@ defmodule Manfrod.Skills do
           name: frontmatter["name"] || entry,
           description: frontmatter["description"] || "",
           cron: frontmatter["cron"],
-          channel: frontmatter["channel"]
+          channel: frontmatter["channel"],
+          scope: frontmatter["scope"] || "channel",
+          requires_mcp: frontmatter["requires_mcp"]
         }
       ]
     else

@@ -155,6 +155,17 @@ defmodule Manfrod.Mcp do
   end
 
   @doc """
+  All connections for a single provider in a given status (default
+  `"connected"`). Unlike `list_all_connections_with_provider/0`, this
+  doesn't resolve provider info — callers who already know the provider
+  (e.g. a per-user cron-skill declaring `requires_mcp: "firmowid"`) just
+  need the list of user ids/tokens to fan out over.
+  """
+  def list_connections_for_provider(provider_id, status \\ "connected") do
+    Repo.all(from(c in Connection, where: c.provider == ^provider_id and c.status == ^status))
+  end
+
+  @doc """
   Every non-disconnected connection paired with its resolved provider info
   (built-in or the owner's custom provider). Skips connections whose
   custom provider was deleted out from under them. Used by the
