@@ -865,26 +865,7 @@ defmodule Manfrod.Agent.Server do
   defp truncate_result(result), do: result
 
   defp get_note_context(user_id, readable_levels, query) do
-    soul = Memory.get_soul(user_id)
-
-    # Get notes linked to soul (workspace notes)
-    linked_to_soul =
-      if soul do
-        Memory.get_node_links(user_id, soul.id)
-      else
-        []
-      end
-
-    # Semantic search for relevant notes based on user query
-    {:ok, relevant} = Memory.search(user_id, readable_levels, query, limit: 10)
-
-    # Combine soul + linked + relevant, deduplicated
-    nodes =
-      ([soul] ++ linked_to_soul ++ relevant)
-      |> Enum.reject(&is_nil/1)
-      |> Enum.uniq_by(& &1.id)
-
-    Memory.build_context(nodes)
+    Memory.get_note_context(user_id, readable_levels, query)
   end
 
   # Identify the inbound Slack message for memory flagging. Only Slack messages

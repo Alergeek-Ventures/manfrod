@@ -16,7 +16,7 @@ defmodule Manfrod.SkillRunner do
   alias Manfrod.Accounts
   alias Manfrod.Accounts.User
   alias Manfrod.Slack.{API, ActivityHandler, Mrkdwn, ThreadTitle}
-  alias Manfrod.{LLM, Repo, Skills, Tools}
+  alias Manfrod.{LLM, Memory, Repo, Skills, Tools}
 
   @timezone "Europe/Warsaw"
   @max_iterations 25
@@ -47,7 +47,7 @@ defmodule Manfrod.SkillRunner do
 
       messages = [
         ReqLLM.Context.system(system_prompt(ctx)),
-        ReqLLM.Context.user(skill.body)
+        ReqLLM.Context.user(user_turn_content(target, ctx, skill.body))
       ]
 
       case run_loop(ctx, messages, 0) do
@@ -82,6 +82,23 @@ defmodule Manfrod.SkillRunner do
         {:error, {:no_dm_channel, user_id}}
     end
   end
+
+  # scope: "user" runs get the same "[Note context]" prefix a normal DM
+  # turn injects ahead of every inbound message (Manfrod.Agent.Server) —
+  # among other things, this is what lets the model naturally reply in
+  # whatever language this specific user's own notes are written in,
+  # instead of a hardcoded language instruction in the skill file. A
+  # `scope: "channel"` run has no real per-user notes to draw on (it's the
+  # synthetic system user), so it skips this and just uses the skill body
+  # as-is.
+  defp user_turn_content(%{kind: :user} = target, ctx, body) do
+    case Memory.get_note_context(target.ctx_user_id, ctx.readable_levels, body) do
+      "" -> body
+      note_context -> "[Note context]\n#{note_context}\n\n[Instructions]\n#{body}"
+    end
+  end
+
+  defp user_turn_content(%{kind: :channel}, _ctx, body), do: body
 
   defp require_channel(%{channel: channel}) when is_binary(channel) and channel != "" do
     {:ok, channel}

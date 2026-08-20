@@ -1582,4 +1582,35 @@ defmodule Manfrod.Memory do
     """
     |> String.trim()
   end
+
+  @doc """
+  The "[Note context]" block a live chat turn injects ahead of every inbound
+  message: the user's soul node, notes linked to it, plus a semantic search
+  over `query` — deduplicated and formatted via `build_context/1`.
+
+  Used by `Manfrod.Agent.Server` for every inbound message, and by
+  `Manfrod.SkillRunner` for `scope: user` cron-skill runs, so a proactive
+  per-user run sees the same per-user context a normal DM turn would —
+  including whatever language that user's own notes happen to be written
+  in, without a hardcoded language instruction.
+  """
+  def get_note_context(user_id, readable_levels, query) do
+    soul = get_soul(user_id)
+
+    linked_to_soul =
+      if soul do
+        get_node_links(user_id, soul.id)
+      else
+        []
+      end
+
+    {:ok, relevant} = search(user_id, readable_levels, query, limit: 10)
+
+    nodes =
+      ([soul] ++ linked_to_soul ++ relevant)
+      |> Enum.reject(&is_nil/1)
+      |> Enum.uniq_by(& &1.id)
+
+    build_context(nodes)
+  end
 end
