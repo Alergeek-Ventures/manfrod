@@ -38,7 +38,15 @@ defmodule Manfrod.Workers.SkillSchedulerWorker do
 
   @schedule_window_hours 12
   @timezone "Europe/Warsaw"
-  @unique_states [:available, :scheduled, :executing, :retryable, :completed, :cancelled, :discarded]
+  @unique_states [
+    :available,
+    :scheduled,
+    :executing,
+    :retryable,
+    :completed,
+    :cancelled,
+    :discarded
+  ]
 
   @impl Oban.Worker
   def perform(%Oban.Job{}) do
@@ -47,7 +55,8 @@ defmodule Manfrod.Workers.SkillSchedulerWorker do
     now = DateTime.utc_now()
     cron_skills = Skills.list_cron_skills()
 
-    scheduled_count = Enum.reduce(cron_skills, 0, fn skill, count -> count + schedule(skill, now) end)
+    scheduled_count =
+      Enum.reduce(cron_skills, 0, fn skill, count -> count + schedule(skill, now) end)
 
     Logger.info("SkillSchedulerWorker: scheduled #{scheduled_count} new trigger job(s)")
     :ok
@@ -102,8 +111,12 @@ defmodule Manfrod.Workers.SkillSchedulerWorker do
 
   defp schedule(skill, now) do
     case parse_cron(skill.cron) do
-      {:standard, _} -> schedule_standard(skill, now)
-      {:random, start_t, end_t, date_conditions} -> schedule_random(skill, start_t, end_t, date_conditions, now)
+      {:standard, _} ->
+        schedule_standard(skill, now)
+
+      {:random, start_t, end_t, date_conditions} ->
+        schedule_random(skill, start_t, end_t, date_conditions, now)
+
       :error ->
         Logger.error("SkillSchedulerWorker: invalid cron expression for #{skill.name}")
         0
