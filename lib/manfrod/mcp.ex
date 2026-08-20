@@ -1,6 +1,6 @@
 defmodule Manfrod.Mcp do
   @moduledoc """
-  User-owned connections to remote MCP servers (Linear, Granola, or any
+  User-owned connections to remote MCP servers (Granola, Firmowid, or any
   custom server a user adds by URL).
 
   `builtin_providers/0` lists the app's known providers; `providers_for_user/1`
@@ -25,15 +25,6 @@ defmodule Manfrod.Mcp do
   """
   def builtin_providers do
     [
-      %{
-        id: "linear",
-        name: "Linear",
-        mcp_url: "https://mcp.linear.app/mcp",
-        mock: false,
-        logo_url: nil,
-        custom: false,
-        scope: nil
-      },
       %{
         id: "granola",
         name: "Granola",
