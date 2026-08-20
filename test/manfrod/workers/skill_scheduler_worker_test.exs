@@ -38,4 +38,33 @@ defmodule Manfrod.Workers.SkillSchedulerWorkerTest do
       assert SkillSchedulerWorker.next_occurrences(skill, now) == []
     end
   end
+
+  describe "parse_cron/1" do
+    test "parses a standard 5-field cron as :standard" do
+      assert {:standard, %Crontab.CronExpression{}} =
+               SkillSchedulerWorker.parse_cron("0 18 * * 0-4")
+    end
+
+    test "returns :error for an invalid standard cron" do
+      assert SkillSchedulerWorker.parse_cron("not a cron") == :error
+    end
+
+    test "parses a RAND(...) fusion into start/end times and date conditions" do
+      assert {:random, ~T[19:00:00], ~T[20:00:00], date_conditions} =
+               SkillSchedulerWorker.parse_cron("RAND(19:00-20:00) * * 1-5")
+
+      # Mon (2026-08-24) matches the 1-5 weekday selector...
+      assert Crontab.DateChecker.matches_date?(date_conditions, ~N[2026-08-24 00:00:00])
+      # ...Sunday doesn't.
+      refute Crontab.DateChecker.matches_date?(date_conditions, ~N[2026-08-23 00:00:00])
+    end
+
+    test "returns :error for a malformed RAND(...) time range" do
+      assert SkillSchedulerWorker.parse_cron("RAND(25:00-20:00) * * 1-5") == :error
+    end
+
+    test "returns :error when the RAND(...) day/month/weekday fields are invalid" do
+      assert SkillSchedulerWorker.parse_cron("RAND(19:00-20:00) not valid fields") == :error
+    end
+  end
 end

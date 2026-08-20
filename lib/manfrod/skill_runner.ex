@@ -7,12 +7,13 @@ defmodule Manfrod.SkillRunner do
   new `priv/skills/<name>/SKILL.md` with `cron` and `channel` fields.
 
   Scheduled by `Manfrod.Workers.SkillSchedulerWorker`, executed via
-  `Manfrod.Workers.SkillTriggerWorker`, which calls `run/1` for every
+  `Manfrod.Workers.SkillTriggerWorker`, which calls `run/2` for every
   cron-skill regardless of name.
   """
 
   require Logger
 
+  alias Manfrod.Accounts
   alias Manfrod.Accounts.User
   alias Manfrod.Slack.{API, Mrkdwn}
   alias Manfrod.{LLM, Repo, Skills, Tools}
@@ -23,19 +24,25 @@ defmodule Manfrod.SkillRunner do
   @doc """
   Run the named cron-skill: build a fresh agent turn from its SKILL.md body
   and execute it to completion, posting tool-driven side effects and the
-  final reply to the skill's configured channel.
+  final reply to its target.
+
+  By default (no `:user_id` opt — `scope: "channel"` skills) the run acts
+  as a synthetic system user and posts to the skill's configured `channel`.
+  With `:user_id` (`scope: "user"` skills, one call per connected user) the
+  run acts as that real user instead — giving it access to that user's own
+  tools, e.g. their connected MCP providers — and posts to their Slack DM.
   """
-  @spec run(String.t()) :: :ok | {:error, term()}
-  def run(skill_name) do
+  @spec run(String.t(), keyword()) :: :ok | {:error, term()}
+  def run(skill_name, opts \\ []) do
     with {:ok, skill} <- Skills.get(skill_name),
-         {:ok, channel} <- require_channel(skill) do
+         {:ok, target} <- resolve_target(skill, opts[:user_id]) do
       ctx = %{
-        user_id: system_user_id(),
+        user_id: target.ctx_user_id,
         readable_levels: ["internal"],
         write_access: ["internal"],
-        # No thread: a skill run posts into the channel, so there is nothing
-        # for thread-scoped tools (e.g. leave_thread) to act on.
-        msg_ctx: %{channel: channel, ts: nil, thread_ts: nil, slack_user_id: nil}
+        # No thread: a skill run posts directly (channel or DM), so there is
+        # nothing for thread-scoped tools (e.g. leave_thread) to act on.
+        msg_ctx: %{channel: target.post_channel, ts: nil, thread_ts: nil, slack_user_id: nil}
       }
 
       messages = [
@@ -45,7 +52,7 @@ defmodule Manfrod.SkillRunner do
 
       case run_loop(ctx, messages, 0) do
         {:ok, final_text} ->
-          post_final_text(channel, final_text)
+          post_final_text(target.post_channel, final_text)
           Logger.info("SkillRunner: '#{skill_name}' completed")
           :ok
 
@@ -57,6 +64,22 @@ defmodule Manfrod.SkillRunner do
       {:error, reason} ->
         Logger.error("SkillRunner: cannot run '#{skill_name}': #{inspect(reason)}")
         {:error, reason}
+    end
+  end
+
+  defp resolve_target(skill, nil) do
+    with {:ok, channel} <- require_channel(skill) do
+      {:ok, %{ctx_user_id: system_user_id(), post_channel: channel}}
+    end
+  end
+
+  defp resolve_target(_skill, user_id) do
+    case Accounts.get_user!(user_id) do
+      %User{slack_dm_channel_id: dm_channel} when is_binary(dm_channel) and dm_channel != "" ->
+        {:ok, %{ctx_user_id: user_id, post_channel: dm_channel}}
+
+      _ ->
+        {:error, {:no_dm_channel, user_id}}
     end
   end
 
