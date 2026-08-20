@@ -189,7 +189,14 @@ defmodule Manfrod.Workers.SkillSchedulerWorker do
     args = if user_id, do: Map.put(args, :user_id, user_id), else: args
     keys = if user_id, do: [:skill_name, :user_id, :date], else: [:skill_name, :date]
 
-    insert_trigger(skill.name, args, instant, unique: [keys: keys, states: @unique_states])
+    # `period:` must be set — Oban's `unique` defaults to a 60-second window
+    # when it's omitted, which is silent and easy to miss. Without this,
+    # every hourly scheduler tick past that window would see the earlier
+    # job as no longer "unique enough" to block on and re-roll + re-insert
+    # a fresh random time for the same day, firing the DM repeatedly.
+    insert_trigger(skill.name, args, instant,
+      unique: [keys: keys, states: @unique_states, period: :infinity]
+    )
   end
 
   defp random_instant(date, start_t, end_t) do
