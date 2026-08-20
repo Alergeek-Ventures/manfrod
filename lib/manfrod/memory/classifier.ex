@@ -515,19 +515,22 @@ defmodule Manfrod.Memory.Classifier do
 
   defp send_firmowid_leave_request_offer(user_id, start_date, end_date) do
     prompt = """
-    [Proaktywna propozycja: wniosek w Firmowidzie]
-    User właśnie zgłosił nieobecność #{start_date}..#{end_date}. Ma podłączony
-    Firmowid (masz dostęp do jego narzędzi firmowid__*). Zapytaj krótko, czy
-    chce, żebyś od razu wysłał to jako wniosek w Firmowidzie.
+    [Proactive offer: Firmowid leave request]
+    The user just reported an absence #{start_date}..#{end_date}. They have
+    Firmowid connected (you have access to their firmowid__* tools). Ask them
+    briefly whether they'd like you to submit this as a leave request in
+    Firmowid right away. Write the question in whatever language they used
+    when they told you about the absence — don't default to Polish or
+    English, match theirs.
 
-    Jeśli tak: zapytaj, co to za rodzaj nieobecności — niedyspozycja, wakacje/
-    odpoczynek, czy coś innego — i na tej podstawie wywołaj
-    firmowid__create_leave_request z reason odpowiednio "indisposition",
-    "rest" albo "other", starts_on: "#{start_date}", ends_on: "#{end_date}".
-    Firmowid nie ma osobnego powodu "vacation"/"sick" — "rest" to najbliższy
-    odpowiednik urlopu wypoczynkowego.
+    If they say yes: ask which category fits — indisposition, vacation/rest,
+    or something else — then call firmowid__create_leave_request with reason
+    set to "indisposition", "rest", or "other" respectively, starts_on:
+    "#{start_date}", ends_on: "#{end_date}". Firmowid has no dedicated
+    "vacation"/"sick" reason — "rest" is the closest match for a standard
+    vacation.
 
-    Jeśli user odmówi, po prostu to zanotuj i nie naciskaj.
+    If they decline, just note that and don't push.
     """
 
     case Proactive.send(user_id, prompt) do
