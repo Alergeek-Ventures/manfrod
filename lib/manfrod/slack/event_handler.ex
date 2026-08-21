@@ -19,6 +19,8 @@ defmodule Manfrod.Slack.EventHandler do
 
   alias Manfrod.Accounts
   alias Manfrod.Agent
+  alias Manfrod.Linear
+  alias Manfrod.Memory.Access
   alias Manfrod.Memory.{Admin, Buffer, ChannelDetector, ChannelMapping, Classifier, Project}
   alias Manfrod.Repo
   alias Manfrod.Slack.API
@@ -206,6 +208,45 @@ defmodule Manfrod.Slack.EventHandler do
     :ok
   end
 
+  def handle_event("slash_commands", %{"command" => "/linear-status"} = payload, bot) do
+    channel_id = payload["channel_id"]
+
+    case Access.get_active_mapping(channel_id) do
+      %{project: %Project{} = project} ->
+        Linear.Status.post_status(bot.token, channel_id, payload["user_id"], project)
+
+      _ ->
+        API.post("chat.postEphemeral", bot.token, %{
+          channel: channel_id,
+          user: payload["user_id"],
+          text: "`/linear-status` działa tylko na kanałach zmapowanych do projektu."
+        })
+    end
+
+    :ok
+  end
+
+  # view_submission for the /linear-status "Connect" modal — see
+  # Manfrod.Linear.Status for why this always closes the modal rather than
+  # returning a synchronous `response_action: "errors"`.
+  def handle_event(
+        "interactive",
+        %{"type" => "view_submission", "view" => %{"callback_id" => "linear_connect_modal"}} =
+          payload,
+        bot
+      ) do
+    project_id = get_in(payload, ["view", "private_metadata"])
+
+    api_key =
+      get_in(payload, ["view", "state", "values", "api_key_block", "api_key_input", "value"])
+
+    slack_user_id = get_in(payload, ["user", "id"])
+
+    Linear.Status.handle_connect_submission(bot.token, project_id, slack_user_id, api_key)
+
+    :ok
+  end
+
   # "Wyrzuć Manfroda" — a message shortcut rather than a slash command,
   # because Slack refuses to run app slash commands inside threads at all
   # (and their payload carries no thread_ts). A message action is the only
@@ -232,30 +273,47 @@ defmodule Manfrod.Slack.EventHandler do
     action = List.first(payload["actions"] || []) || %{}
     channel_id = get_in(payload, ["channel", "id"])
     bot_msg_ts = get_in(payload, ["message", "ts"])
+    trigger_id = payload["trigger_id"]
+    slack_user_id = get_in(payload, ["user", "id"])
 
-    if channel_id && bot_msg_ts do
-      case action["action_id"] do
-        "manfrod_feedback" ->
-          Feedback.record(payload, action, bot.token)
+    case action["action_id"] do
+      "linear_connect" ->
+        Linear.Status.open_connect_modal(bot.token, trigger_id, action["value"])
 
-        "manfrod_feedback_remove" ->
-          Feedback.remove(payload, bot.token)
+      "linear_disconnect" ->
+        Linear.disconnect(action["value"])
 
-        "memory_escalation_save" ->
-          levels = selected_escalation_levels(payload, bot_msg_ts)
-          Classifier.resolve_escalation(:save, levels, channel_id, bot_msg_ts, bot.token)
+        API.post("chat.postEphemeral", bot.token, %{
+          channel: channel_id,
+          user: slack_user_id,
+          text: "🔴 Linear disconnected for this project."
+        })
 
-        "memory_escalation_cancel" ->
-          Classifier.resolve_escalation(:cancel, [], channel_id, bot_msg_ts, bot.token)
+      other_or_nil ->
+        if channel_id && bot_msg_ts do
+          case other_or_nil do
+            "manfrod_feedback" ->
+              Feedback.record(payload, action, bot.token)
 
-        # Ticking a checkbox is not a decision — the prompt stays open until
-        # Save or Cancel. Slack still delivers it, so swallow it quietly.
-        "memory_escalation_levels" ->
-          :ok
+            "manfrod_feedback_remove" ->
+              Feedback.remove(payload, bot.token)
 
-        other ->
-          Logger.debug("Slack EventHandler ignoring interactive action: #{inspect(other)}")
-      end
+            "memory_escalation_save" ->
+              levels = selected_escalation_levels(payload, bot_msg_ts)
+              Classifier.resolve_escalation(:save, levels, channel_id, bot_msg_ts, bot.token)
+
+            "memory_escalation_cancel" ->
+              Classifier.resolve_escalation(:cancel, [], channel_id, bot_msg_ts, bot.token)
+
+            # Ticking a checkbox is not a decision — the prompt stays open until
+            # Save or Cancel. Slack still delivers it, so swallow it quietly.
+            "memory_escalation_levels" ->
+              :ok
+
+            other ->
+              Logger.debug("Slack EventHandler ignoring interactive action: #{inspect(other)}")
+          end
+        end
     end
 
     :ok
@@ -864,7 +922,7 @@ defmodule Manfrod.Slack.EventHandler do
         :error -> nil
       end
 
-    case open_dm_channel(bot_token, target_id) do
+    case API.open_dm(bot_token, target_id) do
       {:ok, dm_channel_id} ->
         case Accounts.find_or_create_by_slack_id(target_id, dm_channel_id, name, email) do
           {:ok, user} ->
@@ -876,14 +934,6 @@ defmodule Manfrod.Slack.EventHandler do
 
       {:error, reason} ->
         "Nie udało się otworzyć DM z <@#{target_id}> (#{inspect(reason)}) — nie dodałem."
-    end
-  end
-
-  defp open_dm_channel(bot_token, target_id) do
-    case API.post("conversations.open", bot_token, %{users: target_id}) do
-      {:ok, %{"channel" => %{"id" => dm_channel_id}}} -> {:ok, dm_channel_id}
-      {:ok, other} -> {:error, other}
-      {:error, reason} -> {:error, reason}
     end
   end
 

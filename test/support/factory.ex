@@ -6,7 +6,7 @@ defmodule Manfrod.Factory do
   alias Manfrod.Desks.{Desk, DeskReservation}
   alias Manfrod.Repo
   alias Manfrod.Accounts.User
-  alias Manfrod.Memory.{Conversation, Message, Node, Link}
+  alias Manfrod.Memory.{ChannelMapping, Conversation, Message, Node, Link, Project}
 
   def fake_embedding(seed \\ "test") do
     :rand.seed(:exsss, {:erlang.phash2(seed), 0, 0})
@@ -125,6 +125,32 @@ defmodule Manfrod.Factory do
   def insert_desk!(attrs \\ %{}) do
     %Desk{}
     |> Desk.changeset(desk_attrs(attrs))
+    |> Repo.insert!()
+  end
+
+  # Projects / channel mappings
+
+  def insert_project!(attrs \\ %{}) do
+    defaults = %{
+      slug: "project-#{System.unique_integer([:positive])}",
+      name: "Test Project #{System.unique_integer([:positive])}"
+    }
+
+    %Project{}
+    |> Project.changeset(Map.merge(defaults, attrs))
+    |> Repo.insert!()
+  end
+
+  def insert_channel_mapping!(attrs \\ %{}) do
+    defaults = %{
+      slack_channel_id: "C#{System.unique_integer([:positive])}",
+      slack_channel_name: "test-channel",
+      source: "slack_command",
+      status: "active"
+    }
+
+    %ChannelMapping{}
+    |> ChannelMapping.changeset(Map.merge(defaults, attrs))
     |> Repo.insert!()
   end
 

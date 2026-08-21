@@ -50,6 +50,8 @@ defmodule Manfrod.MixProject do
       {:websockex, "~> 0.5.1"},
       {:assent, "~> 0.3.1"},
       {:image, "~> 0.72"},
+      {:cloak, "~> 1.1"},
+      {:cloak_ecto, "~> 1.3"},
       {:mox, "~> 1.0", only: :test}
     ]
   end

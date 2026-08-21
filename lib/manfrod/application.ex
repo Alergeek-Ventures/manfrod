@@ -8,6 +8,7 @@ defmodule Manfrod.Application do
     children =
       [
         Manfrod.Repo,
+        Manfrod.Vault,
         {Phoenix.PubSub, name: Manfrod.PubSub},
         {Oban, Application.fetch_env!(:manfrod, Oban)},
         # Event handlers (subscribe to global PubSub)

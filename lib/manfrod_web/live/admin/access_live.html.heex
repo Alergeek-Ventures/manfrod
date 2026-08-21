@@ -86,7 +86,83 @@
     >
       Reminders (<%= length(@reminder_rows) %>)
     </button>
+    <button
+      phx-click="switch_tab"
+      phx-value-tab="linear"
+      class={[
+        "px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors",
+        if(@tab == "linear",
+          do: "border-indigo-500 text-indigo-400",
+          else: "border-transparent text-gray-400 hover:text-gray-200"
+        )
+      ]}
+    >
+      Linear (<%= length(@linear_connections) %>)
+    </button>
   </div>
+
+  <%!-- Linear tab --%>
+  <%= if @tab == "linear" do %>
+    <%= if @linear_connections == [] do %>
+      <p class="text-gray-500 text-sm">
+        No Linear connections yet. Connect one via <code>/linear-status</code> in a project channel.
+      </p>
+    <% else %>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm text-left">
+          <thead>
+            <tr class="border-b border-gray-700 text-gray-400 text-xs uppercase tracking-wider">
+              <th class="pb-3 pr-4">Project</th>
+              <th class="pb-3 pr-4">Team</th>
+              <th class="pb-3 pr-4">API Key</th>
+              <th class="pb-3 pr-4">Status</th>
+              <th class="pb-3 pr-4">Connected</th>
+              <th class="pb-3"></th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-800">
+            <%= for conn <- @linear_connections do %>
+              <tr class="text-gray-300">
+                <td class="py-3 pr-4 text-xs">
+                  <%= conn.project_slug || "—" %>
+                </td>
+                <td class="py-3 pr-4 text-xs">
+                  <%= conn.linear_team_name || "—" %>
+                </td>
+                <td class="py-3 pr-4 font-mono text-xs text-gray-500">••••••••</td>
+                <td class="py-3 pr-4">
+                  <span class={[
+                    "px-2 py-0.5 rounded text-xs font-medium",
+                    if(conn.status == "connected",
+                      do: "bg-green-900/50 text-green-400",
+                      else: "bg-gray-800 text-gray-500"
+                    )
+                  ]}>
+                    <%= conn.status %>
+                  </span>
+                </td>
+                <td class="py-3 pr-4 text-xs text-gray-500">
+                  <%= conn.inserted_at %>
+                </td>
+                <td class="py-3 flex justify-end">
+                  <%= if conn.status == "connected" do %>
+                    <button
+                      phx-click="revoke_linear"
+                      phx-value-id={conn.id}
+                      data-confirm="Revoke this Linear connection?"
+                      class="text-xs text-red-500 hover:text-red-300"
+                    >
+                      Revoke
+                    </button>
+                  <% end %>
+                </td>
+              </tr>
+            <% end %>
+          </tbody>
+        </table>
+      </div>
+    <% end %>
+  <% end %>
 
   <%!-- Channels tab --%>
   <%= if @tab == "channels" do %>

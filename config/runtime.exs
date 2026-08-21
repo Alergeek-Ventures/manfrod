@@ -104,3 +104,21 @@ config :manfrod, :google_api_key, env.("GOOGLE_API_KEY", :string?, nil)
 config :manfrod,
        :holiday_calendar_id,
        env.("HOLIDAY_CALENDAR_ID", :string, "pl.polish#holiday@group.v.calendar.google.com")
+
+# Encryption at rest for project-scoped Linear API keys (Manfrod.Linear.Connection).
+# Fixed dev/test default so `mix test` / `mix phx.server` need no setup — prod
+# MUST set a real LINEAR_ENCRYPTION_KEY (32 random bytes, base64-encoded, e.g.
+# `:crypto.strong_rand_bytes(32) |> Base.encode64()`). Losing it makes every
+# stored Linear key permanently undecryptable.
+linear_encryption_key =
+  env.(
+    "LINEAR_ENCRYPTION_KEY",
+    :string,
+    "N0G8yzhz8v1uS0kDf1PBjaVAd7RITiXHhJI3q6Pn0lU="
+  )
+
+config :manfrod, Manfrod.Vault,
+  ciphers: [
+    default:
+      {Cloak.Ciphers.AES.GCM, tag: "AES.GCM.V1", key: Base.decode64!(linear_encryption_key)}
+  ]
