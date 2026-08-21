@@ -414,6 +414,20 @@ defmodule Manfrod.Slack.API do
     end
   end
 
+  @doc """
+  Opens (or resolves the existing) DM channel with a Slack user.
+
+  Returns `{:ok, dm_channel_id}` or `{:error, reason}`.
+  """
+  @spec open_dm(String.t(), String.t()) :: {:ok, String.t()} | {:error, term()}
+  def open_dm(token, slack_user_id) do
+    case post("conversations.open", token, %{users: slack_user_id}) do
+      {:ok, %{"channel" => %{"id" => dm_channel_id}}} -> {:ok, dm_channel_id}
+      {:ok, other} -> {:error, other}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
   defp parse_retry_after(nil), do: 1
   defp parse_retry_after(value) when is_binary(value), do: String.to_integer(value)
 end

@@ -5,6 +5,7 @@ defmodule ManfrodWeb.Admin.AccessLive do
 
   alias Manfrod.Accounts
   alias Manfrod.Facts
+  alias Manfrod.Linear
   alias Manfrod.Memory
   alias Manfrod.Repo
   alias Manfrod.Memory.{ChannelMapping, Fact, Project, ProjectMembership}
@@ -34,7 +35,7 @@ defmodule ManfrodWeb.Admin.AccessLive do
 
   @impl true
   def handle_params(%{"tab" => tab}, _uri, socket)
-      when tab in ~w(projects channels members vacations cron reminders) do
+      when tab in ~w(projects channels members vacations cron reminders linear) do
     {:noreply, assign(socket, tab: tab)}
   end
 
@@ -280,6 +281,17 @@ defmodule ManfrodWeb.Admin.AccessLive do
     end
   end
 
+  def handle_event("revoke_linear", %{"id" => id}, socket) do
+    case Repo.get(Linear.Connection, id) do
+      nil ->
+        {:noreply, put_flash(socket, :error, "Linear connection not found")}
+
+      conn ->
+        Linear.disconnect(conn.project_id)
+        {:noreply, socket |> load_data() |> put_flash(:info, "Linear connection revoked")}
+    end
+  end
+
   defp toggle_mapping_status(id, new_status, socket) do
     case Repo.get(ChannelMapping, id) do
       nil ->
@@ -380,6 +392,19 @@ defmodule ManfrodWeb.Admin.AccessLive do
     cron_rows = build_cron_rows()
     reminder_rows = build_reminder_rows(users)
 
+    linear_connections =
+      Linear.list_connections()
+      |> Enum.map(fn conn ->
+        %{
+          id: conn.id,
+          project_slug: conn.project && conn.project.slug,
+          project_name: conn.project && conn.project.name,
+          status: conn.status,
+          linear_team_name: conn.linear_team_name,
+          inserted_at: conn.inserted_at
+        }
+      end)
+
     socket
     |> assign(projects: projects)
     |> assign(channels: channels)
@@ -388,6 +413,7 @@ defmodule ManfrodWeb.Admin.AccessLive do
     |> assign(vacations: vacations)
     |> assign(cron_rows: cron_rows)
     |> assign(reminder_rows: reminder_rows)
+    |> assign(linear_connections: linear_connections)
   end
 
   # Skill-crons (from SKILL.md frontmatter, read-only, no owning user) and
