@@ -934,14 +934,5 @@ defmodule Manfrod.Memory.Classifier do
     end
   end
 
-  # Project attribution comes straight from the channel mapping — same source
-  # used to derive write_access — so a node's project is stamped at creation
-  # and never depends on downstream provenance (conversation_id) that may be
-  # missing.
-  defp project_id_for_channel(channel_id) do
-    case Access.get_active_mapping(channel_id) do
-      %{project_id: project_id} -> project_id
-      nil -> nil
-    end
-  end
+  defp project_id_for_channel(channel_id), do: Access.project_id_for_channel(channel_id)
 end

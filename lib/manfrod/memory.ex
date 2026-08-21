@@ -901,6 +901,15 @@ defmodule Manfrod.Memory do
   """
   def find_project(query) when is_binary(query) do
     needle = query |> String.trim() |> String.downcase()
+    do_find_project(needle)
+  end
+
+  # A blank needle would otherwise match "everything" below (String.contains?
+  # against "" is always true), silently returning whatever project happens
+  # to be first — treat it the same as no query at all instead.
+  defp do_find_project(""), do: nil
+
+  defp do_find_project(needle) do
     projects = list_projects()
 
     Enum.find(projects, fn p ->
@@ -1594,7 +1603,7 @@ defmodule Manfrod.Memory do
   including whatever language that user's own notes happen to be written
   in, without a hardcoded language instruction.
   """
-  def get_note_context(user_id, readable_levels, query) do
+  def get_note_context(user_id, readable_levels, query, project_id \\ nil) do
     soul = get_soul(user_id)
 
     linked_to_soul =
@@ -1604,7 +1613,7 @@ defmodule Manfrod.Memory do
         []
       end
 
-    {:ok, relevant} = search(user_id, readable_levels, query, limit: 10)
+    {:ok, relevant} = search(user_id, readable_levels, query, limit: 10, project_id: project_id)
 
     nodes =
       ([soul] ++ linked_to_soul ++ relevant)

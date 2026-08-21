@@ -197,13 +197,16 @@ defmodule Manfrod.Tools.Notes do
   # (if any) so a project channel's summary is always scoped to it without
   # the agent having to ask or name it explicitly.
   defp resolve_project(nil, %{channel: channel}) when is_binary(channel) do
-    case Access.get_active_mapping(channel) do
-      %{project_id: project_id} -> {:ok, project_id}
-      nil -> {:ok, nil}
-    end
+    {:ok, Access.project_id_for_channel(channel)}
   end
 
   defp resolve_project(nil, _msg_ctx), do: {:ok, nil}
+
+  # Some models send `project: ""` instead of omitting an unused optional
+  # arg — treat that exactly like omitting it, not as a real search term.
+  # (`Memory.find_project("")` would otherwise match whatever project
+  # happens to come first, since `String.contains?(_, "")` is always true.)
+  defp resolve_project("", msg_ctx), do: resolve_project(nil, msg_ctx)
 
   defp resolve_project(name, _msg_ctx) when is_binary(name) do
     case Memory.find_project(name) do
