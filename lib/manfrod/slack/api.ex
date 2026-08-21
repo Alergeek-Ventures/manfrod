@@ -415,6 +415,24 @@ defmodule Manfrod.Slack.API do
   end
 
   @doc """
+  Posts to a Slack interactivity `response_url` — the full callback URL
+  Slack includes on `block_actions`/`view_submission` payloads, used to
+  update the *specific* ephemeral/original message that triggered the
+  interaction (`chat.update`/`chat.postMessage` can't target an ephemeral
+  message directly, since it has no stable `ts` the Web API accepts).
+
+  `body` typically carries `replace_original: true` plus new `text`/`blocks`.
+  """
+  @spec respond(String.t(), map()) :: {:ok, map()} | {:error, term()}
+  def respond(response_url, body) do
+    case Req.post(response_url, json: body) do
+      {:ok, %Req.Response{status: 200} = resp} -> {:ok, resp.body}
+      {:ok, %Req.Response{status: status, body: resp_body}} -> {:error, {status, resp_body}}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @doc """
   Opens (or resolves the existing) DM channel with a Slack user.
 
   Returns `{:ok, dm_channel_id}` or `{:error, reason}`.
