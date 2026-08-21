@@ -187,6 +187,23 @@ defmodule Manfrod.Memory.Access do
   end
 
   @doc """
+  The project a channel is mapped to, or `nil` if it isn't mapped to one.
+
+  Single source of truth for "which project does this channel belong to" —
+  used both to stamp a new note's `project_id` at write time
+  (`Manfrod.Memory.Classifier`) and to scope note reads to the current
+  project by default (`Manfrod.Tools.Notes`, the automatic per-message note
+  context in `Manfrod.Agent.Server`).
+  """
+  @spec project_id_for_channel(String.t()) :: binary() | nil
+  def project_id_for_channel(channel_id) do
+    case get_active_mapping(channel_id) do
+      %ChannelMapping{project_id: project_id} -> project_id
+      nil -> nil
+    end
+  end
+
+  @doc """
   Resolve the client id associated with a channel's project.
 
   For internal project channels this finds the active client-facing mapping for

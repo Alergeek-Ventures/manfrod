@@ -5,6 +5,40 @@ defmodule Manfrod.MemoryTest do
 
   @moduletag :db
 
+  describe "find_project/1" do
+    test "matches by slug or name, case-insensitively" do
+      project = insert_project!(%{slug: "acme", name: "Acme Corp"})
+
+      assert Memory.find_project("acme").id == project.id
+      assert Memory.find_project("ACME").id == project.id
+      assert Memory.find_project("Acme Corp").id == project.id
+      assert Memory.find_project("acme corp").id == project.id
+    end
+
+    test "falls back to a substring match on the name" do
+      project = insert_project!(%{slug: "acme", name: "Acme Corp"})
+
+      assert Memory.find_project("corp").id == project.id
+    end
+
+    # An empty needle used to match "everything" via String.contains?(_, ""),
+    # silently returning whatever project came first — a blank/omitted
+    # `project` arg must resolve to "no project", never a wrong one.
+    test "returns nil for a blank query instead of matching an arbitrary project" do
+      insert_project!(%{slug: "acme", name: "Acme Corp"})
+      insert_project!(%{slug: "other", name: "Other Co"})
+
+      assert Memory.find_project("") == nil
+      assert Memory.find_project("   ") == nil
+    end
+
+    test "returns nil when nothing matches" do
+      insert_project!(%{slug: "acme", name: "Acme Corp"})
+
+      assert Memory.find_project("nonexistent") == nil
+    end
+  end
+
   describe "messages" do
     test "create_message/2 creates a pending message" do
       user_id = test_user_id()

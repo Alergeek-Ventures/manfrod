@@ -31,6 +31,7 @@ defmodule Manfrod.Agent.Server do
   alias Manfrod.Events
   alias Manfrod.LLM
   alias Manfrod.Memory
+  alias Manfrod.Memory.Access
   alias Manfrod.Memory.Soul
   alias Manfrod.Repo
   alias Manfrod.Skills
@@ -593,7 +594,10 @@ defmodule Manfrod.Agent.Server do
         # Retrieve relevant note context (the note graph is a single shared
         # graph gated by access level, not by user, so this is safe to scope
         # to whichever author sent this particular message)
-        note_context = get_note_context(event_ctx.user_id, event_ctx.readable_levels, content)
+        project_id = Access.project_id_for_channel(event_ctx.meta.slack_channel_id)
+
+        note_context =
+          get_note_context(event_ctx.user_id, event_ctx.readable_levels, content, project_id)
 
         # Build user message with note context prepended for LLM
         user_content =
@@ -864,8 +868,8 @@ defmodule Manfrod.Agent.Server do
 
   defp truncate_result(result), do: result
 
-  defp get_note_context(user_id, readable_levels, query) do
-    Memory.get_note_context(user_id, readable_levels, query)
+  defp get_note_context(user_id, readable_levels, query, project_id) do
+    Memory.get_note_context(user_id, readable_levels, query, project_id)
   end
 
   # Identify the inbound Slack message for memory flagging. Only Slack messages

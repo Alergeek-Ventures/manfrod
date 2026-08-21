@@ -40,6 +40,15 @@ defmodule Manfrod.Tools.NotesTest do
     })
   end
 
+  defp insert_node_with_project!(content, project_id) do
+    Repo.insert!(%Manfrod.Memory.Node{
+      user_id: test_user_id(),
+      content: content,
+      access: ["internal"],
+      project_id: project_id
+    })
+  end
+
   describe "list_recent_notes" do
     test "lists notes newest first with a date stamp" do
       insert_node_at!("old note", ~U[2026-01-01 10:00:00Z])
@@ -94,6 +103,40 @@ defmodule Manfrod.Tools.NotesTest do
       assert {:ok, msg} = run("list_recent_notes", ctx(), %{})
       assert msg =~ "visible"
       refute msg =~ "hidden"
+    end
+
+    test "on a project-mapped channel, defaults to that project and excludes other projects' notes" do
+      own_project = insert_project!()
+      other_project = insert_project!()
+      mapping = insert_channel_mapping!(%{project_id: own_project.id})
+
+      insert_node_with_project!("own project note", own_project.id)
+      insert_node_with_project!("other project note", other_project.id)
+
+      channel_ctx = ctx(%{msg_ctx: %{channel: mapping.slack_channel_id, ts: nil}})
+
+      assert {:ok, msg} = run("list_recent_notes", channel_ctx, %{})
+      assert msg =~ "own project note"
+      refute msg =~ "other project note"
+    end
+
+    # Some models send `project: ""` instead of omitting the optional arg —
+    # this must resolve exactly like omitting it (default to the channel's
+    # project), not like a real search term that matches an arbitrary
+    # project via Memory.find_project/1's substring fallback.
+    test "an explicit empty-string project behaves the same as omitting it" do
+      own_project = insert_project!()
+      other_project = insert_project!()
+      mapping = insert_channel_mapping!(%{project_id: own_project.id})
+
+      insert_node_with_project!("own project note", own_project.id)
+      insert_node_with_project!("other project note", other_project.id)
+
+      channel_ctx = ctx(%{msg_ctx: %{channel: mapping.slack_channel_id, ts: nil}})
+
+      assert {:ok, msg} = run("list_recent_notes", channel_ctx, %{project: ""})
+      assert msg =~ "own project note"
+      refute msg =~ "other project note"
     end
   end
 
