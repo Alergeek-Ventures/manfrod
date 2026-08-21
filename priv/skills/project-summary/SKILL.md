@@ -54,6 +54,13 @@ If nothing comes back, say so plainly ("nic nie znalazłem na dziś" /
 "brak notatek w tym okresie") — don't pad it out or imply you searched
 harder than you did.
 
+If `linear_list_issues` (or the other `linear_*` tools) are available in
+this conversation, the project has a connected Linear team — pull recent/open
+issues too and fold them into the summary alongside the notes (e.g. under
+their own short "Linear" line or merged into the relevant time tier). If
+those tools aren't offered, the project has no Linear connection — don't
+mention Linear at all, just summarize from notes as usual.
+
 ## 3. Structure the answer
 
 **Specific date/range or "today"/"yesterday" requested:** one section,

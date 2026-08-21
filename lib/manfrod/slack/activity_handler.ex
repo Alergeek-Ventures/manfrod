@@ -535,7 +535,7 @@ defmodule Manfrod.Slack.ActivityHandler do
     case Jason.decode(args) do
       {:ok, decoded} when is_map(decoded) and map_size(decoded) > 0 ->
         decoded
-        |> Enum.map(fn {_key, value} -> preview_value(value) end)
+        |> Enum.map(fn {key, value} -> preview_pair(key, value) end)
         |> Enum.reject(&(&1 == ""))
         |> Enum.join(", ")
         |> String.slice(0, @details_limit)
@@ -546,6 +546,13 @@ defmodule Manfrod.Slack.ActivityHandler do
   end
 
   defp args_preview(_args), do: nil
+
+  defp preview_pair(key, value) do
+    case preview_value(value) do
+      "" -> ""
+      formatted -> "#{key}: #{formatted}"
+    end
+  end
 
   defp preview_value(value) when is_binary(value), do: String.slice(value, 0, 60)
   defp preview_value(value) when is_number(value) or is_boolean(value), do: to_string(value)

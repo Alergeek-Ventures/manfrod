@@ -307,6 +307,27 @@ defmodule Manfrod.Slack.StreamSession do
     end
   end
 
+  # A tool call that resolves inside one flush window announces and resolves
+  # within the same batch — without this, both task_update chunks for the
+  # same step would go out in one `chunks` array, and Slack renders that as
+  # the step's title/details doubled up rather than replacing in place (which
+  # only happens across separate append_stream calls). The later chunk is
+  # already the full merged step (see merge_task/2), so it can just replace
+  # the pending one in place rather than being merged further.
+  defp enqueue(state, %{type: "task_update", id: id} = chunk) do
+    if Enum.any?(state.pending, &match?(%{type: "task_update", id: ^id}, &1)) do
+      pending =
+        Enum.map(state.pending, fn
+          %{type: "task_update", id: ^id} -> chunk
+          other -> other
+        end)
+
+      %{state | pending: pending}
+    else
+      %{state | pending: [chunk | state.pending]}
+    end
+  end
+
   defp enqueue(state, chunk) do
     %{state | pending: [chunk | state.pending]}
   end
