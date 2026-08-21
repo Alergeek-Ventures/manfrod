@@ -76,7 +76,7 @@ defmodule Manfrod.Linear.Client do
     limit = Keyword.get(opts, :limit, 25)
 
     query = """
-    query($teamId: String!, $limit: Int!) {
+    query($teamId: ID!, $limit: Int!) {
       issues(filter: { team: { id: { eq: $teamId } } }, first: $limit, orderBy: updatedAt) {
         nodes {
           identifier
@@ -98,7 +98,7 @@ defmodule Manfrod.Linear.Client do
   @doc "A single issue by its identifier (e.g. `\"ENG-123\"`), scoped to the team."
   def get_issue(api_key, team_id, identifier) do
     query = """
-    query($teamId: String!, $identifier: String!) {
+    query($teamId: ID!, $identifier: Int!) {
       issues(filter: { team: { id: { eq: $teamId } }, number: { eq: $identifier } }, first: 1) {
         nodes {
           identifier
@@ -132,7 +132,7 @@ defmodule Manfrod.Linear.Client do
     limit = Keyword.get(opts, :limit, 25)
 
     query = """
-    query($teamId: String!, $term: String!, $limit: Int!) {
+    query($teamId: ID!, $term: String!, $limit: Int!) {
       issueSearch(filter: { team: { id: { eq: $teamId } } }, term: $term, first: $limit) {
         nodes {
           identifier
@@ -154,7 +154,7 @@ defmodule Manfrod.Linear.Client do
   @doc "Projects owned by the team."
   def list_projects(api_key, team_id) do
     query = """
-    query($teamId: String!) {
+    query($teamId: ID!) {
       team(id: $teamId) {
         projects {
           nodes { id name state url }
@@ -174,7 +174,7 @@ defmodule Manfrod.Linear.Client do
     limit = Keyword.get(opts, :limit, 10)
 
     query = """
-    query($teamId: String!, $limit: Int!) {
+    query($teamId: ID!, $limit: Int!) {
       team(id: $teamId) {
         cycles(first: $limit, orderBy: updatedAt) {
           nodes { number name startsAt endsAt }

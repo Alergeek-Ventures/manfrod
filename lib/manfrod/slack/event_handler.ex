@@ -274,20 +274,24 @@ defmodule Manfrod.Slack.EventHandler do
     channel_id = get_in(payload, ["channel", "id"])
     bot_msg_ts = get_in(payload, ["message", "ts"])
     trigger_id = payload["trigger_id"]
-    slack_user_id = get_in(payload, ["user", "id"])
 
     case action["action_id"] do
       "linear_connect" ->
-        Linear.Status.open_connect_modal(bot.token, trigger_id, action["value"])
+        Linear.Status.open_connect_modal(
+          bot.token,
+          trigger_id,
+          action["value"],
+          payload["response_url"]
+        )
 
       "linear_disconnect" ->
-        Linear.disconnect(action["value"])
+        project_id = action["value"]
+        Linear.disconnect(project_id)
 
-        API.post("chat.postEphemeral", bot.token, %{
-          channel: channel_id,
-          user: slack_user_id,
-          text: "🔴 Linear disconnected for this project."
-        })
+        case Repo.get(Project, project_id) do
+          nil -> :ok
+          project -> Linear.Status.refresh(payload["response_url"], project)
+        end
 
       other_or_nil ->
         if channel_id && bot_msg_ts do

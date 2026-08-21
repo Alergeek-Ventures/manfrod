@@ -8,6 +8,13 @@ defmodule Manfrod.Linear.Status do
   modal, which is never persisted to any message history at all (Block
   Kit's `input`/`plain_text_input` elements only exist inside modals or the
   Home tab — not in regular or ephemeral messages).
+
+  The original ephemeral message can't be edited via `chat.update` (it has
+  no `ts` the Web API accepts) — instead, every button click carries a
+  `response_url` that can replace that exact message. It's threaded through
+  the modal's `private_metadata` (as JSON, alongside `project_id`) so the
+  connect flow can refresh the message it started from once the key is
+  verified, not just DM the result.
   """
 
   require Logger
@@ -21,26 +28,42 @@ defmodule Manfrod.Linear.Status do
   @doc "Posts the ephemeral connect/connected status for `project` into `channel_id`, visible only to `slack_user_id`."
   @spec post_status(String.t(), String.t(), String.t(), Project.t()) :: :ok
   def post_status(bot_token, channel_id, slack_user_id, %Project{} = project) do
-    text =
-      case Linear.get_connection(project.id) do
-        nil -> disconnected_text(project)
-        conn -> connected_text(conn)
-      end
-
-    blocks =
-      case Linear.get_connection(project.id) do
-        nil -> [connect_button(project.id)]
-        _conn -> [disconnect_button(project.id)]
-      end
+    {text, blocks} = render(project)
 
     API.post("chat.postEphemeral", bot_token, %{
       channel: channel_id,
       user: slack_user_id,
       text: text,
-      blocks: [%{type: "section", text: %{type: "mrkdwn", text: text}} | blocks]
+      blocks: blocks
     })
 
     :ok
+  end
+
+  @doc "Replaces the message behind `response_url` with `project`'s current status."
+  @spec refresh(String.t() | nil, Project.t()) :: :ok
+  def refresh(nil, _project), do: :ok
+
+  def refresh(response_url, %Project{} = project) do
+    {text, blocks} = render(project)
+    API.respond(response_url, %{replace_original: true, text: text, blocks: blocks})
+    :ok
+  end
+
+  defp render(project) do
+    case Linear.get_connection(project.id) do
+      nil ->
+        text = disconnected_text(project)
+        {text, status_blocks(text, connect_button(project.id))}
+
+      conn ->
+        text = connected_text(conn)
+        {text, status_blocks(text, disconnect_button(project.id))}
+    end
+  end
+
+  defp status_blocks(text, action_block) do
+    [%{type: "section", text: %{type: "mrkdwn", text: text}}, action_block]
   end
 
   defp disconnected_text(project) do
@@ -87,15 +110,17 @@ defmodule Manfrod.Linear.Status do
     }
   end
 
-  @doc "Opens the API-key entry modal for `project_id`."
-  @spec open_connect_modal(String.t(), String.t(), String.t()) :: :ok
-  def open_connect_modal(bot_token, trigger_id, project_id) do
+  @doc "Opens the API-key entry modal for `project_id`, threading `response_url` through so `handle_connect_submission/4` can refresh the message that started this flow."
+  @spec open_connect_modal(String.t(), String.t(), String.t(), String.t() | nil) :: :ok
+  def open_connect_modal(bot_token, trigger_id, project_id, response_url) do
+    private_metadata = Jason.encode!(%{project_id: project_id, response_url: response_url})
+
     API.post("views.open", bot_token, %{
       trigger_id: trigger_id,
       view: %{
         type: "modal",
         callback_id: @callback_id,
-        private_metadata: project_id,
+        private_metadata: private_metadata,
         title: %{type: "plain_text", text: "Connect Linear"},
         submit: %{type: "plain_text", text: "Connect"},
         close: %{type: "plain_text", text: "Cancel"},
@@ -114,8 +139,10 @@ defmodule Manfrod.Linear.Status do
   end
 
   @doc """
-  Handles a submitted connect modal: verifies + persists the key, then DMs
-  `slack_user_id` with the outcome.
+  Handles a submitted connect modal: verifies + persists the key, DMs
+  `slack_user_id` with the outcome, and refreshes the original ephemeral
+  status message (via the `response_url` carried in `private_metadata`) to
+  reflect the new state.
 
   Slack's Socket Mode envelope for this app is ack'd before async handling
   runs (see `Manfrod.Slack.Socket`), so there is no way to return a
@@ -123,7 +150,10 @@ defmodule Manfrod.Linear.Status do
   and the result (success or failure) is reported via DM instead.
   """
   @spec handle_connect_submission(String.t(), String.t(), String.t(), String.t()) :: :ok
-  def handle_connect_submission(bot_token, project_id, slack_user_id, api_key) do
+  def handle_connect_submission(bot_token, private_metadata, slack_user_id, api_key) do
+    %{"project_id" => project_id, "response_url" => response_url} =
+      Jason.decode!(private_metadata)
+
     user = Manfrod.Accounts.get_user_by_slack_id(slack_user_id)
 
     message =
@@ -151,6 +181,11 @@ defmodule Manfrod.Linear.Status do
 
       {:error, reason} ->
         Logger.error("Linear.Status: could not DM #{slack_user_id}: #{inspect(reason)}")
+    end
+
+    case Manfrod.Repo.get(Project, project_id) do
+      nil -> :ok
+      project -> refresh(response_url, project)
     end
 
     :ok
