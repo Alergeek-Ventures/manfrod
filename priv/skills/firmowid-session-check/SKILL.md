@@ -1,12 +1,9 @@
 ---
 name: firmowid-session-check
-description: Daily check at a random time between 19:00-20:00 on weekdays, whether the user has a forgotten (active >2h) Firmowid session; if so, DM them suggesting to end/edit it. Not for manual use via use_skill — SkillSchedulerWorker/SkillRunner triggers this automatically in the context of a specific user.
-cron: "RAND(19:00-20:00) * * 1-5"
-scope: user
-requires_mcp: firmowid
+description: Checks whether the user has a forgotten (active >2h) Firmowid session; if so, DM them suggesting to end/edit it. Timed to roughly 20 minutes after the user's own average end-of-workday time. Not for manual use via use_skill — Manfrod.Workers.FirmowidSessionCheckWorker triggers this automatically in the context of a specific user.
 ---
 
-# Firmowid session check (per-user cron skill)
+# Firmowid session check (per-user scheduled skill)
 
 You're running on a schedule, not replying to a message — there's no user
 watching this turn yet. Your final reply becomes a new DM thread the user
