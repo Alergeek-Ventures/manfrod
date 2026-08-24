@@ -89,6 +89,7 @@ config :manfrod, Oban,
     {Oban.Plugins.Pruner, max_age: 60 * 60 * 24 * 7},
     {Oban.Plugins.Lifeline, rescue_after: :timer.hours(4)},
     {Oban.Plugins.Cron,
+     timezone: "Europe/Warsaw",
      crontab: [
        # Every hour - memory retrospection (slipbox drain)
        {"5 */3 * * *", Manfrod.Workers.RetrospectionWorker},
@@ -102,6 +103,10 @@ config :manfrod, Oban,
        {"0 * * * *", Manfrod.Workers.SkillSchedulerWorker},
        # Every hour - refresh/expire user MCP connections
        {"15 * * * *", Manfrod.Workers.McpExpiryWorker},
+       # 9am on weekdays - schedules each Firmowid-connected user's
+       # forgotten-session check for later that day, timed from their own
+       # average end-of-workday time
+       {"0 9 * * 1-5", Manfrod.Workers.FirmowidReminderSchedulerWorker},
        # Every hour - roll raw events into the daily usage/adoption tables
        # before the 7-day audit retention drops them
        {"25 * * * *", Manfrod.Workers.RollupWorker}
