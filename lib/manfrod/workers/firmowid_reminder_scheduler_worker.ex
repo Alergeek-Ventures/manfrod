@@ -7,11 +7,15 @@ defmodule Manfrod.Workers.FirmowidReminderSchedulerWorker do
   Replaces the old fixed 19:00-20:00 random-window check
   (`priv/skills/firmowid-session-check/SKILL.md`'s former `RAND(...)` cron)
   with a time tailored to each user: for every user connected to Firmowid,
-  pulls their last `@session_sample_size` sessions, averages the time-of-day
-  they ended, and schedules a `Manfrod.Workers.FirmowidSessionCheckWorker`
-  run `@offset_minutes` after that predicted end-of-day time. Each scheduled
-  job carries `meta` (who/when, in local time) so it's inspectable without
-  decoding `scheduled_at`/`args` by hand.
+  pulls their last `@session_sample_size` sessions, takes the *last* session
+  of each calendar day (a workday usually has several sessions — meetings,
+  breaks — and averaging every single one of those instead of just the
+  final one pulls the result hours earlier than the real end of the
+  workday), averages those per-day end times, and schedules a
+  `Manfrod.Workers.FirmowidSessionCheckWorker` run `@offset_minutes` after
+  that predicted end-of-day time. Each scheduled job carries `meta`
+  (who/when, in local time) so it's inspectable without decoding
+  `scheduled_at`/`args` by hand.
   """
   use Oban.Worker,
     queue: :default,
@@ -66,7 +70,7 @@ defmodule Manfrod.Workers.FirmowidReminderSchedulerWorker do
   defp schedule_for_connection(conn, provider, today) do
     with {:ok, access_token} <- Mcp.ensure_valid_token(conn),
          {:ok, sessions} <- fetch_recent_sessions(provider.mcp_url, access_token),
-         {:ok, avg_time} <- average_end_time(sessions) do
+         {:ok, avg_time} <- average_end_time(sessions, today) do
       schedule_reminder(conn.user_id, today, avg_time)
     else
       {:error, reason} ->
@@ -117,13 +121,22 @@ defmodule Manfrod.Workers.FirmowidReminderSchedulerWorker do
 
   defp extract_sessions(_), do: []
 
-  defp average_end_time(sessions) do
+  # Only the last session of each calendar day represents "end of workday" —
+  # a day usually has several sessions (meetings, breaks resuming later),
+  # and averaging every one of those instead of just the final one pulls
+  # the result hours earlier than reality. Today itself is excluded: its
+  # last session so far is mid-day-in-progress, not the day's real end.
+  defp average_end_time(sessions, today) do
     seconds =
       sessions
       |> Enum.map(&Map.get(&1, "end_datetime"))
       |> Enum.reject(&is_nil/1)
-      |> Enum.map(&seconds_of_day/1)
+      |> Enum.map(&local_datetime/1)
       |> Enum.reject(&is_nil/1)
+      |> Enum.reject(&(DateTime.to_date(&1) == today))
+      |> Enum.group_by(&DateTime.to_date/1)
+      |> Enum.map(fn {_date, datetimes} -> Enum.max_by(datetimes, &DateTime.to_unix/1) end)
+      |> Enum.map(&seconds_of_day/1)
 
     case seconds do
       [] -> :error
@@ -131,15 +144,15 @@ defmodule Manfrod.Workers.FirmowidReminderSchedulerWorker do
     end
   end
 
-  defp seconds_of_day(iso_string) do
+  defp local_datetime(iso_string) do
     case DateTime.from_iso8601(iso_string) do
-      {:ok, dt, _offset} ->
-        local = DateTime.shift_zone!(dt, @timezone)
-        local.hour * 3600 + local.minute * 60 + local.second
-
-      {:error, _} ->
-        nil
+      {:ok, dt, _offset} -> DateTime.shift_zone!(dt, @timezone)
+      {:error, _} -> nil
     end
+  end
+
+  defp seconds_of_day(%DateTime{} = local) do
+    local.hour * 3600 + local.minute * 60 + local.second
   end
 
   defp schedule_reminder(user_id, date, avg_time) do
