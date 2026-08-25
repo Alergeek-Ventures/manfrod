@@ -21,10 +21,16 @@ defmodule Manfrod.Release do
   serving. Cron-skills have no other source of truth than the current
   `priv/skills/*/SKILL.md` files, so any pending job scheduled under a
   since-changed or since-deleted skill would otherwise linger and fire on
-  stale instructions. Safe and lossless either way:
-  `Manfrod.Workers.SkillSchedulerWorker` (hourly) fully regenerates the
-  correct set from the current skill files on its next tick — nothing here
-  is a durable source of truth being discarded.
+  stale instructions.
+
+  Also inserts one immediate `Manfrod.Workers.SkillSchedulerWorker` job
+  right after the delete, so the schedule is regenerated as soon as the
+  server's Oban queue starts processing — this step runs before the app
+  (and Oban) is up, so without this the deleted schedule would otherwise
+  sit empty until the next hourly cron tick, up to ~1h away. Inserting the
+  job row directly (not `Oban.insert/1`, which needs a running Oban
+  instance) is safe: it's the same DB row either way, just without the
+  LISTEN/NOTIFY nudge for instant pickup.
   """
   def reset_skill_schedule do
     load_app()
@@ -38,7 +44,10 @@ defmodule Manfrod.Release do
               where: j.state in ["available", "scheduled"]
             )
 
-          {:ok, repo.delete_all(query)}
+          deleted = repo.delete_all(query)
+          {:ok, _job} = Manfrod.Workers.SkillSchedulerWorker.new(%{}) |> repo.insert()
+
+          {:ok, deleted}
         end)
     end
   end
