@@ -11,6 +11,10 @@ defmodule Manfrod.Workers.FirmowidSessionCheckWorker do
   `Manfrod.Release.reset_skill_schedule/0` (which would otherwise silently
   drop today's already-computed check on a deploy landing between 9am and
   the scheduled time).
+
+  The scheduler attaches `meta` (`user_name`, `user_email`, `avg_end_time`,
+  `scheduled_for_local`) to each job it inserts, so who/when a given check
+  is for is visible directly on the `oban_jobs` row without decoding args.
   """
   use Oban.Worker,
     queue: :default,

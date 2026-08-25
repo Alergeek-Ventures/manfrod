@@ -1,16 +1,17 @@
 defmodule Manfrod.Workers.FirmowidReminderSchedulerWorker do
   @moduledoc """
-  Runs hourly via Oban cron, but only does anything at 9am Europe/Warsaw on
-  weekdays — self-gated rather than a fixed UTC crontab entry, since
-  `Oban.Plugins.Cron` runs in UTC and Warsaw shifts between CET/CEST across
-  the year.
+  Runs at 9am Europe/Warsaw on weekdays (`Oban.Plugins.Cron` is configured
+  with `timezone: "Europe/Warsaw"`, so `"0 9 * * 1-5"` needs no DST
+  juggling here).
 
   Replaces the old fixed 19:00-20:00 random-window check
   (`priv/skills/firmowid-session-check/SKILL.md`'s former `RAND(...)` cron)
   with a time tailored to each user: for every user connected to Firmowid,
   pulls their last `@session_sample_size` sessions, averages the time-of-day
   they ended, and schedules a `Manfrod.Workers.FirmowidSessionCheckWorker`
-  run `@offset_minutes` after that predicted end-of-day time.
+  run `@offset_minutes` after that predicted end-of-day time. Each scheduled
+  job carries `meta` (who/when, in local time) so it's inspectable without
+  decoding `scheduled_at`/`args` by hand.
   """
   use Oban.Worker,
     queue: :default,
@@ -18,6 +19,7 @@ defmodule Manfrod.Workers.FirmowidReminderSchedulerWorker do
 
   require Logger
 
+  alias Manfrod.Accounts
   alias Manfrod.Mcp
   alias Manfrod.Mcp.Client
   alias Manfrod.Workers.FirmowidSessionCheckWorker
@@ -38,17 +40,8 @@ defmodule Manfrod.Workers.FirmowidReminderSchedulerWorker do
 
   @impl Oban.Worker
   def perform(%Oban.Job{}) do
-    now_local = DateTime.now!(@timezone)
-
-    if run_now?(now_local) do
-      run(now_local)
-    end
-
+    run(DateTime.now!(@timezone))
     :ok
-  end
-
-  defp run_now?(now_local) do
-    now_local.hour == 9 and Date.day_of_week(DateTime.to_date(now_local)) in 1..5
   end
 
   defp run(now_local) do
@@ -150,17 +143,28 @@ defmodule Manfrod.Workers.FirmowidReminderSchedulerWorker do
   end
 
   defp schedule_reminder(user_id, date, avg_time) do
-    reminder_at =
+    reminder_at_local =
       date
       |> DateTime.new!(avg_time, @timezone)
       |> DateTime.add(@offset_minutes * 60, :second)
-      |> DateTime.shift_zone!("Etc/UTC")
+
+    reminder_at = DateTime.shift_zone!(reminder_at_local, "Etc/UTC")
 
     if DateTime.compare(reminder_at, DateTime.utc_now()) == :gt do
       args = %{user_id: user_id, date: Date.to_iso8601(date)}
+      user = Accounts.get_user!(user_id)
+
+      meta = %{
+        user_id: user_id,
+        user_name: user.name,
+        user_email: user.email,
+        avg_end_time: Time.to_iso8601(avg_time),
+        scheduled_for_local: DateTime.to_iso8601(reminder_at_local)
+      }
 
       case FirmowidSessionCheckWorker.new(args,
              scheduled_at: reminder_at,
+             meta: meta,
              unique: [keys: [:user_id, :date], states: @unique_states, period: :infinity]
            )
            |> Oban.insert() do
