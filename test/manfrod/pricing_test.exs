@@ -10,11 +10,11 @@ defmodule Manfrod.PricingTest do
     test "prices plain input and output at the headline rates" do
       cost = Pricing.cost(@gpt, %{input_tokens: 1_000_000, output_tokens: 1_000_000})
 
-      assert_in_delta cost, 0.10 + 0.60, 0.000001
+      assert_in_delta cost, 0.20 + 1.20, 0.000001
     end
 
     test "treats cached tokens as a discounted subset of input, not an addition" do
-      # 1M input of which 600K was a cache hit: 400K fresh @ $0.10 + 600K cached @ $0.01
+      # 1M input of which 600K was a cache hit: 400K fresh @ $0.20 + 600K cached @ $0.01
       cost =
         Pricing.cost(@gpt, %{
           input_tokens: 1_000_000,
@@ -22,7 +22,7 @@ defmodule Manfrod.PricingTest do
           cached_tokens: 600_000
         })
 
-      assert_in_delta cost, 0.4 * 0.10 + 0.6 * 0.01, 0.000001
+      assert_in_delta cost, 0.4 * 0.20 + 0.6 * 0.01, 0.000001
     end
 
     test "caching is cheaper than not caching for the same input volume" do
@@ -74,7 +74,7 @@ defmodule Manfrod.PricingTest do
     end
 
     test "accepts string keys and tolerates missing or nil counts" do
-      assert_in_delta Pricing.cost(@gpt, %{"input_tokens" => 1_000_000}), 0.10, 0.000001
+      assert_in_delta Pricing.cost(@gpt, %{"input_tokens" => 1_000_000}), 0.20, 0.000001
       assert Pricing.cost(@gpt, %{}) == 0.0
       assert Pricing.cost(@gpt, %{input_tokens: nil, output_tokens: nil}) == 0.0
     end

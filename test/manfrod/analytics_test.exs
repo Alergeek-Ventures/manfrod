@@ -49,8 +49,8 @@ defmodule Manfrod.AnalyticsTest do
       assert row.output_tokens == 200_000
       assert row.user_id == user.id
       assert row.purpose == "agent"
-      # 2M input @ $0.10 + 200K output @ $0.60 = $0.32
-      assert Decimal.eq?(Decimal.round(row.cost_usd, 4), Decimal.new("0.3200"))
+      # 2M input @ $0.20 + 200K output @ $1.20 = $0.64
+      assert Decimal.eq?(Decimal.round(row.cost_usd, 4), Decimal.new("0.6400"))
     end
 
     test "separates rows per model so a mid-window switch stays distinguishable" do

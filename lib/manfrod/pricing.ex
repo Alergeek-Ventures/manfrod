@@ -40,8 +40,8 @@ defmodule Manfrod.Pricing do
 
   @prices %{
     "openai/gpt-5.6-luna" => %{
-      input_per_mtok: 0.10,
-      output_per_mtok: 0.60,
+      input_per_mtok: 0.20,
+      output_per_mtok: 1.20,
       cached_input_per_mtok: 0.01,
       cache_write_per_mtok: 0.125,
       cache_write_above_per_mtok: 0.25,
@@ -132,7 +132,7 @@ defmodule Manfrod.Pricing do
   `usage` accepts either atom or string keys and tolerates missing/nil counts.
 
       iex> Manfrod.Pricing.cost("openai/gpt-5.6-luna", %{input_tokens: 1_000_000, output_tokens: 0})
-      0.1
+      0.2
   """
   @spec cost(String.t() | nil, map()) :: float()
   def cost(model, usage) when is_map(usage) do
