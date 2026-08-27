@@ -1,8 +1,8 @@
 defmodule Manfrod.Security.SecretDetector do
   @moduledoc false
 
-  @min_token_length 16
-  @entropy_threshold 4.0
+  @min_token_length 12
+  @transition_ratio_threshold 0.6
   @token_regex ~r/[A-Za-z0-9\-_\/\+=]{#{@min_token_length},}/
 
   @spec contains_secret?(String.t() | nil) :: boolean()
@@ -17,20 +17,24 @@ defmodule Manfrod.Security.SecretDetector do
   defp extract_tokens(text), do: Regex.scan(@token_regex, text) |> List.flatten()
 
   defp looks_like_secret?(token) do
-    String.length(token) >= @min_token_length and shannon_entropy(token) > @entropy_threshold
+    String.length(token) >= @min_token_length and
+      transition_ratio(token) >= @transition_ratio_threshold
   end
 
-  defp shannon_entropy(token) do
-    length = String.length(token)
-
-    token
-    |> String.graphemes()
-    |> Enum.frequencies()
-    |> Enum.reduce(0.0, fn {_char, count}, acc ->
-      p = count / length
-      acc - p * :math.log2(p)
-    end)
+  defp transition_ratio(token) do
+    chars = String.graphemes(token)
+    pairs = Enum.zip(chars, tl(chars))
+    transitions = Enum.count(pairs, fn {a, b} -> not same_char_class?(a, b) end)
+    transitions / length(chars)
   end
+
+  defp same_char_class?(a, b) do
+    (lower?(a) and lower?(b)) or (upper?(a) and upper?(b)) or (digit?(a) and digit?(b))
+  end
+
+  defp lower?(c), do: c =~ ~r/[a-z]/
+  defp upper?(c), do: c =~ ~r/[A-Z]/
+  defp digit?(c), do: c =~ ~r/[0-9]/
 
   @polish_chars ~r/[ąćęłńóśźżĄĆĘŁŃÓŚŹŻ]/
   @polish_words ~w(nie jest tutaj proszę cześć siema dzięki masz jak co gdzie kiedy jestem może właśnie)
