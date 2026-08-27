@@ -114,6 +114,8 @@ config :manfrod, Oban,
        {"0 21 * * 0-4", Manfrod.Workers.FirmowidMorningReminderSchedulerWorker},
        # Every hour - roll raw events into the daily usage/adoption tables
        # before the 7-day audit retention drops them
-       {"25 * * * *", Manfrod.Workers.RollupWorker}
+       {"25 * * * *", Manfrod.Workers.RollupWorker},
+       # Daily at 3am - refresh the gitleaks secret-pattern ruleset from upstream
+       {"0 3 * * *", Manfrod.Workers.GitleaksRulesRefreshWorker}
      ]}
   ]

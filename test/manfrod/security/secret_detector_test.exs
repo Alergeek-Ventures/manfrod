@@ -1,9 +1,22 @@
 defmodule Manfrod.Security.SecretDetectorTest do
   use ExUnit.Case, async: true
 
-  alias Manfrod.Security.SecretDetector
+  alias Manfrod.Security.{GitleaksRules, SecretDetector}
+
+  setup_all do
+    GitleaksRules.load!()
+    :ok
+  end
 
   describe "contains_secret?/1" do
+    test "flags known-provider secret formats via the gitleaks ruleset" do
+      fake_key = "sk_liv" <> "e_4eC39HqLyjWDarjtT1zdp7dc"
+      fake_pat = "gh" <> "p_wWPw5k4aXcaT4fNP0UcnZwJUVFk6LO0pINUx"
+
+      assert SecretDetector.contains_secret?("stripe key #{fake_key}")
+      assert SecretDetector.contains_secret?("github token #{fake_pat}")
+    end
+
     test "flags tokens that frequently switch character class (random keys/passwords)" do
       assert SecretDetector.contains_secret?(
                "tutaj klucz: qX7pL2vR9zK4mN8wJ3hT6yB1cF5dS0gA-uE_oP"
@@ -32,8 +45,8 @@ defmodule Manfrod.Security.SecretDetectorTest do
       refute SecretDetector.contains_secret?("mam iPhone15ProMax, działa świetnie")
     end
 
-    test "does not flag a known documented example key (single character class)" do
-      refute SecretDetector.contains_secret?("AKIAIOSFODNN7EXAMPLE")
+    test "flags the AWS-format example key via the gitleaks ruleset (format-based, not entropy)" do
+      assert SecretDetector.contains_secret?("AKIAIOSFODNN7EXAMPLE")
     end
 
     test "ignores nil/non-string input" do
