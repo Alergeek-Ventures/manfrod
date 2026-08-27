@@ -4,7 +4,7 @@ defmodule Manfrod.Security.SecretDetectorTest do
   alias Manfrod.Security.SecretDetector
 
   describe "contains_secret?/1" do
-    test "flags high-entropy tokens" do
+    test "flags tokens that frequently switch character class (random keys/passwords)" do
       assert SecretDetector.contains_secret?(
                "tutaj klucz: qX7pL2vR9zK4mN8wJ3hT6yB1cF5dS0gA-uE_oP"
              )
@@ -12,6 +12,8 @@ defmodule Manfrod.Security.SecretDetectorTest do
       assert SecretDetector.contains_secret?(
                "token=Zm9vYmFyLXJhbmRvbS1sb29raW5nLXRlc3QtdG9rZW4tMTIzNDU"
              )
+
+      assert SecretDetector.contains_secret?("ważne hasło: X9jo84N8LCpGpds!")
     end
 
     test "does not flag ordinary sentences" do
@@ -25,7 +27,12 @@ defmodule Manfrod.Security.SecretDetectorTest do
              )
     end
 
-    test "does not flag a low-entropy known-looking key (limited alphabet)" do
+    test "does not flag camelCase identifiers or product names" do
+      refute SecretDetector.contains_secret?("wywołaj getUserById na tym obiekcie")
+      refute SecretDetector.contains_secret?("mam iPhone15ProMax, działa świetnie")
+    end
+
+    test "does not flag a known documented example key (single character class)" do
       refute SecretDetector.contains_secret?("AKIAIOSFODNN7EXAMPLE")
     end
 
