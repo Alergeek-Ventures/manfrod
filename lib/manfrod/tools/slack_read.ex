@@ -86,33 +86,7 @@ defmodule Manfrod.Tools.SlackRead do
 
   defp bot_token, do: Application.get_env(:manfrod, :slack_bot_token)
 
-  # Already an ID ("C..."/"G..."/"D..."), or looked up by name via the
-  # channel list (case-insensitive, leading '#' stripped).
-  defp resolve_channel(_token, id) when is_binary(id) and byte_size(id) > 0 do
-    if String.match?(id, ~r/^[CGD][A-Z0-9]{8,}$/) do
-      {:ok, id}
-    else
-      lookup_channel_by_name(id)
-    end
-  end
-
-  defp resolve_channel(_token, _), do: {:error, :not_found}
-
-  defp lookup_channel_by_name(name) do
-    token = bot_token()
-    wanted = name |> String.trim_leading("#") |> String.downcase()
-
-    case API.list_channels(token) do
-      {:ok, channels} ->
-        case Enum.find(channels, &(String.downcase(Map.get(&1, "name", "")) == wanted)) do
-          %{"id" => id} -> {:ok, id}
-          nil -> {:error, :not_found}
-        end
-
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
+  defp resolve_channel(token, channel), do: API.resolve_channel(token, channel)
 
   defp format_messages(_token, []), do: {:ok, "Brak wiadomości."}
 
