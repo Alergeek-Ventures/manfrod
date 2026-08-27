@@ -71,4 +71,8 @@ defmodule Manfrod.LinearTest do
   test "get_connection/1 returns nil for an unknown project" do
     assert Linear.get_connection(Ecto.UUID.generate()) == nil
   end
+
+  test "get_connection/1 returns nil for a project-less (company) channel" do
+    assert Linear.get_connection(nil) == nil
+  end
 end
