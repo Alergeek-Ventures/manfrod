@@ -16,7 +16,9 @@ defmodule Manfrod.Linear do
   alias Manfrod.Repo
 
   @doc "The connected Linear connection for a project, or `nil`."
-  @spec get_connection(binary()) :: Connection.t() | nil
+  @spec get_connection(binary() | nil) :: Connection.t() | nil
+  def get_connection(nil), do: nil
+
   def get_connection(project_id) do
     Repo.one(from c in Connection, where: c.project_id == ^project_id and c.status == "connected")
   end
