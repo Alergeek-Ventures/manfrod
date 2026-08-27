@@ -105,6 +105,11 @@ config :manfrod,
        :holiday_calendar_id,
        env.("HOLIDAY_CALENDAR_ID", :string, "pl.polish#holiday@group.v.calendar.google.com")
 
+# Kalafiornia office-door access log (separate static key, not per-user session)
+config :manfrod,
+       :kalafiornia_office_access_api_key,
+       env.("KALAFIORNIA_OFFICE_ACCESS_API_KEY", :string?, nil)
+
 # Encryption at rest for project-scoped Linear API keys (Manfrod.Linear.Connection).
 # Fixed dev/test default so `mix test` / `mix phx.server` need no setup — prod
 # MUST set a real LINEAR_ENCRYPTION_KEY (32 random bytes, base64-encoded, e.g.

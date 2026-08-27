@@ -70,6 +70,34 @@ defmodule Manfrod.Kalafiornia.Client do
     end
   end
 
+  @doc """
+  Fetches the office door's access log: every unlock event, newest last,
+  as `%{"time" => iso8601, "event" => ..., "doorId" => ..., "userName" => ...,
+  "openedBy" => "app" | "key"}`. Authenticated with a static API key (not a
+  per-user session) — returns `{:ok, entries}` or `{:error, reason}`.
+  """
+  def office_access_log do
+    api_key = Application.get_env(:manfrod, :kalafiornia_office_access_api_key)
+
+    case Req.get(@base_url <> "/api/log/office-access",
+           headers: [{"x-api-key", api_key}],
+           receive_timeout: 10_000
+         ) do
+      {:ok, %Req.Response{status: 200, body: entries}} when is_list(entries) ->
+        {:ok, entries}
+
+      {:ok, %Req.Response{status: status, body: body}} ->
+        Logger.warning(
+          "Kalafiornia.Client: office_access_log failed: HTTP #{status} #{inspect(body)}"
+        )
+
+        {:error, {:unexpected_status, status}}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
   defp not_logged_in?(body) when is_binary(body), do: String.trim(body) == "Not logged in."
   defp not_logged_in?(_body), do: false
 

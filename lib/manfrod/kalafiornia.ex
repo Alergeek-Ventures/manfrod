@@ -51,6 +51,57 @@ defmodule Manfrod.Kalafiornia do
     end
   end
 
+  @doc """
+  The office door's access log: `%{time: DateTime, event, door_id, user_name,
+  opened_by}` entries, oldest first. `opts`:
+
+    * `:since` — a `Date`/`DateTime`, drop entries strictly before it
+    * `:user_name` — case-insensitive substring match on `user_name`
+
+  Returns `{:ok, entries}` or `{:error, reason}`. Meant to later back a
+  "did this person badge in without starting Firmowid" check — for now it's
+  just the raw filtered log.
+  """
+  def list_office_access_log(opts \\ []) do
+    with {:ok, raw} <- Client.office_access_log() do
+      entries =
+        raw
+        |> Enum.map(&normalize_access_entry/1)
+        |> filter_since(Keyword.get(opts, :since))
+        |> filter_user_name(Keyword.get(opts, :user_name))
+
+      {:ok, entries}
+    end
+  end
+
+  defp normalize_access_entry(%{
+         "time" => time,
+         "event" => event,
+         "doorId" => door_id,
+         "userName" => user_name,
+         "openedBy" => opened_by
+       }) do
+    {:ok, dt, _offset} = DateTime.from_iso8601(time)
+    %{time: dt, event: event, door_id: door_id, user_name: user_name, opened_by: opened_by}
+  end
+
+  defp filter_since(entries, nil), do: entries
+
+  defp filter_since(entries, %Date{} = since) do
+    filter_since(entries, DateTime.new!(since, ~T[00:00:00], "Etc/UTC"))
+  end
+
+  defp filter_since(entries, %DateTime{} = since) do
+    Enum.filter(entries, &(DateTime.compare(&1.time, since) != :lt))
+  end
+
+  defp filter_user_name(entries, nil), do: entries
+
+  defp filter_user_name(entries, wanted) do
+    wanted = String.downcase(wanted)
+    Enum.filter(entries, &String.contains?(String.downcase(&1.user_name), wanted))
+  end
+
   def mark_invalid(%Connection{} = conn) do
     conn |> Connection.changeset(%{status: "invalid"}) |> Repo.update()
   end
