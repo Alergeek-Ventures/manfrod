@@ -401,9 +401,12 @@ defmodule Manfrod.Slack.EventHandler do
     end
   end
 
+  @language_context_limit 6
+
   defp warn_about_secret(bot, event, channel) do
-    lang = SecretDetector.language_hint(event["text"])
-    text = SecretWarning.generate(lang)
+    fallback_lang = SecretDetector.language_hint(event["text"])
+    context = recent_language_context(bot, channel, event["ts"])
+    text = SecretWarning.generate(context, fallback_lang)
 
     if dm_channel?(channel) do
       API.post("chat.postMessage", bot.token, %{channel: channel, text: text})
@@ -419,6 +422,21 @@ defmodule Manfrod.Slack.EventHandler do
       "Slack EventHandler: withheld likely-secret message in #{channel} from " <>
         "#{event["user"]} (buffer/classifier/agent never saw it)"
     )
+  end
+
+  defp recent_language_context(bot, channel, exclude_ts) do
+    case API.list_messages(bot.token, channel, limit: @language_context_limit) do
+      {:ok, messages} ->
+        messages
+        |> Enum.reject(&(&1["ts"] == exclude_ts))
+        |> Enum.map(&Map.get(&1, "text", ""))
+        |> Enum.reject(&(&1 == "" or SecretDetector.contains_secret?(&1)))
+        |> Enum.take(-4)
+        |> Enum.join("\n")
+
+      {:error, _reason} ->
+        ""
+    end
   end
 
   defp suggest_prompts(bot, slack_user_id, channel_id, thread_ts)

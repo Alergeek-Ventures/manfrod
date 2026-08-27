@@ -24,15 +24,20 @@ defmodule Manfrod.Security.SecretWarning do
   Vary the phrasing naturally each time — don't always use the same
   sentence structure. Match the tone of a normal casual DM from a helpful
   coworker, not a security alert. No quotes around the message, no
-  markdown headers. The input you get is just a language code (`pl` or
-  `en`) — write entirely in that language, nothing else.
+  markdown headers.
+
+  The input you get is EITHER a language code (`pl`, `en`, ...) — write
+  entirely in that language — OR a few of this person's other recent Slack
+  messages, labeled as such. In that case they are only there so you can
+  tell which language and tone this person actually writes in; never
+  quote, reference, or reply to what they say in them.
   """
 
-  @spec generate(:pl | :en) :: String.t()
-  def generate(lang) do
+  @spec generate(String.t() | nil, atom()) :: String.t()
+  def generate(context, fallback_lang) do
     messages = [
       ReqLLM.Context.system(@system_message),
-      ReqLLM.Context.user(Atom.to_string(lang))
+      ReqLLM.Context.user(user_content(context, fallback_lang))
     ]
 
     case LLM.generate_simple(@model, messages,
@@ -41,17 +46,23 @@ defmodule Manfrod.Security.SecretWarning do
            timeout_ms: 8_000
          ) do
       {:ok, text} when is_binary(text) ->
-        clean(text, lang)
+        clean(text, fallback_lang)
 
       {:error, reason} ->
         Logger.debug("SecretWarning: LLM error, falling back to fixed text: #{inspect(reason)}")
-        fallback(lang)
+        fallback(fallback_lang)
     end
   end
 
-  defp clean(text, lang) do
+  defp user_content(context, _fallback_lang) when is_binary(context) and context != "" do
+    "Recent messages from this person, oldest first (language/tone reference only):\n#{context}"
+  end
+
+  defp user_content(_context, fallback_lang), do: Atom.to_string(fallback_lang)
+
+  defp clean(text, fallback_lang) do
     case text |> String.trim() |> String.trim("\"") do
-      "" -> fallback(lang)
+      "" -> fallback(fallback_lang)
       cleaned -> cleaned
     end
   end
