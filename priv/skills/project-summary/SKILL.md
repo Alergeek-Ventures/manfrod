@@ -61,6 +61,16 @@ their own short "Linear" line or merged into the relevant time tier). If
 those tools aren't offered, the project has no Linear connection — don't
 mention Linear at all, just summarize from notes as usual.
 
+If `read_slack_canvas` is available in this conversation, also check the
+project's channel for a pinned canvas: call it with the channel (use
+`list_slack_canvases` first if you need to resolve the channel/id). Canvases
+often hold the standing project overview (goals, decisions, links) that notes
+don't repeat day to day — fold anything relevant in as background context
+alongside the notes, rather than as its own dated tier. If the channel has no
+pinned canvas ("Ten kanał nie ma przypiętego canvasu"), say nothing about it
+and just proceed with notes as usual. If the tool isn't offered, skip this
+step entirely.
+
 ## 3. Structure the answer
 
 **Specific date/range or "today"/"yesterday" requested:** one section,
