@@ -446,6 +446,106 @@ defmodule Manfrod.Slack.API do
     end
   end
 
+  @doc """
+  List canvas files visible to the bot, optionally filtered to a single
+  channel. Returns Slack's raw `files.list` entries (each with `"id"`,
+  `"title"`, `"url_private"`, ...) restricted to canvases.
+
+  Requires the `channels:read` scope, plus the file-listing scope
+  (`files:read`) needed for `files.list` in general.
+  """
+  @spec list_canvases(String.t(), keyword()) :: {:ok, [map()]} | {:error, term()}
+  def list_canvases(token, opts \\ []) do
+    params =
+      %{types: "canvas"}
+      |> then(fn p ->
+        case Keyword.get(opts, :channel) do
+          nil -> p
+          channel -> Map.put(p, :channel, channel)
+        end
+      end)
+
+    case get("files.list", token, params) do
+      {:ok, %{"files" => files}} -> {:ok, files}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @doc """
+  The file ID of a channel's built-in canvas (the one pinned to the
+  channel's Canvas tab), if it has one. Returns `{:ok, file_id}`,
+  `{:ok, nil}` when the channel has no canvas, or `{:error, reason}`.
+  """
+  @spec get_channel_canvas_id(String.t(), String.t()) ::
+          {:ok, String.t() | nil} | {:error, term()}
+  def get_channel_canvas_id(token, channel) do
+    case get_channel_info(token, channel) do
+      {:ok, info} -> {:ok, get_in(info, ["properties", "canvas", "file_id"])}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @doc """
+  Fetch file metadata (title, `url_private`, etc.) for a file/canvas ID.
+  Returns Slack's raw `files.info` `"file"` map, or `{:error, reason}`.
+  """
+  @spec get_file_info(String.t(), String.t()) :: {:ok, map()} | {:error, term()}
+  def get_file_info(token, file_id) do
+    case get("files.info", token, %{file: file_id}) do
+      {:ok, %{"file" => file}} -> {:ok, file}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @doc """
+  Download a canvas' (or any file's) raw content from its `url_private`,
+  authenticated with the bot token. Canvas files are served as plain
+  markdown. Returns `{:ok, body}` or `{:error, reason}`.
+  """
+  @spec download_file(String.t(), String.t()) :: {:ok, String.t()} | {:error, term()}
+  def download_file(token, url_private) do
+    case Req.get(url_private, auth: {:bearer, token}) do
+      {:ok, %Req.Response{status: 200, body: body}} ->
+        {:ok, to_string(body)}
+
+      {:ok, %Req.Response{status: status, body: body}} ->
+        Logger.error("Slack file download failed: HTTP #{status}")
+        {:error, {:unexpected_status, status, body}}
+
+      {:error, reason} ->
+        Logger.error("Slack file download transport error: #{inspect(reason)}")
+        {:error, reason}
+    end
+  end
+
+  @doc """
+  Resolve a channel name (with or without leading '#') or ID to a channel
+  ID. IDs are recognized and returned as-is; names are looked up via
+  `list_channels/1` (case-insensitive). Returns `{:ok, channel_id}` or
+  `{:error, :not_found}` / `{:error, reason}`.
+  """
+  @spec resolve_channel(String.t(), String.t() | nil) :: {:ok, String.t()} | {:error, term()}
+  def resolve_channel(token, id) when is_binary(id) and byte_size(id) > 0 do
+    if String.match?(id, ~r/^[CGD][A-Z0-9]{8,}$/) do
+      {:ok, id}
+    else
+      wanted = id |> String.trim_leading("#") |> String.downcase()
+
+      case list_channels(token) do
+        {:ok, channels} ->
+          case Enum.find(channels, &(String.downcase(Map.get(&1, "name", "")) == wanted)) do
+            %{"id" => channel_id} -> {:ok, channel_id}
+            nil -> {:error, :not_found}
+          end
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+    end
+  end
+
+  def resolve_channel(_token, _), do: {:error, :not_found}
+
   defp parse_retry_after(nil), do: 1
   defp parse_retry_after(value) when is_binary(value), do: String.to_integer(value)
 end
