@@ -1,15 +1,16 @@
 defmodule Manfrod.Security.SecretDetector do
   @moduledoc false
 
+  alias Manfrod.Security.GitleaksRules
+
   @min_token_length 12
   @transition_ratio_threshold 0.6
   @token_regex ~r/[A-Za-z0-9\-_\/\+=]{#{@min_token_length},}/
 
   @spec contains_secret?(String.t() | nil) :: boolean()
   def contains_secret?(text) when is_binary(text) do
-    text
-    |> extract_tokens()
-    |> Enum.any?(&looks_like_secret?/1)
+    match?({true, _rule_id}, GitleaksRules.matches?(text)) or
+      text |> extract_tokens() |> Enum.any?(&looks_like_secret?/1)
   end
 
   def contains_secret?(_), do: false

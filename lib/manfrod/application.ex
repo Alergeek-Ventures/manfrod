@@ -5,6 +5,8 @@ defmodule Manfrod.Application do
 
   @impl true
   def start(_type, _args) do
+    Manfrod.Security.GitleaksRules.load!()
+
     children =
       [
         Manfrod.Repo,
