@@ -31,9 +31,6 @@ defmodule Manfrod.Analytics do
   @intent_tools MapSet.new([
                   "reserve_desk",
                   "cancel_desk_reservation",
-                  "add_desk",
-                  "update_desk",
-                  "deactivate_desk",
                   "open_office_door",
                   "set_reminder",
                   "cancel_reminder",
@@ -49,7 +46,12 @@ defmodule Manfrod.Analytics do
                   "link_notes",
                   "unlink_notes",
                   "delete_slack_message",
-                  "leave_thread"
+                  "leave_thread",
+                  "list_office_access_log",
+                  "list_slack_canvases",
+                  "read_slack_canvas",
+                  "linear_list_issues",
+                  "linear_get_issue"
                 ])
 
   @doc """
