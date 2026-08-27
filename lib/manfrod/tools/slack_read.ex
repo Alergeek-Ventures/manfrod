@@ -10,6 +10,7 @@ defmodule Manfrod.Tools.SlackRead do
   plus `users:read` for name resolution.
   """
 
+  alias Manfrod.Security.SecretDetector
   alias Manfrod.Slack.API
 
   @timezone "Europe/Warsaw"
@@ -97,13 +98,23 @@ defmodule Manfrod.Tools.SlackRead do
       Enum.map(messages, fn msg ->
         time = format_ts(Map.get(msg, "ts"))
         author = author_name(msg, user_names)
-        text = resolve_mentions(Map.get(msg, "text", ""), user_names)
+        text = redacted_text(msg, user_names)
         thread_note = thread_note(msg)
 
         "[#{time}] #{author}: #{text}#{thread_note}"
       end)
 
     {:ok, Enum.join(lines, "\n")}
+  end
+
+  defp redacted_text(msg, user_names) do
+    raw = Map.get(msg, "text", "")
+
+    if SecretDetector.contains_secret?(raw) do
+      "[wiadomość ukryta — wygląda na klucz API/hasło]"
+    else
+      resolve_mentions(raw, user_names)
+    end
   end
 
   defp thread_note(%{"reply_count" => count}) when is_integer(count) and count > 0,

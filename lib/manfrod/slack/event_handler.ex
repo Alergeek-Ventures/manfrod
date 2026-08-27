@@ -23,6 +23,7 @@ defmodule Manfrod.Slack.EventHandler do
   alias Manfrod.Memory.Access
   alias Manfrod.Memory.{Admin, Buffer, ChannelDetector, ChannelMapping, Classifier, Project}
   alias Manfrod.Repo
+  alias Manfrod.Security.{SecretDetector, SecretWarning}
   alias Manfrod.Slack.API
   alias Manfrod.Slack.EventDedup
   alias Manfrod.Slack.Feedback
@@ -31,8 +32,6 @@ defmodule Manfrod.Slack.EventHandler do
   alias Manfrod.Slack.ThreadPermission
   alias Manfrod.Slack.UserContext
 
-  # Must match the shortcut's Callback ID in the Slack app config
-  # (Interactivity & Shortcuts → Shortcuts → On messages).
   @kick_callback_id "kick_manfrod"
 
   @doc """
@@ -73,60 +72,15 @@ defmodule Manfrod.Slack.EventHandler do
     slack_user_id = event["user"]
     channel = event["channel"]
 
-    if text_present?(text) and slack_user_id do
-      # Before anything else: a DM is always answered, so the shimmer can go up
-      # the moment the message lands rather than after the identity and channel
-      # lookups below, which are several sequential Slack round trips.
-      if dm_channel?(channel) do
-        start_thinking(bot.token, channel, event["thread_ts"] || event["ts"])
-      end
+    cond do
+      text_present?(text) and not is_nil(slack_user_id) and SecretDetector.contains_secret?(text) ->
+        warn_about_secret(bot, event, channel)
 
-      user_name = resolve_user_name(bot.token, slack_user_id)
-      channel_name = resolve_channel_name(bot.token, channel)
+      text_present?(text) and not is_nil(slack_user_id) ->
+        handle_message(bot, event, text, slack_user_id, channel)
 
-      # Passive memory is always active: every inbound message is buffered for
-      # the Classifier (the single writer). Direct interactions additionally flow
-      # to the agent, whose mutating tools only flag these buffered messages
-      # instead of writing themselves — so no duplicate writes/prompts.
-      Buffer.push(
-        channel,
-        event["thread_ts"],
-        channel_name,
-        %{
-          "user" => slack_user_id,
-          "user_name" => user_name,
-          "text" => text,
-          "ts" => event["ts"]
-        },
-        bot.token
-      )
-
-      # Name-dropped without an actual @mention ("manfrod, could you...") —
-      # acknowledge with an eyes reaction without starting a full
-      # conversation. Independent of the routing below, and of session state.
-      # A kicked thread gets no reaction either: "stop chiming in" covers
-      # emoji, not just words.
-      if not dm_channel?(channel) and not bot_mentioned?(text, bot.user_id) and
-           name_dropped?(text) and
-           not kicked_thread?(channel, event["thread_ts"]) do
-        API.add_reaction(bot.token, channel, event["ts"], "eyes")
-      end
-
-      cond do
-        dm_channel?(channel) ->
-          handle_dm_message(bot, event, text, slack_user_id, channel)
-
-        bot_mentioned?(text, bot.user_id) ->
-          thread_ts = event["thread_ts"] || event["ts"]
-          handle_channel_mention(bot, event, text, slack_user_id, channel, thread_ts)
-
-        true ->
-          # Agent path: thread replies in active sessions (top-level channel
-          # messages without @mention no-op here but are still buffered above).
-          handle_channel_thread_reply(event, bot, text, slack_user_id, channel)
-      end
-    else
-      Logger.debug("Slack EventHandler ignoring message with no text or no user")
+      true ->
+        Logger.debug("Slack EventHandler ignoring message with no text or no user")
     end
 
     :ok
@@ -143,15 +97,10 @@ defmodule Manfrod.Slack.EventHandler do
     :ok
   end
 
-  # A new agent thread was opened. Slack shows the suggested prompts before
-  # the user types anything, so this is the app's shop window — see
-  # `Manfrod.Slack.SuggestedPrompts` for how they are chosen.
   def handle_event("assistant_thread_started", %{"assistant_thread" => thread}, bot) do
     slack_user_id = thread["user_id"]
     channel_id = thread["channel_id"]
 
-    # The thread's own context is fresher than anything cached — record it
-    # before building prompts that may refer to it.
     UserContext.put(slack_user_id, thread["context"])
 
     suggest_prompts(bot, slack_user_id, channel_id, thread["thread_ts"])
@@ -162,8 +111,6 @@ defmodule Manfrod.Slack.EventHandler do
   def handle_event("app_home_opened", %{"user" => slack_user_id} = event, bot) do
     UserContext.put(slack_user_id, event["app_context"])
 
-    # Only the Messages tab has a composer to pin prompts above; the Home tab
-    # is a different surface with no thread to attach them to.
     if event["tab"] in [nil, "messages"] do
       suggest_prompts(bot, slack_user_id, event["channel"], event["thread_ts"])
     end
@@ -171,8 +118,6 @@ defmodule Manfrod.Slack.EventHandler do
     :ok
   end
 
-  # The user navigated somewhere else while the app was open. Recorded so a DM
-  # like "streść mi to" has a referent — see `Manfrod.Slack.UserContext`.
   def handle_event("app_context_changed", %{"user" => slack_user_id} = event, _bot) do
     UserContext.put(slack_user_id, event["app_context"])
     :ok
@@ -226,9 +171,6 @@ defmodule Manfrod.Slack.EventHandler do
     :ok
   end
 
-  # view_submission for the /linear-status "Connect" modal — see
-  # Manfrod.Linear.Status for why this always closes the modal rather than
-  # returning a synchronous `response_action: "errors"`.
   def handle_event(
         "interactive",
         %{"type" => "view_submission", "view" => %{"callback_id" => "linear_connect_modal"}} =
@@ -247,10 +189,6 @@ defmodule Manfrod.Slack.EventHandler do
     :ok
   end
 
-  # "Wyrzuć Manfroda" — a message shortcut rather than a slash command,
-  # because Slack refuses to run app slash commands inside threads at all
-  # (and their payload carries no thread_ts). A message action is the only
-  # surface that both works in a thread and says which thread it means.
   def handle_event(
         "interactive",
         %{"type" => "message_action", "callback_id" => @kick_callback_id} = payload,
@@ -259,9 +197,6 @@ defmodule Manfrod.Slack.EventHandler do
     channel = get_in(payload, ["channel", "id"])
     message = payload["message"] || %{}
     slack_user_id = get_in(payload, ["user", "id"])
-
-    # Set on a reply; absent when the shortcut is used on the thread's root
-    # message, where the root's own ts is the thread id.
     thread_ts = message["thread_ts"] || message["ts"]
 
     kick_thread(bot, channel, thread_ts, slack_user_id, "shortcut")
@@ -309,8 +244,6 @@ defmodule Manfrod.Slack.EventHandler do
             "memory_escalation_cancel" ->
               Classifier.resolve_escalation(:cancel, [], channel_id, bot_msg_ts, bot.token)
 
-            # Ticking a checkbox is not a decision — the prompt stays open until
-            # Save or Cancel. Slack still delivers it, so swallow it quietly.
             "memory_escalation_levels" ->
               :ok
 
@@ -333,10 +266,6 @@ defmodule Manfrod.Slack.EventHandler do
 
   defp kicked_thread?(_channel, _thread_ts), do: false
 
-  # Shared by the message shortcut above and, via `Manfrod.Tools.Kick`, by the
-  # agent asking to leave. The Manfrod account is looked up but not required:
-  # anyone in the thread may evict the bot, including someone who has never
-  # DMed it.
   defp kick_thread(bot, channel, thread_ts, slack_user_id, source)
        when is_binary(channel) and is_binary(thread_ts) do
     user = slack_user_id && Accounts.get_user_by_slack_id(slack_user_id)
@@ -349,8 +278,6 @@ defmodule Manfrod.Slack.EventHandler do
 
     case Kick.run(bot.token, channel, thread_ts, attrs) do
       :already_kicked ->
-        # Don't post a second farewell into a thread already left — tell only
-        # the person who clicked, so the thread stays quiet.
         API.post("chat.postEphemeral", bot.token, %{
           channel: channel,
           thread_ts: thread_ts,
@@ -377,11 +304,6 @@ defmodule Manfrod.Slack.EventHandler do
   @escalation_levels_block "memory_escalation_levels_block"
   @escalation_levels_action "memory_escalation_levels"
 
-  # Which access levels were ticked when Save was pressed. Slack ships the
-  # whole message's input state with every block_actions payload, so the
-  # checkbox selection arrives on the button click itself. A payload without
-  # state (an older prompt, an unexpected shape) falls back to what the bot
-  # had pre-ticked — never to "everything on offer".
   defp selected_escalation_levels(payload, bot_msg_ts) do
     case get_in(payload, [
            "state",
@@ -400,8 +322,6 @@ defmodule Manfrod.Slack.EventHandler do
         Classifier.preselected_levels(bot_msg_ts)
     end
   end
-
-  # -- DM messages: create user on first interaction, forward to Agent ---------
 
   defp handle_dm_message(bot, event, text, slack_user_id, channel) do
     thread_ts = event["thread_ts"] || event["ts"]
@@ -423,16 +343,12 @@ defmodule Manfrod.Slack.EventHandler do
         source: :slack,
         reply_to: %{channel: channel, thread_ts: thread_ts, slack_user_id: slack_user_id},
         ts: event["ts"],
-        # A DM is unambiguous direct address — always respond.
         requires_gate: false
       },
       channel
     )
   end
 
-  # Prefix a DM with where the user is looking, when Slack has told us. Only
-  # DMs get this: in a channel thread the referent of "this" is the thread the
-  # message is already in, and prepending a different channel would confuse it.
   defp with_viewing_context(text, bot_token, slack_user_id) do
     case UserContext.describe(slack_user_id, &resolve_channel_name(bot_token, &1)) do
       nil -> text
@@ -440,13 +356,69 @@ defmodule Manfrod.Slack.EventHandler do
     end
   end
 
-  # Fire-and-forget: this exists to make the bot look responsive, so it must
-  # not itself add a round trip to the path it is trying to shorten. The
-  # status is cleared again once the reply starts streaming — see
-  # `Manfrod.Slack.StreamSession`.
   defp start_thinking(bot_token, channel, thread_ts) do
     Task.start(fn -> API.set_status(bot_token, channel, thread_ts, "is thinking...") end)
     :ok
+  end
+
+  defp handle_message(bot, event, text, slack_user_id, channel) do
+    if dm_channel?(channel) do
+      start_thinking(bot.token, channel, event["thread_ts"] || event["ts"])
+    end
+
+    user_name = resolve_user_name(bot.token, slack_user_id)
+    channel_name = resolve_channel_name(bot.token, channel)
+
+    Buffer.push(
+      channel,
+      event["thread_ts"],
+      channel_name,
+      %{
+        "user" => slack_user_id,
+        "user_name" => user_name,
+        "text" => text,
+        "ts" => event["ts"]
+      },
+      bot.token
+    )
+
+    if not dm_channel?(channel) and not bot_mentioned?(text, bot.user_id) and
+         name_dropped?(text) and
+         not kicked_thread?(channel, event["thread_ts"]) do
+      API.add_reaction(bot.token, channel, event["ts"], "eyes")
+    end
+
+    cond do
+      dm_channel?(channel) ->
+        handle_dm_message(bot, event, text, slack_user_id, channel)
+
+      bot_mentioned?(text, bot.user_id) ->
+        thread_ts = event["thread_ts"] || event["ts"]
+        handle_channel_mention(bot, event, text, slack_user_id, channel, thread_ts)
+
+      true ->
+        handle_channel_thread_reply(event, bot, text, slack_user_id, channel)
+    end
+  end
+
+  defp warn_about_secret(bot, event, channel) do
+    lang = SecretDetector.language_hint(event["text"])
+    text = SecretWarning.generate(lang)
+
+    if dm_channel?(channel) do
+      API.post("chat.postMessage", bot.token, %{channel: channel, text: text})
+    else
+      API.post("chat.postMessage", bot.token, %{
+        channel: channel,
+        thread_ts: event["thread_ts"] || event["ts"],
+        text: text
+      })
+    end
+
+    Logger.warning(
+      "Slack EventHandler: withheld likely-secret message in #{channel} from " <>
+        "#{event["user"]} (buffer/classifier/agent never saw it)"
+    )
   end
 
   defp suggest_prompts(bot, slack_user_id, channel_id, thread_ts)
@@ -467,17 +439,8 @@ defmodule Manfrod.Slack.EventHandler do
 
   defp suggest_prompts(_bot, _slack_user_id, _channel_id, _thread_ts), do: :ok
 
-  # -- Channel thread replies: only respond if bot is already in the thread ---
-
-  # A single @mention arrives as two Slack events (`message` + `app_mention`),
-  # and Socket Mode can redeliver either — without this guard each delivery
-  # would reach the Agent and the bot would reply twice to one message.
   defp handle_channel_mention(bot, event, raw_text, slack_user_id, channel, thread_ts) do
     if EventDedup.first?({:mention, channel, event["ts"]}) do
-      # An explicit @mention is always answered, so — as with a DM — the
-      # shimmer goes up now, ahead of the lookups and the thread backfill.
-      # Inside the dedup guard, or the duplicate `message`/`app_mention`
-      # delivery of one mention would set it twice.
       start_thinking(bot.token, channel, thread_ts)
 
       do_handle_channel_mention(bot, event, raw_text, slack_user_id, channel, thread_ts)
@@ -501,15 +464,10 @@ defmodule Manfrod.Slack.EventHandler do
     if text_present?(cleaned_text) and slack_user_id do
       case Accounts.get_user_by_slack_id(slack_user_id) do
         nil ->
-          # User hasn't DMed the bot yet — reply with instructions
           Logger.info(
             "Slack EventHandler: unknown user #{slack_user_id} in channel, sending DM-first message"
           )
 
-          # Ephemeral in a kicked thread: the person still needs to hear why
-          # they got no answer, but a thread the bot was thrown out of is not
-          # a place for it to post — and their mention did not lift the kick,
-          # since only a known user's mention does that.
           if kicked_thread?(channel, thread_ts) do
             API.post("chat.postEphemeral", bot.token, %{
               channel: channel,
@@ -526,8 +484,6 @@ defmodule Manfrod.Slack.EventHandler do
           end
 
         user ->
-          # An explicit @mention invites the bot into this thread for good —
-          # from now on it may also answer plain replies here.
           ThreadPermission.allow(channel, thread_ts)
 
           channel_info = resolve_channel_info(bot.token, channel)
@@ -546,7 +502,6 @@ defmodule Manfrod.Slack.EventHandler do
               source: :slack,
               reply_to: %{channel: channel, thread_ts: thread_ts, slack_user_id: slack_user_id},
               ts: event["ts"],
-              # An explicit @mention is unambiguous direct address — always respond.
               requires_gate: false
             },
             access_channel_id
@@ -558,8 +513,6 @@ defmodule Manfrod.Slack.EventHandler do
   end
 
   defp handle_channel_thread_reply(event, bot, text, slack_user_id, channel) do
-    # Only handle replies inside existing threads, not top-level channel messages.
-    # A thread reply has thread_ts set (pointing to the parent message).
     thread_ts = event["thread_ts"]
 
     if thread_ts do
@@ -572,13 +525,7 @@ defmodule Manfrod.Slack.EventHandler do
           )
 
         user ->
-          # Only forward if the bot was @mentioned somewhere in this thread
-          # (by anyone — not only by this specific user), so it never barges
-          # into a thread it was not invited into. Deliberately not keyed on
-          # a live Agent session: sessions die on idle timeout, and proactive
-          # or cron posts can create one in a thread nobody invited it to.
           if ThreadPermission.allowed?(bot, channel, thread_ts) do
-            # Strip bot mention if present (user might @mention again in the thread)
             cleaned_text =
               text
               |> String.replace(~r/<@#{Regex.escape(bot.user_id)}>/, "")
@@ -605,8 +552,6 @@ defmodule Manfrod.Slack.EventHandler do
                     slack_user_id: slack_user_id
                   },
                   ts: event["ts"],
-                  # Plain thread reply, no @mention — goes through the
-                  # response gate instead of always triggering a reply.
                   requires_gate: true
                 },
                 access_channel_id
@@ -629,13 +574,6 @@ defmodule Manfrod.Slack.EventHandler do
 
   @thread_history_limit 50
 
-  # An @mention mid-thread where no Agent session exists yet means the bot is
-  # being pulled into a conversation that started without it. Backfill the
-  # prior thread messages into the new session's first message so the agent
-  # joins with the same context as if it had been present from the start —
-  # not as a fresh one-on-one exchange with whoever mentioned it. Mentions at
-  # the thread root, or in threads with a live session, have nothing to
-  # backfill.
   defp maybe_thread_history(bot, event, channel, thread_ts, session_key) do
     if event["thread_ts"] != nil and not session_exists?(session_key) do
       case API.list_thread_replies(bot.token, channel, thread_ts, limit: @thread_history_limit) do
@@ -695,8 +633,6 @@ defmodule Manfrod.Slack.EventHandler do
     "[from: #{format_author(author_name, slack_user_id)}]\n#{text}"
   end
 
-  # Full name + Slack ID, not just the name — two people can share a first
-  # name (or even a full name), but the Slack ID is always unique.
   defp format_author(nil, slack_user_id), do: slack_user_id
   defp format_author(author_name, slack_user_id), do: "#{author_name} <#{slack_user_id}>"
 
@@ -804,8 +740,6 @@ defmodule Manfrod.Slack.EventHandler do
     end
   end
 
-  # Company channel: no project, no client — writes internal, reads include
-  # the caller's project external levels (resolved per user at query time).
   defp map_company_channel(payload, bot_token) do
     channel_id = payload["channel_id"]
     channel_name = payload["channel_name"] || resolve_channel_name(bot_token, channel_id)
@@ -878,8 +812,6 @@ defmodule Manfrod.Slack.EventHandler do
     end
   end
 
-  # -- /add-user: provision a user without requiring them to DM first ---------
-
   @add_user_usage "Użycie: `/add-user @osoba email@domena.pl`"
 
   defp handle_add_user_command(payload, bot_token) do
@@ -904,8 +836,6 @@ defmodule Manfrod.Slack.EventHandler do
     end
   end
 
-  # Slash-command text with escaping enabled delivers mentions as
-  # "<@U123|handle>" (or "<@U123>"); the email is matched anywhere in the rest.
   defp parse_add_user_args(text) do
     with [_, target_id] <- Regex.run(~r/<@([A-Z0-9]+)(?:\|[^>]*)?>/, text),
          [email] <- Regex.run(~r/[\w.+-]+@[\w-]+\.[\w.-]+/, text) do
@@ -915,10 +845,6 @@ defmodule Manfrod.Slack.EventHandler do
     end
   end
 
-  # The users table requires slack_dm_channel_id (DM-first invariant), so a
-  # user added by command gets their DM channel opened up front via
-  # conversations.open — after this they're indistinguishable from a user who
-  # DMed the bot themselves.
   defp provision_user(bot_token, target_id, email) do
     name =
       case API.fetch_user_info(bot_token, target_id) do
