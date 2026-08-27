@@ -107,6 +107,11 @@ config :manfrod, Oban,
        # forgotten-session check for later that day, timed from their own
        # average end-of-workday time
        {"0 9 * * 1-5", Manfrod.Workers.FirmowidReminderSchedulerWorker},
+       # 9pm on Sun-Thu (i.e. the evening before each weekday) - schedules
+       # each Firmowid-connected user's "entered the office but forgot to
+       # start a session" check for the next morning, timed from their own
+       # average start-of-workday time
+       {"0 21 * * 0-4", Manfrod.Workers.FirmowidMorningReminderSchedulerWorker},
        # Every hour - roll raw events into the daily usage/adoption tables
        # before the 7-day audit retention drops them
        {"25 * * * *", Manfrod.Workers.RollupWorker}

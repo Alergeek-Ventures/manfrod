@@ -7,15 +7,15 @@ defmodule Manfrod.Workers.FirmowidReminderSchedulerWorker do
   Replaces the old fixed 19:00-20:00 random-window check
   (`priv/skills/firmowid-session-check/SKILL.md`'s former `RAND(...)` cron)
   with a time tailored to each user: for every user connected to Firmowid,
-  pulls their last `@session_sample_size` sessions, takes the *last* session
-  of each calendar day (a workday usually has several sessions — meetings,
-  breaks — and averaging every single one of those instead of just the
-  final one pulls the result hours earlier than the real end of the
-  workday), averages those per-day end times, and schedules a
+  pulls their recent sessions (`Manfrod.Firmowid.SessionStats`), averages
+  the *last* session's end-time per calendar day, and schedules a
   `Manfrod.Workers.FirmowidSessionCheckWorker` run `@offset_minutes` after
   that predicted end-of-day time. Each scheduled job carries `meta`
   (who/when, in local time) so it's inspectable without decoding
   `scheduled_at`/`args` by hand.
+
+  Mirrored by `Manfrod.Workers.FirmowidMorningReminderSchedulerWorker` for
+  the start-of-day side.
   """
   use Oban.Worker,
     queue: :default,
@@ -24,8 +24,8 @@ defmodule Manfrod.Workers.FirmowidReminderSchedulerWorker do
   require Logger
 
   alias Manfrod.Accounts
+  alias Manfrod.Firmowid.SessionStats
   alias Manfrod.Mcp
-  alias Manfrod.Mcp.Client
   alias Manfrod.Workers.FirmowidSessionCheckWorker
 
   @provider "firmowid"
@@ -69,8 +69,14 @@ defmodule Manfrod.Workers.FirmowidReminderSchedulerWorker do
 
   defp schedule_for_connection(conn, provider, today) do
     with {:ok, access_token} <- Mcp.ensure_valid_token(conn),
-         {:ok, sessions} <- fetch_recent_sessions(provider.mcp_url, access_token),
-         {:ok, avg_time} <- average_end_time(sessions, today) do
+         {:ok, sessions} <-
+           SessionStats.fetch_recent_sessions(
+             provider.mcp_url,
+             access_token,
+             @session_sample_size
+           ),
+         {:ok, avg_time} <-
+           SessionStats.average_time_of_day(sessions, today, "end_datetime", :max) do
       schedule_reminder(conn.user_id, today, avg_time)
     else
       {:error, reason} ->
@@ -83,76 +89,6 @@ defmodule Manfrod.Workers.FirmowidReminderSchedulerWorker do
       :error ->
         0
     end
-  end
-
-  defp fetch_recent_sessions(mcp_url, access_token) do
-    case Client.call_tool(mcp_url, access_token, "list_sessions", %{
-           "input" => %{},
-           "limit" => @session_sample_size,
-           "sort" => [%{"field" => "start_datetime", "direction" => "desc"}]
-         }) do
-      {:ok, result} -> {:ok, extract_sessions(result)}
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
-  defp extract_sessions(%{"structuredContent" => %{"records" => records}})
-       when is_list(records),
-       do: records
-
-  defp extract_sessions(%{"structuredContent" => records}) when is_list(records), do: records
-
-  defp extract_sessions(%{"content" => content}) when is_list(content) do
-    text =
-      content
-      |> Enum.map(fn
-        %{"type" => "text", "text" => text} -> text
-        _ -> nil
-      end)
-      |> Enum.reject(&is_nil/1)
-      |> Enum.join("\n")
-
-    case Jason.decode(text) do
-      {:ok, list} when is_list(list) -> list
-      {:ok, %{"records" => list}} when is_list(list) -> list
-      _ -> []
-    end
-  end
-
-  defp extract_sessions(_), do: []
-
-  # Only the last session of each calendar day represents "end of workday" —
-  # a day usually has several sessions (meetings, breaks resuming later),
-  # and averaging every one of those instead of just the final one pulls
-  # the result hours earlier than reality. Today itself is excluded: its
-  # last session so far is mid-day-in-progress, not the day's real end.
-  defp average_end_time(sessions, today) do
-    seconds =
-      sessions
-      |> Enum.map(&Map.get(&1, "end_datetime"))
-      |> Enum.reject(&is_nil/1)
-      |> Enum.map(&local_datetime/1)
-      |> Enum.reject(&is_nil/1)
-      |> Enum.reject(&(DateTime.to_date(&1) == today))
-      |> Enum.group_by(&DateTime.to_date/1)
-      |> Enum.map(fn {_date, datetimes} -> Enum.max_by(datetimes, &DateTime.to_unix/1) end)
-      |> Enum.map(&seconds_of_day/1)
-
-    case seconds do
-      [] -> :error
-      list -> {:ok, Time.add(~T[00:00:00], round(Enum.sum(list) / length(list)), :second)}
-    end
-  end
-
-  defp local_datetime(iso_string) do
-    case DateTime.from_iso8601(iso_string) do
-      {:ok, dt, _offset} -> DateTime.shift_zone!(dt, @timezone)
-      {:error, _} -> nil
-    end
-  end
-
-  defp seconds_of_day(%DateTime{} = local) do
-    local.hour * 3600 + local.minute * 60 + local.second
   end
 
   defp schedule_reminder(user_id, date, avg_time) do
