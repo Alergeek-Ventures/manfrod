@@ -500,9 +500,17 @@ defmodule Manfrod.Agent.Server do
   end
 
   # LLM call: iteration limit
-  def handle_info({:call_llm, _ctx, iter, refresher_pid}, state) when iter >= 50 do
+  def handle_info({:call_llm, ctx, iter, refresher_pid}, state) when iter >= 50 do
     TypingRefresher.stop(refresher_pid)
     Logger.error("Agent.Server: max tool iterations reached for session #{state.session_key}")
+
+    Events.broadcast(
+      :responding,
+      Map.put(ctx, :meta, %{
+        content: "Sorry, I got stuck working on this and had to stop. Could you try again?"
+      })
+    )
+
     send(self(), :loop)
     {:noreply, state}
   end

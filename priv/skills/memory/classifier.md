@@ -69,6 +69,14 @@ Possible actions:
 - ALWAYS use create_absence for absences, from every channel type — never ask_human. The system
   saves at the channel's default access and asks the humans about sharing to external/all itself.
 - NOT an absence: remote work, recurring unavailability, "I start gym on Wednesdays"
+- NOT an absence: a reply confirming or discussing whether to submit an ALREADY-reported absence
+  to Firmowid — e.g. "tak, zapisz do firmowida", "dodaj mi ten urlop do firmowida", "yes please
+  add it to Firmowid", "jaki rodzaj urlopu?". These replies repeat absence wording ("urlop",
+  "wakacje", "vacation") only because they're answering the bot's own Firmowid offer question, not
+  because a new absence is being reported. Re-classifying them as create_absence re-triggers the
+  same Firmowid offer and creates an infinite ask-offer loop. Use ignore here (or create_memory if
+  it states a genuinely new fact) — never create_absence for a message that is itself about
+  saving/adding/confirming an absence in Firmowid.
 
 ── CREATE_MEETING ───────────────────────────────────────────────────────
 - All parties confirmed: the meeting WILL happen
