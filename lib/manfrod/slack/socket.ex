@@ -93,7 +93,7 @@ defmodule Manfrod.Slack.Socket do
 
       case API.post("apps.connections.open", state.app_token, %{}) do
         {:ok, %{"url" => url}} ->
-          {:reconnect, url, %{state | reconnect_attempts: attempts + 1}}
+          {:reconnect, WebSockex.Conn.new(url), %{state | reconnect_attempts: attempts + 1}}
 
         {:error, reason} ->
           Logger.error("Slack Socket failed to obtain new WSS URL: #{inspect(reason)}")
