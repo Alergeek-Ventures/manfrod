@@ -6,14 +6,19 @@ defmodule Manfrod.Security.SecretDetector do
   @min_token_length 12
   @transition_ratio_threshold 0.6
   @token_regex ~r/[A-Za-z0-9\-_\/\+=]{#{@min_token_length},}/
+  @url_regex ~r/\bhttps?:\/\/\S+/
 
   @spec contains_secret?(String.t() | nil) :: boolean()
   def contains_secret?(text) when is_binary(text) do
-    match?({true, _rule_id}, GitleaksRules.matches?(text)) or
-      text |> extract_tokens() |> Enum.any?(&looks_like_secret?/1)
+    text_without_urls = strip_urls(text)
+
+    match?({true, _rule_id}, GitleaksRules.matches?(text_without_urls)) or
+      text_without_urls |> extract_tokens() |> Enum.any?(&looks_like_secret?/1)
   end
 
   def contains_secret?(_), do: false
+
+  defp strip_urls(text), do: Regex.replace(@url_regex, text, " ")
 
   defp extract_tokens(text), do: Regex.scan(@token_regex, text) |> List.flatten()
 

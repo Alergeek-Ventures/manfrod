@@ -40,6 +40,12 @@ defmodule Manfrod.Security.SecretDetectorTest do
              )
     end
 
+    test "does not flag a URL whose path/query looks high-entropy" do
+      refute SecretDetector.contains_secret?(
+               "link: https://example.com/r/aB3xQ9zK-mN7wJ2hT6yB1cF5dS0gA?token=Zm9vYmFyLXJhbmRvbQ"
+             )
+    end
+
     test "does not flag camelCase identifiers or product names" do
       refute SecretDetector.contains_secret?("wywołaj getUserById na tym obiekcie")
       refute SecretDetector.contains_secret?("mam iPhone15ProMax, działa świetnie")
