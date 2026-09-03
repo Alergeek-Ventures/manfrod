@@ -106,6 +106,7 @@ defmodule Manfrod.Mcp.Client do
       auth: {:bearer, access_token},
       headers: headers,
       json: body,
+      connect_options: [timeout: 5_000],
       receive_timeout: 15_000
     )
   end

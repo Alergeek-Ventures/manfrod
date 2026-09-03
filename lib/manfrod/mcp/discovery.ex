@@ -37,6 +37,7 @@ defmodule Manfrod.Mcp.Discovery do
     case Req.post(mcp_url,
            headers: [{"accept", "application/json, text/event-stream"}],
            json: body,
+           connect_options: [timeout: 5_000],
            receive_timeout: 8_000
          ) do
       {:ok, %Req.Response{status: 200, body: %{"result" => %{"serverInfo" => info}}}} ->
@@ -57,7 +58,7 @@ defmodule Manfrod.Mcp.Discovery do
   end
 
   defp probe_image(url) do
-    case Req.get(url, receive_timeout: 8_000) do
+    case Req.get(url, connect_options: [timeout: 5_000], receive_timeout: 8_000) do
       {:ok, %Req.Response{status: 200} = resp} ->
         content_type = Req.Response.get_header(resp, "content-type") |> List.first() || ""
         if String.starts_with?(content_type, "image/"), do: url, else: nil
