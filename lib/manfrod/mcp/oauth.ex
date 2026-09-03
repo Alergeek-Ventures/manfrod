@@ -34,7 +34,7 @@ defmodule Manfrod.Mcp.OAuth do
   end
 
   defp fetch_metadata(url) do
-    case Req.get(url, receive_timeout: 10_000) do
+    case Req.get(url, connect_options: [timeout: 5_000], receive_timeout: 10_000) do
       {:ok, %Req.Response{status: 200, body: %{"authorization_endpoint" => _} = body}} ->
         {:ok,
          %{
@@ -82,6 +82,7 @@ defmodule Manfrod.Mcp.OAuth do
                response_types: ["code"],
                token_endpoint_auth_method: "none"
              },
+             connect_options: [timeout: 5_000],
              receive_timeout: 10_000
            ) do
       Mcp.save_oauth_client(provider, %{
@@ -176,7 +177,11 @@ defmodule Manfrod.Mcp.OAuth do
     form =
       if client.client_secret, do: Map.put(form, :client_secret, client.client_secret), else: form
 
-    case Req.post(client.token_endpoint, form: form, receive_timeout: 10_000) do
+    case Req.post(client.token_endpoint,
+           form: form,
+           connect_options: [timeout: 5_000],
+           receive_timeout: 10_000
+         ) do
       {:ok, %Req.Response{status: 200, body: body}} when is_map(body) ->
         {:ok,
          %{
