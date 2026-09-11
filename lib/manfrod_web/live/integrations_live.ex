@@ -15,13 +15,22 @@ defmodule ManfrodWeb.IntegrationsLive do
   alias Manfrod.Mcp
 
   @impl true
-  def mount(_params, _session, socket) do
+  def mount(_params, %{} = _session, socket) do
+    if connected?(socket) do
+      Mcp.subscribe_connections(socket.assigns.current_scope.user.id)
+    end
+
     {:ok,
      socket
      |> assign(show_add_form: false)
      |> assign(add_form: %{"url" => "", "name" => ""})
      |> assign(adding: false)
      |> load_data()}
+  end
+
+  @impl true
+  def handle_info(:connections_changed, socket) do
+    {:noreply, load_data(socket)}
   end
 
   @impl true
