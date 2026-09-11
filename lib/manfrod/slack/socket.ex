@@ -99,9 +99,7 @@ defmodule Manfrod.Slack.Socket do
     idle_for = System.monotonic_time(:millisecond) - state.last_activity
 
     if idle_for >= @idle_timeout do
-      Logger.warning(
-        "Slack Socket idle for #{idle_for}ms with no frames — forcing reconnect"
-      )
+      Logger.warning("Slack Socket idle for #{idle_for}ms with no frames — forcing reconnect")
 
       {:close, state}
     else
