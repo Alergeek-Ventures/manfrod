@@ -15,6 +15,10 @@ defmodule Manfrod.Slack.Socket do
   - `disconnect` frames are handled gracefully
   - Self-message filter uses `bot.id` correctly (slack_elixir matched on a
     non-existent struct field)
+  - A watchdog force-reconnects if no frame (including WS pings) has been
+    seen for a while — guards against a connection that goes silently dead
+    (e.g. dropped by a network intermediary) without ever firing
+    `handle_disconnect/2`
   """
 
   use WebSockex
@@ -24,6 +28,8 @@ defmodule Manfrod.Slack.Socket do
   alias Manfrod.Slack.API
 
   @max_reconnect_attempts 10
+  @watchdog_interval :timer.seconds(60)
+  @idle_timeout :timer.minutes(5)
 
   # ---------------------------------------------------------------------------
   # Public API
@@ -45,7 +51,8 @@ defmodule Manfrod.Slack.Socket do
       app_token: app_token,
       bot: bot,
       event_handler: event_handler,
-      reconnect_attempts: 0
+      reconnect_attempts: 0,
+      last_activity: System.monotonic_time(:millisecond)
     }
 
     case API.post("apps.connections.open", app_token, %{}) do
@@ -62,7 +69,15 @@ defmodule Manfrod.Slack.Socket do
   # ---------------------------------------------------------------------------
 
   @impl WebSockex
+  def handle_connect(_conn, state) do
+    schedule_watchdog()
+    {:ok, %{state | last_activity: System.monotonic_time(:millisecond)}}
+  end
+
+  @impl WebSockex
   def handle_frame({:text, raw}, state) do
+    state = touch(state)
+
     case Jason.decode(raw) do
       {:ok, message} ->
         handle_message(message, state)
@@ -73,7 +88,27 @@ defmodule Manfrod.Slack.Socket do
     end
   end
 
-  def handle_frame(_frame, state), do: {:ok, state}
+  def handle_frame(_frame, state), do: {:ok, touch(state)}
+
+  @impl WebSockex
+  def handle_ping(:ping, state), do: {:reply, :pong, touch(state)}
+  def handle_ping({:ping, msg}, state), do: {:reply, {:pong, msg}, touch(state)}
+
+  @impl WebSockex
+  def handle_info(:connection_watchdog, state) do
+    idle_for = System.monotonic_time(:millisecond) - state.last_activity
+
+    if idle_for >= @idle_timeout do
+      Logger.warning(
+        "Slack Socket idle for #{idle_for}ms with no frames — forcing reconnect"
+      )
+
+      {:close, state}
+    else
+      schedule_watchdog()
+      {:ok, state}
+    end
+  end
 
   @impl WebSockex
   def handle_disconnect(_connection_status, state) do
@@ -157,6 +192,12 @@ defmodule Manfrod.Slack.Socket do
   # ---------------------------------------------------------------------------
   # Helpers
   # ---------------------------------------------------------------------------
+
+  defp schedule_watchdog do
+    Process.send_after(self(), :connection_watchdog, @watchdog_interval)
+  end
+
+  defp touch(state), do: %{state | last_activity: System.monotonic_time(:millisecond)}
 
   defp dispatch_task(fun) do
     Task.Supervisor.start_child(

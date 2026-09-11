@@ -185,10 +185,26 @@ defmodule Manfrod.Mcp do
   def mark_expired(%Connection{status: "expired"} = conn), do: {:ok, conn}
 
   def mark_expired(%Connection{} = conn) do
-    conn
-    |> Connection.changeset(%{status: "expired"})
-    |> Repo.update()
+    with {:ok, updated} <-
+           conn
+           |> Connection.changeset(%{status: "expired"})
+           |> Repo.update() do
+      Phoenix.PubSub.broadcast(
+        Manfrod.PubSub,
+        connections_topic(updated.user_id),
+        :connections_changed
+      )
+
+      {:ok, updated}
+    end
   end
+
+  @doc "Subscribe to changes in a user's MCP connections (e.g. marked expired in the background)."
+  def subscribe_connections(user_id) when is_binary(user_id) do
+    Phoenix.PubSub.subscribe(Manfrod.PubSub, connections_topic(user_id))
+  end
+
+  defp connections_topic(user_id), do: "mcp_connections:#{user_id}"
 
   def mark_notified(%Connection{} = conn) do
     conn
