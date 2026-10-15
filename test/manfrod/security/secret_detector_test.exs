@@ -17,7 +17,7 @@ defmodule Manfrod.Security.SecretDetectorTest do
       assert SecretDetector.contains_secret?("github token #{fake_pat}")
     end
 
-    test "flags tokens that frequently switch character class (random keys/passwords)" do
+    test "flags a labelled credential whose value mixes letters and digits" do
       assert SecretDetector.contains_secret?(
                "tutaj klucz: qX7pL2vR9zK4mN8wJ3hT6yB1cF5dS0gA-uE_oP"
              )
@@ -27,11 +27,27 @@ defmodule Manfrod.Security.SecretDetectorTest do
              )
 
       assert SecretDetector.contains_secret?("ważne hasło: X9jo84N8LCpGpds!")
+      assert SecretDetector.contains_secret?("api key: new1_98a23ce2152c40bca6d7a98c494ff02a")
     end
 
     test "does not flag ordinary sentences" do
       refute SecretDetector.contains_secret?("hej siema, jak leci? co u ciebie słychać dzisiaj")
       refute SecretDetector.contains_secret?("zwykle zdanie bez zadnych sekretow tylko slowa")
+    end
+
+    test "does not flag sentences that merely mention keys, tokens or the API" do
+      refute SecretDetector.contains_secret?(
+               "dalem mu pare poprawek na watki, obsluge ich, zapisywanie kontekstu, " <>
+                 "nieprzerywanie w srodku konwy, mam nadzieje ze bedzie troche lepiej"
+             )
+
+      refute SecretDetector.contains_secret?("token: wygenerowałem nowy dzisiaj, sprawdźcie")
+      refute SecretDetector.contains_secret?("klucz do biura jest u recepcji, password do wifi na tablicy")
+      refute SecretDetector.contains_secret?("the api key rotation is scheduled for friday")
+    end
+
+    test "does not flag random-looking text without a provider format or a label" do
+      refute SecretDetector.contains_secret?("qX7pL2vR9zK4mN8wJ3hT6yB1cF5dS0gA")
     end
 
     test "does not flag a normal URL" do

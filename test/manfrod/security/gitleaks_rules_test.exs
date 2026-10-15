@@ -28,11 +28,10 @@ defmodule Manfrod.Security.GitleaksRulesTest do
   """
 
   describe "parse/1" do
-    test "extracts id, regex, and keywords per rule, skipping rules without a regex" do
+    test "extracts id, regex, and keywords per rule, skipping rules without a regex and generic rules" do
       rules = GitleaksRules.parse(@fixture)
 
-      assert length(rules) == 2
-      assert Enum.map(rules, & &1.id) == ["adafruit-api-key", "generic-password"]
+      assert Enum.map(rules, & &1.id) == ["adafruit-api-key"]
 
       adafruit = Enum.find(rules, &(&1.id == "adafruit-api-key"))
       assert adafruit.keywords == ["adafruit"]
@@ -58,6 +57,11 @@ defmodule Manfrod.Security.GitleaksRulesTest do
 
     test "does not match an ordinary sentence" do
       refute GitleaksRules.matches?("hej, jak leci dzisiaj w pracy")
+
+      refute GitleaksRules.matches?(
+               "dalem mu pare poprawek na watki, obsluge ich, zapisywanie kontekstu, " <>
+                 "nieprzerywanie w srodku konwy"
+             )
     end
 
     test "loads at least 200 rules from the vendored file" do
