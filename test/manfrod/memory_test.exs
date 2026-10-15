@@ -587,8 +587,11 @@ defmodule Manfrod.MemoryTest do
     test "get_soul/1 returns first node by insertion" do
       user_id = test_user_id()
       n1 = insert_node!(%{content: "First soul"})
-      Process.sleep(10)
       _n2 = insert_node!(%{content: "Second"})
+
+      # inserted_at has second precision; make the order unambiguous
+      earlier = NaiveDateTime.add(NaiveDateTime.utc_now(), -60) |> NaiveDateTime.truncate(:second)
+      Repo.update_all(from(n in Manfrod.Memory.Node, where: n.id == ^n1.id), set: [inserted_at: earlier])
 
       soul = Memory.get_soul(user_id)
       assert soul.id == n1.id
