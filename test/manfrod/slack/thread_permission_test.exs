@@ -10,6 +10,8 @@ defmodule Manfrod.Slack.ThreadPermissionTest do
   # Each test gets its own thread, so the process-wide ETS cache can't leak a
   # verdict from one test into the next.
   setup do
+    unless Process.whereis(ThreadPermission), do: start_supervised!(ThreadPermission)
+
     {:ok, thread_ts: "#{System.unique_integer([:positive])}.000100"}
   end
 

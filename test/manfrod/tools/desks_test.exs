@@ -7,6 +7,8 @@ defmodule Manfrod.Tools.DesksTest do
 
   @no_channel %{channel: nil, ts: nil}
 
+  defp future_date, do: Date.utc_today() |> Date.add(30) |> Date.to_iso8601()
+
   defp run(name, user_id, args, msg_ctx \\ @no_channel) do
     tool =
       %{user_id: user_id, msg_ctx: msg_ctx}
@@ -20,14 +22,15 @@ defmodule Manfrod.Tools.DesksTest do
     test "reserves and then reports the conflict on a second attempt" do
       desk = insert_desk!(%{label: "A1"})
       user_id = test_user_id()
+      date = future_date()
 
-      assert {:ok, msg} = run("reserve_desk", user_id, %{desk_label: desk.label, date: "2026-08-01"})
+      assert {:ok, msg} = run("reserve_desk", user_id, %{desk_label: desk.label, date: date})
       assert msg =~ "Reserved desk A1"
 
       other = insert_user!()
 
       assert {:ok, msg} =
-               run("reserve_desk", other.id, %{desk_label: desk.label, date: "2026-08-01"})
+               run("reserve_desk", other.id, %{desk_label: desk.label, date: date})
 
       assert msg =~ "already booked"
     end
@@ -44,14 +47,15 @@ defmodule Manfrod.Tools.DesksTest do
     test "cancel only removes the caller's own reservation" do
       desk = insert_desk!(%{label: "A1"})
       user_id = test_user_id()
-      {:ok, _} = run("reserve_desk", user_id, %{desk_label: desk.label, date: "2026-08-01"})
+      date = future_date()
+      {:ok, _} = run("reserve_desk", user_id, %{desk_label: desk.label, date: date})
 
       other = insert_user!()
 
       assert {:ok, msg} =
                run("cancel_desk_reservation", other.id, %{
                  desk_label: desk.label,
-                 date: "2026-08-01"
+                 date: date
                })
 
       assert msg =~ "don't have a reservation"
@@ -59,7 +63,7 @@ defmodule Manfrod.Tools.DesksTest do
       assert {:ok, msg} =
                run("cancel_desk_reservation", user_id, %{
                  desk_label: desk.label,
-                 date: "2026-08-01"
+                 date: date
                })
 
       assert msg =~ "Cancelled"
