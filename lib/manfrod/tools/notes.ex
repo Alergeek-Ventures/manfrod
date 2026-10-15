@@ -305,15 +305,20 @@ defmodule Manfrod.Tools.Notes do
   end
 
   defp delete_note(user_id, readable_levels, msg_ctx, %{id: id}) do
-    with {:ok, channel_id, ts} <- Support.flaggable(msg_ctx),
+    with false <- Memory.soul?(id),
+         {:ok, channel_id, ts} <- Support.flaggable(msg_ctx),
          node when not is_nil(node) <- Memory.get_node_accessible(readable_levels, id) do
       PendingOps.add_op(channel_id, ts, {:delete, %{node_id: id, user_id: user_id}})
       {:ok, "Zaznaczyłem notatkę do usunięcia: #{id}"}
     else
+      true -> {:ok, soul_note_message(id)}
       :error -> delete_note_direct(user_id, readable_levels, id)
       nil -> {:ok, "Note not found: #{id}"}
     end
   end
+
+  defp soul_note_message(id),
+    do: "Note #{id} is a soul and can't be deleted. Change it with update_soul instead."
 
   defp delete_note_direct(user_id, readable_levels, id) do
     case Memory.get_node_accessible(readable_levels, id) do
@@ -324,6 +329,7 @@ defmodule Manfrod.Tools.Notes do
         case Memory.delete_node(user_id, id) do
           {:ok, _node} -> {:ok, "Deleted note: #{id}"}
           {:error, :not_found} -> {:ok, "Note not found or not yours: #{id}"}
+          {:error, :soul} -> {:ok, soul_note_message(id)}
         end
     end
   end

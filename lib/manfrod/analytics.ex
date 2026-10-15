@@ -45,6 +45,8 @@ defmodule Manfrod.Analytics do
                   "delete_note",
                   "link_notes",
                   "unlink_notes",
+                  "update_soul",
+                  "set_soul_note",
                   "delete_slack_message",
                   "leave_thread",
                   "list_office_access_log",

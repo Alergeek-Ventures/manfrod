@@ -16,6 +16,7 @@ defmodule Manfrod.Memory do
   import Pgvector.Ecto.Query
   import Paradex
 
+  alias Manfrod.Accounts.User
   alias Manfrod.Events
   alias Manfrod.Repo
   alias Manfrod.Voyage
@@ -184,22 +185,122 @@ defmodule Manfrod.Memory do
 
   # --- Soul ---
 
+  # A user's soul is the note that anchors their graph: it opens every system
+  # prompt and note context built for them. It is an explicit pointer on the
+  # user (`users.soul_node_id`), so it survives retrospection and can be
+  # rewritten or moved on request. A user without one adopts their oldest
+  # note, the way the soul used to be defined implicitly.
+
+  @doc "Whether the user has a soul (or a note that can become it)."
+  def has_soul?(user_id), do: get_soul(user_id) != nil
+
   @doc """
-  Check if the user's zettelkasten has a soul (any nodes exist).
+  Get a user's soul note. Without a user, the oldest soul in the graph — the
+  entry point the graph view centers on. Returns nil if there is none.
   """
-  def has_soul?(user_id) do
-    Repo.exists?(from(n in Node, where: n.user_id == ^user_id))
+  def get_soul(user_id \\ nil)
+
+  def get_soul(nil) do
+    Repo.one(
+      from n in Node,
+        join: u in User,
+        on: u.soul_node_id == n.id,
+        order_by: [asc: n.inserted_at],
+        limit: 1
+    )
+  end
+
+  def get_soul(user_id) do
+    case Repo.get(User, user_id) do
+      nil -> nil
+      %User{soul_node_id: nil} = user -> adopt_first_node(user)
+      %User{soul_node_id: node_id} = user -> Repo.get(Node, node_id) || adopt_first_node(user)
+    end
+  end
+
+  defp adopt_first_node(%User{slack_id: "system:" <> _}), do: nil
+
+  defp adopt_first_node(user) do
+    first =
+      Repo.one(
+        from n in Node,
+          where: n.user_id == ^user.id,
+          order_by: [asc: n.inserted_at, asc: n.id],
+          limit: 1
+      )
+
+    if first, do: point_soul(user, first.id)
+    first
+  end
+
+  @doc "Whether the node is anyone's soul."
+  def soul?(node_id) do
+    case Ecto.UUID.cast(node_id) do
+      {:ok, id} -> Repo.exists?(from u in User, where: u.soul_node_id == ^id)
+      :error -> false
+    end
+  end
+
+  @doc "Ids of every soul note."
+  def soul_node_ids do
+    from(u in User, where: not is_nil(u.soul_node_id), select: u.soul_node_id)
+    |> Repo.all()
+    |> MapSet.new()
   end
 
   @doc """
-  Get the soul for a user - the first node by insertion time.
-  Returns nil if no nodes exist for the user.
+  Make an existing note the user's soul. The previous soul stays as an
+  ordinary note.
   """
-  def get_soul(user_id \\ nil) do
-    scoped_nodes_query(user_id)
-    |> order_by([n], asc: n.inserted_at)
-    |> limit(1)
-    |> Repo.one()
+  def set_soul(user_id, node_id) do
+    with %User{} = user <- Repo.get(User, user_id),
+         %Node{} = node <- Repo.get(Node, node_id),
+         {:ok, _user} <- point_soul(user, node.id) do
+      {:ok, node}
+    else
+      nil -> {:error, :not_found}
+      {:error, changeset} -> {:error, changeset}
+    end
+  end
+
+  @doc """
+  Rewrite the user's soul, or create it (in `access`) if they have none.
+  `embedding` is the embedding of `content`.
+  """
+  def update_soul(user_id, content, embedding, access) do
+    case get_soul(user_id) do
+      nil ->
+        with {:ok, node} <-
+               create_node(user_id, access, %{
+                 content: content,
+                 embedding: embedding,
+                 processed_at: DateTime.utc_now() |> DateTime.truncate(:second)
+               }),
+             {:ok, node} <- set_soul(user_id, node.id) do
+          {:ok, node}
+        end
+
+      soul ->
+        case soul |> Node.changeset(%{content: content, embedding: embedding}) |> Repo.update() do
+          {:ok, updated} ->
+            Events.broadcast(:memory_node_updated, %{
+              user_id: user_id,
+              source: :memory,
+              meta: %{node_id: updated.id, content_preview: String.slice(updated.content, 0, 100)}
+            })
+
+            {:ok, updated}
+
+          error ->
+            error
+        end
+    end
+  end
+
+  defp point_soul(user, node_id) do
+    user
+    |> Ecto.Changeset.change(soul_node_id: node_id)
+    |> Repo.update()
   end
 
   # --- Nodes ---
@@ -464,49 +565,34 @@ defmodule Manfrod.Memory do
   """
   def delete_node(user_id, node_id) do
     case get_node(user_id, node_id) do
-      nil ->
-        {:error, :not_found}
-
-      node ->
-        # Delete all links involving this node
-        from(l in Link,
-          where: l.node_a_id == ^node_id or l.node_b_id == ^node_id
-        )
-        |> Repo.delete_all()
-
-        # Delete the node
-        Repo.delete(node)
-
-        Events.broadcast(:memory_node_deleted, %{
-          user_id: user_id,
-          source: :memory,
-          meta: %{node_id: node_id}
-        })
-
-        {:ok, node}
+      nil -> {:error, :not_found}
+      node -> remove_node(node, user_id)
     end
   end
 
   def delete_node_accessible(readable_levels, node_id) do
     case get_node_accessible(readable_levels, node_id) do
-      nil ->
-        {:error, :not_found}
+      nil -> {:error, :not_found}
+      node -> remove_node(node, node.user_id)
+    end
+  end
 
-      node ->
-        from(l in Link,
-          where: l.node_a_id == ^node_id or l.node_b_id == ^node_id
-        )
-        |> Repo.delete_all()
+  # A soul is never deleted outright: point the user at another one first
+  # (set_soul/2), or rewrite it (update_soul/4).
+  defp remove_node(node, event_user_id) do
+    if soul?(node.id) do
+      {:error, :soul}
+    else
+      Repo.delete_all(from l in Link, where: l.node_a_id == ^node.id or l.node_b_id == ^node.id)
+      Repo.delete(node)
 
-        Repo.delete(node)
+      Events.broadcast(:memory_node_deleted, %{
+        user_id: event_user_id,
+        source: :memory,
+        meta: %{node_id: node.id}
+      })
 
-        Events.broadcast(:memory_node_deleted, %{
-          user_id: node.user_id,
-          source: :memory,
-          meta: %{node_id: node_id}
-        })
-
-        {:ok, node}
+      {:ok, node}
     end
   end
 
@@ -698,19 +784,14 @@ defmodule Manfrod.Memory do
   and are at least `:min_age_days` old — candidates for retiring once what
   they describe is over. Random order, so notes that turn out to still be
   relevant don't crowd out the rest day after day. Never returns a user's
-  soul (their oldest node, see `get_soul/1`).
+  soul (see `get_soul/1`).
   """
   def get_time_bound_nodes_by_access(access, opts \\ []) do
     limit = Keyword.get(opts, :limit, 40)
     min_age_days = Keyword.get(opts, :min_age_days, 1)
     cutoff = NaiveDateTime.add(NaiveDateTime.utc_now(), -min_age_days * 86_400)
 
-    souls =
-      from(m in Node,
-        distinct: m.user_id,
-        order_by: [asc: m.user_id, asc: m.inserted_at],
-        select: m.id
-      )
+    souls = from(u in User, where: not is_nil(u.soul_node_id), select: u.soul_node_id)
 
     Node
     |> where([n], n.access == ^access and not is_nil(n.processed_at))

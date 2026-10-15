@@ -112,6 +112,20 @@ defmodule Manfrod.Memory.RetrospectorTest do
     end
   end
 
+  describe "merge_exact_duplicates/0 and souls" do
+    test "keeps the soul when it has an exact duplicate" do
+      content = unique_content("Soul fact")
+      soul = insert_node!(%{content: content})
+      duplicate = insert_node!(%{content: content})
+      {:ok, _} = Memory.set_soul(test_user_id(), soul.id)
+
+      Retrospector.merge_exact_duplicates()
+
+      assert Repo.get(Node, soul.id)
+      refute Repo.get(Node, duplicate.id)
+    end
+  end
+
   describe "Memory.get_time_bound_nodes_by_access/2" do
     defp processed_node!(content, days_old) do
       node =
@@ -130,6 +144,8 @@ defmodule Manfrod.Memory.RetrospectorTest do
       meeting = processed_node!(unique_content("Spotkanie z klientem w czwartek"), 3)
       lasting = processed_node!(unique_content("Projekt używa Elixira i Phoenixa"), 3)
       fresh = processed_node!(unique_content("Jutro deploy"), 0)
+      soul = processed_node!(unique_content("Urlop zawsze w sierpniu"), 3)
+      {:ok, _} = Memory.set_soul(test_user_id(), soul.id)
 
       ids =
         ["internal"]
@@ -140,6 +156,7 @@ defmodule Manfrod.Memory.RetrospectorTest do
       assert meeting.id in ids
       refute lasting.id in ids
       refute fresh.id in ids
+      refute soul.id in ids
     end
   end
 end
