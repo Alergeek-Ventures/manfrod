@@ -6,8 +6,10 @@ defmodule Manfrod.Memory.Soul do
   to the system prompt to collect soul-defining information from the user.
 
   The conversation (including user responses) gets extracted into nodes
-  on idle timeout, with the first node becoming the "soul" - the entry
-  point to the knowledge graph.
+  on idle timeout, and the user's first node becomes their "soul" — the
+  entry point to the knowledge graph, kept as an explicit pointer
+  (`users.soul_node_id`) that the agent rewrites only on request
+  (`Manfrod.Tools.Soul`).
 
   Edit `@base_prompt` manually to customize the onboarding questionnaire.
   """

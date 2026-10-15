@@ -194,6 +194,13 @@ defmodule Manfrod.Memory.Retrospector do
     schedule.
   - Still upcoming or ongoing, recurring, or you can't tell → leave it.
 
+  ## Souls
+
+  A note marked `[soul]` is the anchor of someone's graph: it opens every
+  conversation with them. Link to it freely, but never delete, merge away or
+  rewrite it — only its owner can change it. When a soul has a duplicate,
+  keep the soul and delete the duplicate.
+
   ## Contradictions
 
   When two notes disagree, the newer one (by written date) is usually a
@@ -393,15 +400,20 @@ defmodule Manfrod.Memory.Retrospector do
       :noop
     else
       link_counts = link_counts(Enum.map(nodes, & &1.id))
+      souls = Memory.soul_node_ids()
+      soul? = &MapSet.member?(souls, &1.id)
 
-      [survivor | losers] =
+      # A soul always survives its duplicates, and is never absorbed itself.
+      [survivor | rest] =
         Enum.sort_by(nodes, fn n ->
-          {-Map.get(link_counts, n.id, 0), if(n.processed_at, do: 0, else: 1), n.inserted_at}
+          {if(soul?.(n), do: 0, else: 1), -Map.get(link_counts, n.id, 0),
+           if(n.processed_at, do: 0, else: 1), n.inserted_at}
         end)
 
+      losers = Enum.reject(rest, soul?)
       group_ids = MapSet.new(nodes, & &1.id)
       Enum.each(losers, &absorb(survivor, &1, group_ids))
-      {:ok, length(losers)}
+      if losers == [], do: :noop, else: {:ok, length(losers)}
     end
   end
 
@@ -667,12 +679,16 @@ defmodule Manfrod.Memory.Retrospector do
   @neighbor_max_distance 0.5
   @likely_duplicate_distance 0.15
 
+  defp format_nodes([], _readable_levels), do: ""
+
   defp format_nodes(nodes, readable_levels) do
     project_names = project_name_map()
+    souls = Memory.soul_node_ids()
 
     nodes
     |> Enum.map(fn n ->
-      base = "- [#{n.id}]#{project_tag(n, project_names)} (#{written_on(n)}) #{n.content}"
+      base =
+        "- [#{n.id}]#{soul_tag(n, souls)}#{project_tag(n, project_names)} (#{written_on(n)}) #{n.content}"
 
       case Memory.similar_nodes(n, readable_levels,
              limit: @neighbor_limit,
@@ -687,7 +703,7 @@ defmodule Manfrod.Memory.Retrospector do
               similarity = Float.round(1.0 - distance, 2)
               flag = if distance < @likely_duplicate_distance, do: " LIKELY DUPLICATE —", else: ""
 
-              "    ~ [#{m.id}]#{project_tag(m, project_names)} (#{written_on(m)}, sim #{similarity})#{flag} #{m.content}"
+              "    ~ [#{m.id}]#{soul_tag(m, souls)}#{project_tag(m, project_names)} (#{written_on(m)}, sim #{similarity})#{flag} #{m.content}"
             end)
 
           Enum.join([base | neighbor_lines], "\n")
@@ -703,6 +719,8 @@ defmodule Manfrod.Memory.Retrospector do
     do: at |> DateTime.to_date() |> Date.to_iso8601()
 
   defp written_on(_node), do: "?"
+
+  defp soul_tag(node, souls), do: if(MapSet.member?(souls, node.id), do: " [soul]", else: "")
 
   defp project_name_map do
     Map.new(Memory.list_projects(), fn p -> {p.id, p.name} end)
@@ -1292,35 +1310,36 @@ defmodule Manfrod.Memory.Retrospector do
   defp tool_update_node(readable_levels, %{id: id, content: content} = args) do
     project_name = Map.get(args, :project)
 
-    case resolve_project_id(project_name) do
-      {:ok, project_id} ->
-        case Voyage.embed_query(content) do
-          {:ok, embedding} ->
-            attrs = %{content: content, embedding: embedding}
-            # Only touch project_id when the agent explicitly named one —
-            # most update_node calls are content-only fixes and must not
-            # silently clear an existing project attribution.
-            attrs = if project_name, do: Map.put(attrs, :project_id, project_id), else: attrs
+    with {:soul, false} <- {:soul, Memory.soul?(id)},
+         {:ok, project_id} <- resolve_project_id(project_name),
+         {:ok, embedding} <- embed(content) do
+      attrs = %{content: content, embedding: embedding}
+      # Only touch project_id when the agent explicitly named one —
+      # most update_node calls are content-only fixes and must not
+      # silently clear an existing project attribution.
+      attrs = if project_name, do: Map.put(attrs, :project_id, project_id), else: attrs
 
-            case Memory.update_node_accessible(readable_levels, id, attrs) do
-              {:ok, _node} ->
-                {:ok, "Updated node: #{id}"}
-
-              {:error, :not_found} ->
-                {:ok, "Node not found: #{id}"}
-
-              {:error, changeset} ->
-                {:ok, "Failed to update node: #{inspect(changeset.errors)}"}
-            end
-
-          {:error, reason} ->
-            {:ok, "Failed to generate embedding: #{inspect(reason)}"}
-        end
-
-      {:error, :unknown_project} ->
-        {:ok, unknown_project_message(project_name)}
+      case Memory.update_node_accessible(readable_levels, id, attrs) do
+        {:ok, _node} -> {:ok, "Updated node: #{id}"}
+        {:error, :not_found} -> {:ok, "Node not found: #{id}"}
+        {:error, changeset} -> {:ok, "Failed to update node: #{inspect(changeset.errors)}"}
+      end
+    else
+      {:soul, true} -> {:ok, soul_message(id)}
+      {:error, :unknown_project} -> {:ok, unknown_project_message(project_name)}
+      {:error, {:embedding, reason}} -> {:ok, "Failed to generate embedding: #{inspect(reason)}"}
     end
   end
+
+  defp embed(content) do
+    case Voyage.embed_query(content) do
+      {:ok, embedding} -> {:ok, embedding}
+      {:error, reason} -> {:error, {:embedding, reason}}
+    end
+  end
+
+  defp soul_message(id),
+    do: "Node #{id} is a soul — it can't be rewritten or deleted here. Link to it instead."
 
   defp tool_create_link(user_id, %{node_a_id: a, node_b_id: b} = args) do
     opts = if args[:context], do: [context: args[:context]], else: []
@@ -1348,6 +1367,9 @@ defmodule Manfrod.Memory.Retrospector do
 
       {:error, :not_found} ->
         {:ok, "Node not found: #{id}"}
+
+      {:error, :soul} ->
+        {:ok, soul_message(id)}
     end
   end
 

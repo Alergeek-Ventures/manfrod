@@ -7,7 +7,7 @@ defmodule ManfrodWeb.GraphLive do
   - Click node to view details in side panel
   - Search to highlight matching nodes
   - Filter by status (all / processed / slipbox)
-  - Initial view centers on the "soul" (first node)
+  - Initial view centers on the oldest "soul" in the graph
   """
   use ManfrodWeb, :live_view
 
@@ -134,6 +134,9 @@ defmodule ManfrodWeb.GraphLive do
 
           {:error, :not_found} ->
             {:noreply, put_flash(socket, :error, "Node not found or not accessible")}
+
+          {:error, :soul} ->
+            {:noreply, put_flash(socket, :error, "This node is a soul and can't be deleted")}
         end
     end
   end

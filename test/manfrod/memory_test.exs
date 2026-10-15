@@ -594,6 +594,61 @@ defmodule Manfrod.MemoryTest do
       assert soul.id == n1.id
       assert soul.content == "First soul"
     end
+
+    test "get_soul/1 records the adopted note as the user's soul" do
+      user_id = test_user_id()
+      n1 = insert_node!(%{content: "First soul"})
+
+      Memory.get_soul(user_id)
+
+      assert Repo.get(Manfrod.Accounts.User, user_id).soul_node_id == n1.id
+      assert Memory.soul?(n1.id)
+    end
+
+    test "set_soul/2 moves the soul to another note and keeps the old one" do
+      user_id = test_user_id()
+      first = insert_node!(%{content: "First soul"})
+      other = insert_node!(%{content: "Chosen soul"})
+
+      assert {:ok, _} = Memory.set_soul(user_id, other.id)
+
+      assert Memory.get_soul(user_id).id == other.id
+      assert Repo.get(Manfrod.Memory.Node, first.id)
+      refute Memory.soul?(first.id)
+    end
+
+    test "update_soul/4 rewrites the soul in place" do
+      user_id = test_user_id()
+      soul = insert_node!(%{content: "Old soul"})
+      Memory.get_soul(user_id)
+
+      assert {:ok, updated} =
+               Memory.update_soul(user_id, "New soul", fake_embedding("New soul"), ["internal"])
+
+      assert updated.id == soul.id
+      assert Memory.get_soul(user_id).content == "New soul"
+    end
+
+    test "update_soul/4 creates a soul for a user without one" do
+      user_id = test_user_id()
+
+      assert {:ok, soul} =
+               Memory.update_soul(user_id, "Fresh soul", fake_embedding("Fresh soul"), [
+                 "private/#{user_id}"
+               ])
+
+      assert Memory.get_soul(user_id).id == soul.id
+    end
+
+    test "a soul can't be deleted" do
+      user_id = test_user_id()
+      soul = insert_node!(%{content: "Soul"})
+      Memory.get_soul(user_id)
+
+      assert {:error, :soul} = Memory.delete_node(user_id, soul.id)
+      assert {:error, :soul} = Memory.delete_node_accessible(["internal"], soul.id)
+      assert Repo.get(Manfrod.Memory.Node, soul.id)
+    end
   end
 
   describe "build_context/1" do

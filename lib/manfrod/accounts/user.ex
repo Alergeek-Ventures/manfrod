@@ -9,6 +9,7 @@ defmodule Manfrod.Accounts.User do
   - `email` — backfilled from Slack (`users:read.email` scope) or set
     during Google Sign-In linking.
   - A linked `GoogleIdentity` — created when the user signs in with Google.
+  - A soul (`soul_node_id`) — the note that anchors their memory graph.
 
   The user record is the tenant anchor for all scoped data (memory graph,
   conversations, reminders, audit events).
@@ -30,6 +31,10 @@ defmodule Manfrod.Accounts.User do
     field :email, :string
 
     has_one :google_identity, GoogleIdentity
+
+    # The note that anchors this user's graph (see Manfrod.Memory.get_soul/1).
+    # Set programmatically, never cast from user input.
+    belongs_to :soul_node, Manfrod.Memory.Node
 
     timestamps()
   end
