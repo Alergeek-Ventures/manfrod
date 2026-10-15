@@ -69,7 +69,24 @@ defmodule Manfrod.Slack.ActivityHandler do
   Used by `Manfrod.Proactive` to start new DM threads.
   """
   def start_thread(channel) do
-    GenServer.call(__MODULE__, {:start_thread, channel})
+    %{token: token} = GenServer.call(__MODULE__, :bot)
+    MessageServer.ensure_started(token, channel)
+
+    case API.post("chat.postMessage", token, %{
+           channel: channel,
+           text: ":hourglass_flowing_sand: Thinking..."
+         }) do
+      {:ok, %{"ts" => placeholder_ts}} ->
+        GenServer.call(__MODULE__, {:register_placeholder, channel, placeholder_ts})
+        {:ok, placeholder_ts}
+
+      {:error, reason} ->
+        Logger.error(
+          "Slack ActivityHandler failed to start thread in #{channel}: #{inspect(reason)}"
+        )
+
+        {:error, reason}
+    end
   end
 
   # ---------------------------------------------------------------------------
@@ -86,27 +103,16 @@ defmodule Manfrod.Slack.ActivityHandler do
 
   # -- start_thread (for proactive messages) ----------------------------------
 
+  # The Slack call itself happens in the caller (start_thread/1): this
+  # process delivers every thread's activity, so it must never wait on Slack.
   @impl true
-  def handle_call({:start_thread, channel}, _from, state) do
-    MessageServer.ensure_started(state.bot.token, channel)
+  def handle_call(:bot, _from, state), do: {:reply, state.bot, state}
 
-    case API.post("chat.postMessage", state.bot.token, %{
-           channel: channel,
-           text: ":hourglass_flowing_sand: Thinking..."
-         }) do
-      {:ok, %{"ts" => placeholder_ts}} ->
-        state =
-          put_in(state, [:pending, {channel, placeholder_ts}], %{placeholder_ts: placeholder_ts})
+  def handle_call({:register_placeholder, channel, placeholder_ts}, _from, state) do
+    state =
+      put_in(state, [:pending, {channel, placeholder_ts}], %{placeholder_ts: placeholder_ts})
 
-        {:reply, {:ok, placeholder_ts}, state}
-
-      {:error, reason} ->
-        Logger.error(
-          "Slack ActivityHandler failed to start thread in #{channel}: #{inspect(reason)}"
-        )
-
-        {:reply, {:error, reason}, state}
-    end
+    {:reply, :ok, state}
   end
 
   # -- :thinking --------------------------------------------------------------
@@ -236,16 +242,20 @@ defmodule Manfrod.Slack.ActivityHandler do
 
     {stream, state} = pop_in(state, [:streams, key])
 
-    delivered =
-      if stream do
-        finish_stream(channel, thread_ts, content, activity)
-      else
-        :not_streaming
-      end
+    bot_token = state.bot.token
 
-    if delivered == :not_streaming do
-      post_message(state, channel, thread_ts, content, activity.session_key)
-    end
+    async(fn ->
+      delivered =
+        if stream do
+          finish_stream(channel, thread_ts, content, activity)
+        else
+          :not_streaming
+        end
+
+      if delivered == :not_streaming do
+        post_message(bot_token, channel, thread_ts, content, activity.session_key)
+      end
+    end)
 
     state =
       state
@@ -275,18 +285,22 @@ defmodule Manfrod.Slack.ActivityHandler do
         state
       )
       when is_binary(emoji) and is_binary(ts) do
-    case API.add_reaction(state.bot.token, channel, ts, emoji) do
-      {:ok, _} ->
-        :ok
+    bot_token = state.bot.token
 
-      {:error, "already_reacted"} ->
-        :ok
+    async(fn ->
+      case API.add_reaction(bot_token, channel, ts, emoji) do
+        {:ok, _} ->
+          :ok
 
-      {:error, reason} ->
-        Logger.warning(
-          "Slack ActivityHandler failed to add reaction :#{emoji}: in #{channel}: #{inspect(reason)}"
-        )
-    end
+        {:error, "already_reacted"} ->
+          :ok
+
+        {:error, reason} ->
+          Logger.warning(
+            "Slack ActivityHandler failed to add reaction :#{emoji}: in #{channel}: #{inspect(reason)}"
+          )
+      end
+    end)
 
     {:noreply, state}
   end
@@ -404,7 +418,7 @@ defmodule Manfrod.Slack.ActivityHandler do
   # message to msg_too_long.
   @markdown_block_limit 11_900
 
-  defp post_message(state, channel, thread_ts, content, session_key) do
+  defp post_message(bot_token, channel, thread_ts, content, session_key) do
     {text, table_blocks} = Mrkdwn.to_blocks(content)
 
     message =
@@ -416,7 +430,7 @@ defmodule Manfrod.Slack.ActivityHandler do
           %{thread_ts: thread_ts, text: text, blocks: body ++ [Feedback.block(session_key)]}
       end
 
-    MessageServer.ensure_started(state.bot.token, channel)
+    MessageServer.ensure_started(bot_token, channel)
     MessageServer.send_message(channel, message)
   end
 
@@ -502,15 +516,28 @@ defmodule Manfrod.Slack.ActivityHandler do
   # ---------------------------------------------------------------------------
 
   defp set_status(bot_token, channel, thread_ts, status) do
-    case API.set_status(bot_token, channel, thread_ts, status) do
-      {:ok, _} ->
-        :ok
+    async(fn ->
+      case API.set_status(bot_token, channel, thread_ts, status) do
+        {:ok, _} ->
+          :ok
 
-      {:error, reason} ->
-        Logger.error(
-          "Slack ActivityHandler failed to set status in #{channel}: #{inspect(reason)}"
-        )
-    end
+        {:error, reason} ->
+          Logger.error(
+            "Slack ActivityHandler failed to set status in #{channel}: #{inspect(reason)}"
+          )
+      end
+    end)
+  end
+
+  # Slack calls run off this process: it serves every thread, and one slow
+  # or rate-limited call must not hold up delivery everywhere else.
+  defp async(fun) do
+    Task.Supervisor.start_child(
+      {:via, PartitionSupervisor, {Manfrod.Slack.TaskSupervisors, make_ref()}},
+      fun
+    )
+
+    :ok
   end
 
   defp humanize(action_name) when is_binary(action_name) do

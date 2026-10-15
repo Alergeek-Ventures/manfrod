@@ -122,6 +122,92 @@ defmodule Manfrod.Facts do
   end
 
   @doc """
+  Record an absence for `user_id`, replacing any of their absences whose
+  dates overlap it: a restated or corrected absence supersedes the old
+  record instead of sitting next to it. A replaced record keeps its access,
+  so a correction of an absence already shared with clients is shared too.
+
+  Returns `{:ok, fact, :created | :replaced}` or `{:error, changeset}`.
+  """
+  @spec put_absence(binary(), String.t(), String.t(), String.t(), [String.t()]) ::
+          {:ok, Fact.t(), :created | :replaced} | {:error, Ecto.Changeset.t()}
+  def put_absence(user_id, start_date, end_date, description, access) do
+    key = "absence:#{user_id}:#{start_date}"
+    value = "#{start_date}..#{end_date} — #{description}"
+
+    Repo.transaction(fn ->
+      case overlapping_absences(user_id, start_date, end_date) do
+        [] ->
+          case set_fact(key, value, access, user_id) do
+            {:ok, fact} -> {fact, :created}
+            {:error, changeset} -> Repo.rollback(changeset)
+          end
+
+        [kept | others] ->
+          Enum.each(others, &Repo.delete!/1)
+          Repo.delete_all(from f in Fact, where: f.key == ^key and f.id != ^kept.id)
+
+          case kept |> Fact.changeset(%{key: key, value: value}) |> Repo.update() do
+            {:ok, fact} -> {fact, :replaced}
+            {:error, changeset} -> Repo.rollback(changeset)
+          end
+      end
+    end)
+    |> case do
+      {:ok, {fact, outcome}} -> {:ok, fact, outcome}
+      {:error, changeset} -> {:error, changeset}
+    end
+  end
+
+  @doc """
+  The user's absences whose date range overlaps `start_date..end_date`
+  (ISO dates), regardless of access.
+  """
+  @spec overlapping_absences(binary(), String.t(), String.t()) :: [Fact.t()]
+  def overlapping_absences(user_id, start_date, end_date) do
+    with {:ok, new_from} <- Date.from_iso8601(start_date),
+         {:ok, new_to} <- Date.from_iso8601(end_date) do
+      "absence:"
+      |> list_facts_by_user_unscoped(user_id)
+      |> Enum.filter(fn fact ->
+        case parse_date_range(fact.value) do
+          {:ok, from, to} ->
+            Date.compare(new_from, to) != :gt and Date.compare(new_to, from) != :lt
+
+          :error ->
+            false
+        end
+      end)
+    else
+      _ -> []
+    end
+  end
+
+  @doc """
+  Delete absences that ended before `date`. They are only noise once over:
+  the leave digest, holiday checks and the agent all care about upcoming or
+  current absences, and Firmowid keeps the real leave history.
+
+  Returns the number of facts deleted.
+  """
+  @spec delete_absences_ended_before(Date.t()) :: non_neg_integer()
+  def delete_absences_ended_before(date) do
+    ids =
+      from(f in Fact, where: like(f.key, "absence:%"))
+      |> Repo.all()
+      |> Enum.filter(fn fact ->
+        case parse_date_range(fact.value) do
+          {:ok, _from, to} -> Date.compare(to, date) == :lt
+          :error -> false
+        end
+      end)
+      |> Enum.map(& &1.id)
+
+    {count, _} = Repo.delete_all(from f in Fact, where: f.id in ^ids)
+    count
+  end
+
+  @doc """
   Parse a fact value of the form "YYYY-MM-DD..YYYY-MM-DD — ..." into its
   {from, to} date range. Returns :error if the value doesn't start with a
   recognizable date range.

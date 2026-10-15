@@ -752,8 +752,8 @@ defmodule Manfrod.Slack.EventHandler do
   defp private_conversation?(_event, _channel, _channel_info), do: false
 
   defp resolve_channel_info(token, channel) do
-    case API.get("conversations.info", token, %{channel: channel}) do
-      {:ok, %{"channel" => info}} ->
+    case API.get_channel_info(token, channel) do
+      {:ok, info} ->
         %{
           name: Map.get(info, "name") || channel,
           is_im: Map.get(info, "is_im") == true,

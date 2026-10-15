@@ -111,4 +111,35 @@ defmodule Manfrod.Memory.RetrospectorTest do
       assert Repo.get(Node, b.id)
     end
   end
+
+  describe "Memory.get_time_bound_nodes_by_access/2" do
+    defp processed_node!(content, days_old) do
+      node =
+        insert_node!(%{
+          content: content,
+          processed_at: DateTime.utc_now() |> DateTime.truncate(:second)
+        })
+
+      written = NaiveDateTime.add(NaiveDateTime.utc_now(), -days_old * 86_400)
+      Repo.update_all(from(n in Node, where: n.id == ^node.id), set: [inserted_at: written])
+      node
+    end
+
+    test "finds older notes about dated or one-off events" do
+      dated = processed_node!(unique_content("Franek ma urlop 2026-10-08..2026-10-16"), 3)
+      meeting = processed_node!(unique_content("Spotkanie z klientem w czwartek"), 3)
+      lasting = processed_node!(unique_content("Projekt używa Elixira i Phoenixa"), 3)
+      fresh = processed_node!(unique_content("Jutro deploy"), 0)
+
+      ids =
+        ["internal"]
+        |> Memory.get_time_bound_nodes_by_access(limit: 10_000)
+        |> MapSet.new(& &1.id)
+
+      assert dated.id in ids
+      assert meeting.id in ids
+      refute lasting.id in ids
+      refute fresh.id in ids
+    end
+  end
 end

@@ -38,5 +38,21 @@ defmodule Manfrod.Tools.VacationTest do
 
       assert msg =~ "Ola Test bierze urlop 2026-08-15..2026-08-16"
     end
+
+    test "records work away from the office as work, with its details" do
+      user = insert_user!(%{name: "Ola Test"})
+
+      assert {:ok, msg} =
+               run("report_vacation", user.id, %{
+                 start_date: "2026-10-08",
+                 end_date: "2026-10-16",
+                 working: true,
+                 details: "wyjazd do klienta Scape w Sztokholmie"
+               })
+
+      assert msg =~ "Ola Test pracuje poza biurem 2026-10-08..2026-10-16"
+      assert msg =~ "Scape"
+      refute msg =~ "urlop"
+    end
   end
 end

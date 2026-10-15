@@ -247,50 +247,50 @@ defmodule Manfrod.Memory.Classifier do
     user_name = message["user_name"] || message["user"] || "unknown"
     user_id = find_user_id(message["user"])
     {start_date, end_date} = absence_dates(result)
+    note = note_or_text(result, message)
 
-    if user_id && already_recorded_absence?(user_id, start_date, end_date) do
-      Logger.debug("Classifier create_absence: already covered for #{user_id}, skipping")
-    else
-      # Fact value keeps the resolved conclusion first; the literal message stays
-      # as provenance. The key carries the resolved start date, not "today".
-      key = "absence:#{user_id || user_name}:#{start_date}"
-      value = "#{start_date}..#{end_date} — \"#{text}\""
-      Facts.set_fact(key, value, write_access, user_id)
+    overlapping? =
+      user_id != nil and Facts.overlapping_absences(user_id, start_date, end_date) != []
 
-      if user_id do
-        note = note_or_text(result, message)
+    cond do
+      # The agent recorded it on purpose (report_vacation) over an absence we
+      # already have: a correction or restatement. The record is replaced,
+      # and the sharing prompt / Firmowid offer are not repeated.
+      overlapping? and result["flagged"] == true ->
+        case Facts.put_absence(user_id, start_date, end_date, note, write_access) do
+          {:ok, fact, _outcome} ->
+            create_absence_node(user_id, fact.access, note, channel_id)
 
-        case Voyage.embed_query(note) do
-          {:ok, embedding} ->
-            node_attrs = %{
-              content: note,
-              embedding: embedding,
-              project_id: project_id_for_channel(channel_id)
-            }
-
-            case Memory.create_node(user_id, write_access, node_attrs) do
-              {:ok, node} ->
-                maybe_propose_absence_escalation(
-                  channel_id,
-                  kind,
-                  message["ts"],
-                  node,
-                  key,
-                  write_access,
-                  bot_token,
-                  lang(result)
-                )
-
-                maybe_offer_firmowid_leave_request(user_id, start_date, end_date)
-
-              {:error, reason} ->
-                Logger.error("Classifier create_absence node error: #{inspect(reason)}")
-            end
-
-          {:error, reason} ->
-            Logger.error("Classifier create_absence embed error: #{inspect(reason)}")
+          {:error, changeset} ->
+            Logger.error("Classifier create_absence correction failed: #{inspect(changeset)}")
         end
-      end
+
+      # The same absence mentioned again (e.g. on another channel).
+      overlapping? ->
+        Logger.debug("Classifier create_absence: already covered for #{user_id}, skipping")
+
+      true ->
+        key = "absence:#{user_id || user_name}:#{start_date}"
+        value = "#{start_date}..#{end_date} — #{absence_description(note, text)}"
+        Facts.set_fact(key, value, write_access, user_id)
+
+        with true <- user_id != nil,
+             {:ok, node} <- create_absence_node(user_id, write_access, note, channel_id) do
+          maybe_propose_absence_escalation(
+            channel_id,
+            kind,
+            message["ts"],
+            node,
+            key,
+            write_access,
+            bot_token,
+            lang(result)
+          )
+
+          unless result["working"] == true do
+            maybe_offer_firmowid_leave_request(user_id, start_date, end_date)
+          end
+        end
     end
 
     :ok
@@ -351,19 +351,24 @@ defmodule Manfrod.Memory.Classifier do
     :ok
   end
 
-  defp already_recorded_absence?(user_id, start_date, end_date) do
-    with {:ok, new_from} <- Date.from_iso8601(start_date),
-         {:ok, new_to} <- Date.from_iso8601(end_date) do
-      Facts.list_facts_by_user_unscoped("absence:", user_id)
-      |> Enum.any?(fn fact ->
-        with {:ok, from, to} <- Facts.parse_date_range(fact.value) do
-          Date.compare(new_from, to) != :gt and Date.compare(new_to, from) != :lt
-        else
-          _ -> false
-        end
-      end)
+  # The resolved note first; the literal message stays as provenance when the
+  # note is a reformulation of it.
+  defp absence_description(note, text) when note == text, do: "\"#{text}\""
+  defp absence_description(note, text), do: "#{note} (\"#{text}\")"
+
+  defp create_absence_node(user_id, access, note, channel_id) do
+    with {:ok, embedding} <- Voyage.embed_query(note),
+         {:ok, node} <-
+           Memory.create_node(user_id, access, %{
+             content: note,
+             embedding: embedding,
+             project_id: project_id_for_channel(channel_id)
+           }) do
+      {:ok, node}
     else
-      _ -> false
+      {:error, reason} ->
+        Logger.error("Classifier create_absence node error: #{inspect(reason)}")
+        {:error, reason}
     end
   end
 
@@ -381,6 +386,8 @@ defmodule Manfrod.Memory.Classifier do
       |> maybe_override("note", Map.get(flag, :content))
       |> maybe_override("start_date", Map.get(flag, :start_date))
       |> maybe_override("end_date", Map.get(flag, :end_date))
+      |> maybe_override("working", Map.get(flag, :working))
+      |> Map.put("flagged", true)
 
     {flag.action, result}
   end

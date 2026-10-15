@@ -18,7 +18,9 @@ defmodule Manfrod.Memory.Retrospector do
     nodes as a side effect of a bucket having new slipbox content, so a fully
     processed bucket never gets revisited otherwise and near-duplicates/orphans
     accumulate. This runs the same agent over a review sample of every
-    processed bucket regardless of slipbox state.
+    processed bucket regardless of slipbox state, plus a sample of notes that
+    mention dates or one-off events, so ones whose event is over get retired.
+    It also deletes absence facts that ended over a week ago, mechanically.
 
   Every listed node (slipbox or review sample) is annotated with its nearest
   embedding neighbors so the agent sees duplicate suspects and link candidates
@@ -49,10 +51,18 @@ defmodule Manfrod.Memory.Retrospector do
 
   require Logger
 
-  alias Manfrod.{Events, LLM, Memory, Repo, Voyage}
+  alias Manfrod.{Events, Facts, LLM, Memory, Repo, Voyage}
   alias Manfrod.Accounts.User
   alias Manfrod.Memory.{Access, Link, Node}
   alias Manfrod.Tools.WebSearch
+
+  # How many possibly expired notes the daily review checks per bucket.
+  @time_bound_budget 40
+
+  # Absence records are kept this long after they end, then deleted.
+  @absence_grace_days 7
+
+  @timezone "Europe/Warsaw"
 
   # Embed zettelkasten guide at compile time
   @external_resource Path.join(__DIR__, "zettelkasten.md")
@@ -168,6 +178,27 @@ defmodule Manfrod.Memory.Retrospector do
     noticed it while working the graph.
   - Use `list_projects` if you're unsure of a project's exact name/slug.
 
+  ## Time-bound Notes
+
+  Your input starts with today's date, and every listed note shows the date
+  it was written. A note about a one-off event, plan, meeting, absence,
+  deadline or temporary state ("Franek jest na urlopie 8-16.10", "spotkanie
+  z klientem w czwartek", "trzeba wysłać ofertę do piątku") stops being
+  useful once that date has passed. Relative dates ("jutro", "w piątek")
+  count from the day the note was written.
+
+  - Over, with nothing lasting in it → delete_node.
+  - Over, but it records something that still matters (a decision taken, an
+    outcome, how something works, someone's preference) → update_node to
+    keep only that lasting part, in the past tense, without the stale
+    schedule.
+  - Still upcoming or ongoing, recurring, or you can't tell → leave it.
+
+  ## Contradictions
+
+  When two notes disagree, the newer one (by written date) is usually a
+  correction of the older: keep the newer, and fix or delete the older.
+
   ## Structure Notes
 
   When the graph reaches ~700 nodes, start creating structure notes - hub nodes
@@ -275,6 +306,7 @@ defmodule Manfrod.Memory.Retrospector do
   """
   def review_processed_graph(opts \\ []) do
     merge_exact_duplicates()
+    prune_past_absences()
 
     budget = Keyword.get(opts, :review_budget, 100)
     buckets = Memory.list_processed_access_buckets()
@@ -290,23 +322,52 @@ defmodule Manfrod.Memory.Retrospector do
         user_id = find_bucket_user_id(access_bucket)
         review_sample = user_id && build_review_sample(access_bucket, budget)
 
+        time_bound =
+          user_id &&
+            Memory.get_time_bound_nodes_by_access(access_bucket, limit: @time_bound_budget)
+
         cond do
           is_nil(user_id) ->
             Logger.warning(
               "Retrospector: no user found for bucket #{inspect(access_bucket)}, skipping"
             )
 
-          review_sample == [] ->
+          review_sample == [] and time_bound == [] ->
             :ok
 
           true ->
-            run_agent(user_id, readable_levels, access_bucket, [], review_sample, :graph_review)
+            run_agent(
+              user_id,
+              readable_levels,
+              access_bucket,
+              [],
+              review_sample,
+              :graph_review,
+              time_bound
+            )
         end
       end)
 
       :ok
     end
   end
+
+  @doc """
+  Delete absence facts that ended more than #{@absence_grace_days} days ago —
+  mechanically, no LLM. Returns the number deleted.
+  """
+  def prune_past_absences do
+    cutoff = Date.add(local_today(), -@absence_grace_days)
+    count = Facts.delete_absences_ended_before(cutoff)
+
+    if count > 0 do
+      Logger.info("Retrospector: deleted #{count} absence fact(s) that ended before #{cutoff}")
+    end
+
+    count
+  end
+
+  defp local_today, do: @timezone |> DateTime.now!() |> DateTime.to_date()
 
   # ---------------------------------------------------------------------------
   # Mechanical exact-duplicate merge
@@ -534,17 +595,31 @@ defmodule Manfrod.Memory.Retrospector do
   # Agent run
   # ---------------------------------------------------------------------------
 
-  defp run_agent(user_id, readable_levels, write_access, slipbox, review_sample, kind) do
+  defp run_agent(
+         user_id,
+         readable_levels,
+         write_access,
+         slipbox,
+         review_sample,
+         kind,
+         time_bound \\ []
+       ) do
     slipbox_text = format_nodes(slipbox, readable_levels)
     review_text = format_nodes(review_sample, readable_levels)
+    time_bound_text = format_nodes(time_bound, readable_levels)
 
     Events.broadcast(:retrospection_started, %{
       user_id: user_id,
       source: :retrospector,
-      meta: %{slipbox_count: length(slipbox), review_count: length(review_sample), kind: kind}
+      meta: %{
+        slipbox_count: length(slipbox),
+        review_count: length(review_sample),
+        time_bound_count: length(time_bound),
+        kind: kind
+      }
     })
 
-    user_message = build_user_message(slipbox_text, review_text)
+    user_message = build_user_message(slipbox_text, review_text, time_bound_text)
 
     messages = [
       ReqLLM.Context.system(@system_prompt),
@@ -597,7 +672,7 @@ defmodule Manfrod.Memory.Retrospector do
 
     nodes
     |> Enum.map(fn n ->
-      base = "- [#{n.id}]#{project_tag(n, project_names)} #{n.content}"
+      base = "- [#{n.id}]#{project_tag(n, project_names)} (#{written_on(n)}) #{n.content}"
 
       case Memory.similar_nodes(n, readable_levels,
              limit: @neighbor_limit,
@@ -612,7 +687,7 @@ defmodule Manfrod.Memory.Retrospector do
               similarity = Float.round(1.0 - distance, 2)
               flag = if distance < @likely_duplicate_distance, do: " LIKELY DUPLICATE —", else: ""
 
-              "    ~ [#{m.id}]#{project_tag(m, project_names)} (sim #{similarity})#{flag} #{m.content}"
+              "    ~ [#{m.id}]#{project_tag(m, project_names)} (#{written_on(m)}, sim #{similarity})#{flag} #{m.content}"
             end)
 
           Enum.join([base | neighbor_lines], "\n")
@@ -620,6 +695,14 @@ defmodule Manfrod.Memory.Retrospector do
     end)
     |> Enum.join("\n")
   end
+
+  defp written_on(%{inserted_at: %NaiveDateTime{} = at}),
+    do: at |> NaiveDateTime.to_date() |> Date.to_iso8601()
+
+  defp written_on(%{inserted_at: %DateTime{} = at}),
+    do: at |> DateTime.to_date() |> Date.to_iso8601()
+
+  defp written_on(_node), do: "?"
 
   defp project_name_map do
     Map.new(Memory.list_projects(), fn p -> {p.id, p.name} end)
@@ -634,7 +717,13 @@ defmodule Manfrod.Memory.Retrospector do
     end
   end
 
-  defp build_user_message(slipbox_text, review_text) do
+  defp build_user_message(slipbox_text, review_text, time_bound_text) do
+    today = local_today()
+
+    date_line =
+      "Today is #{Date.to_iso8601(today)} (#{Calendar.strftime(today, "%A")}). " <>
+        "Dates in parentheses are when each note was written.\n\n"
+
     slipbox_section =
       if slipbox_text == "" do
         "Your slipbox is empty - no new notes to process."
@@ -672,7 +761,24 @@ defmodule Manfrod.Memory.Retrospector do
         """
       end
 
-    slipbox_section <> review_section
+    time_bound_section =
+      if time_bound_text == "" do
+        ""
+      else
+        """
+
+        ## Possibly expired notes
+
+        These notes mention dates, days or one-off events. Check each one
+        against today's date (see "Time-bound Notes"): delete the ones that
+        are over, trim the ones that are over but hold something lasting,
+        leave the rest.
+
+        #{time_bound_text}
+        """
+      end
+
+    date_line <> slipbox_section <> review_section <> time_bound_section
   end
 
   # Bounds a single agent run's iteration count — the rest of the
