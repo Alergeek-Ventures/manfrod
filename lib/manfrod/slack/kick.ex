@@ -131,7 +131,7 @@ defmodule Manfrod.Slack.Kick do
   # The last few messages, oldest first, as plain "author: text" lines. On any
   # API trouble the model simply writes a generic goodbye instead.
   defp thread_context(token, channel, thread_ts) do
-    case API.list_thread_replies(token, channel, thread_ts, limit: 200) do
+    case API.list_full_thread(token, channel, thread_ts) do
       {:ok, messages} ->
         messages
         |> Enum.take(-@context_messages)

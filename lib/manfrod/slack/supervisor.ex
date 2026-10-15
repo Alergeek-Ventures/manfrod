@@ -27,6 +27,7 @@ defmodule Manfrod.Slack.Supervisor do
     EventHandler,
     Socket,
     ThreadPermission,
+    ThreadSeen,
     UserContext
   }
 
@@ -65,6 +66,8 @@ defmodule Manfrod.Slack.Supervisor do
       EventDedup,
       # Which channel threads the bot has been invited into (@mentioned in)
       ThreadPermission,
+      # Which thread messages each thread session already has in context
+      ThreadSeen,
       # Where each user is currently looking (app_context_changed)
       UserContext,
       # Outbound: PubSub → Slack delivery

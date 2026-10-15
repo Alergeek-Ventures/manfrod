@@ -53,7 +53,7 @@ defmodule Manfrod.Slack.ThreadPermission do
   @allowed_ttl_ms :timer.hours(24)
   @denied_ttl_ms :timer.minutes(5)
   @sweep_interval_ms :timer.minutes(10)
-  @thread_scan_limit 200
+  @thread_scan_limit 1000
 
   def start_link(_opts) do
     GenServer.start_link(__MODULE__, nil, name: __MODULE__)
@@ -164,7 +164,7 @@ defmodule Manfrod.Slack.ThreadPermission do
   end
 
   defp mentioned_in_thread?(bot, channel, thread_ts) do
-    case API.list_thread_replies(bot.token, channel, thread_ts, limit: @thread_scan_limit) do
+    case API.list_full_thread(bot.token, channel, thread_ts, max: @thread_scan_limit) do
       {:ok, messages} ->
         Enum.any?(messages, &mentions_bot?(&1["text"], bot.user_id))
 

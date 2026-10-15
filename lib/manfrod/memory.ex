@@ -106,6 +106,18 @@ defmodule Manfrod.Memory do
     |> Enum.reverse()
   end
 
+  @doc """
+  When the newest message of a session within the last `window_hours` was
+  received, or nil if there is none.
+  """
+  def last_session_message_at(session_key, window_hours) do
+    Message
+    |> where([m], m.session_key == ^session_key)
+    |> session_window(window_hours)
+    |> select([m], max(m.received_at))
+    |> Repo.one()
+  end
+
   defp session_window(query, nil), do: query
 
   defp session_window(query, window_hours) do
