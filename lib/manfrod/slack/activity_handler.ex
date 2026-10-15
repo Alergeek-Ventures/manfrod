@@ -257,13 +257,9 @@ defmodule Manfrod.Slack.ActivityHandler do
 
   # -- :interrupted (new message mid-turn) -------------------------------------
 
-  def handle_info(
-        {:activity,
-         %Activity{type: :interrupted, reply_to: %{channel: channel, thread_ts: thread_ts}}},
-        state
-      ) do
-    {stream, state} = pop_in(state, [:streams, {channel, thread_ts}])
-    if stream, do: StreamSession.abort(channel, thread_ts)
+  # The agent restarts the turn with the follow-up and always answers it, so
+  # the open stream is kept for that answer instead of being closed empty.
+  def handle_info({:activity, %Activity{type: :interrupted}}, state) do
     {:noreply, state}
   end
 

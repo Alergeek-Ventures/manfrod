@@ -415,6 +415,38 @@ defmodule Manfrod.Slack.API do
   end
 
   @doc """
+  Fetch a whole thread, following pagination, oldest-first (parent first).
+
+  `list_thread_replies/4` returns only the first page, which for a long
+  thread is its oldest messages — useless when the newest ones matter.
+  Stops after `:max` messages (default 1000).
+  """
+  @spec list_full_thread(String.t(), String.t(), String.t(), keyword()) ::
+          {:ok, [map()]} | {:error, term()}
+  def list_full_thread(token, channel, thread_ts, opts \\ []) do
+    max = Keyword.get(opts, :max, 1000)
+    fetch_thread_pages(token, %{channel: channel, ts: thread_ts, limit: 200}, max, [])
+  end
+
+  defp fetch_thread_pages(token, params, max, acc) do
+    case get("conversations.replies", token, params) do
+      {:ok, %{"messages" => messages} = body} ->
+        acc = Enum.uniq_by(acc ++ messages, & &1["ts"])
+        cursor = get_in(body, ["response_metadata", "next_cursor"])
+
+        if body["has_more"] == true and is_binary(cursor) and cursor != "" and
+             length(acc) < max do
+          fetch_thread_pages(token, Map.put(params, :cursor, cursor), max, acc)
+        else
+          {:ok, Enum.take(acc, max)}
+        end
+
+      {:error, reason} ->
+        if acc == [], do: {:error, reason}, else: {:ok, acc}
+    end
+  end
+
+  @doc """
   Posts to a Slack interactivity `response_url` — the full callback URL
   Slack includes on `block_actions`/`view_submission` payloads, used to
   update the *specific* ephemeral/original message that triggered the

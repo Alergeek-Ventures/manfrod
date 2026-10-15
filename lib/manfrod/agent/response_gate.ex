@@ -30,9 +30,17 @@ defmodule Manfrod.Agent.ResponseGate do
   You decide how an AI assistant present in a Slack thread should handle a
   new message. Choose exactly one:
 
-  - "respond" - reply with a full text message. Only when directly
-    addressed, asked a question it can answer, or the conversation clearly
-    calls for it to contribute.
+  - "respond" - reply with a full text message. When the message is
+    directed at the assistant, asks it something it can answer, or the
+    conversation clearly calls for it to contribute. The assistant appears
+    in the transcript as "Manfrod". Treat these as directed at it:
+    - it is addressed by name ("Manfrod, ..."), even without an @mention
+    - the message corrects, disputes or adds to something Manfrod just said
+      (e.g. Manfrod wrote "z Escape" and the reply is just "z Scape")
+    - someone complains Manfrod did not answer or tells it to answer
+      ("to odpowiedz", "halo?", "zghostowałeś mnie", "?")
+    - a follow-up question right after Manfrod's own reply that only makes
+      sense as a question to Manfrod
   - "react:<emoji>" - add ONLY an emoji reaction, no text. Use this fairly
     often — whenever a lightweight nod fits better than a full reply or
     staying silent, e.g. a message is funny, impressive, a clear
@@ -43,9 +51,11 @@ defmodule Manfrod.Agent.ResponseGate do
     says something nice, complimentary, or appreciative about the
     assistant itself: react with a warm emoji like "heart" or
     "smiling_face_with_3_hearts" and also reply.
-  - "ignore" - do nothing. Still the right choice for ordinary
-    back-and-forth between people that isn't directed at or about the
-    assistant and doesn't call for any acknowledgement.
+  - "ignore" - do nothing. The right choice for ordinary back-and-forth
+    between people that isn't directed at or about the assistant and
+    doesn't call for any acknowledgement. When in doubt whether a message
+    is meant for the assistant, do not choose "ignore": a missed question
+    is far worse than an unneeded reply.
 
   One case overrides all of the above: if the message asks the assistant to
   stop replying in this thread, to leave, or to butt out (e.g. "przestań się
@@ -90,9 +100,17 @@ defmodule Manfrod.Agent.ResponseGate do
     end
   end
 
+  # A line can carry a whole backfilled thread; the gate needs the gist of the
+  # conversation, and the end of a line is where the actual message is.
+  @line_limit 800
+
   defp build_prompt(recent_transcript, new_messages) do
-    history = if recent_transcript == [], do: "(none)", else: Enum.join(recent_transcript, "\n")
-    new_text = Enum.join(new_messages, "\n")
+    history =
+      if recent_transcript == [],
+        do: "(none)",
+        else: Enum.map_join(recent_transcript, "\n", &tail/1)
+
+    new_text = Enum.map_join(new_messages, "\n", &tail/1)
 
     """
     Recent conversation:
@@ -103,6 +121,14 @@ defmodule Manfrod.Agent.ResponseGate do
 
     What should the assistant do?
     """
+  end
+
+  defp tail(line) do
+    if String.length(line) > @line_limit do
+      "…" <> String.slice(line, -@line_limit, @line_limit)
+    else
+      line
+    end
   end
 
   defp parse_decision(response) when is_binary(response) do

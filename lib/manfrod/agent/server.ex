@@ -59,6 +59,24 @@ defmodule Manfrod.Agent.Server do
   - Never use an em dash or en dash (— or –). Use a plain hyphen "-" instead,
     or rewrite the sentence. This applies to every message you send.
 
+  ## Slack threads
+  - In a shared thread you are one of several participants. Answer whoever
+    addressed you. If several people asked you something since your last
+    reply, answer each of them, by name, in one message - never silently
+    drop an earlier question in favour of the newest one.
+  - An @mention with no text is a nudge: answer whatever was most recently
+    said to you or asked of you in the thread.
+  - If someone asks you to read or check the thread, or you are not sure
+    what was said, call read_slack_thread (no arguments reads the current
+    thread) instead of guessing. You always know which thread you are in.
+  - When someone corrects you, accept it in a few words and use the
+    corrected version from then on, spelled exactly as they wrote it. If the
+    correction is about something you know from memory (e.g. why someone is
+    away), save it with create_note so the mistake does not come back.
+  - Never invent technical excuses about yourself ("I lost the reply",
+    "single-threaded mode", "Slack did not give me the ID"). If you missed
+    something, just answer it now.
+
   ## MANDATORY tool usage rules (NEVER skip these)
 
   ### Meetings
@@ -145,6 +163,9 @@ defmodule Manfrod.Agent.Server do
   @channel_restore_limit 60
   @channel_restore_window_hours 24
 
+  @doc "How far back a channel thread session restores its history from the DB."
+  def channel_restore_window_hours, do: @channel_restore_window_hours
+
   # How many recent transcript lines the response gate gets to see.
   @transcript_window 12
 
@@ -208,6 +229,12 @@ defmodule Manfrod.Agent.Server do
        # so a rebuilt session judges replies in context instead of blind.
        transcript: restored |> Enum.map(&transcript_line/1) |> Enum.take(-@transcript_window),
        inbox: [],
+       # Author of the turn in progress (nil when idle). A session runs one
+       # turn at a time; messages arriving meanwhile wait in the inbox.
+       turn: nil,
+       # Set when a turn is interrupted by its own author's follow-up: the
+       # next batch must be answered, never re-judged by the response gate.
+       owed: false,
        flush_timer: nil,
        gate_debounce_timer: nil,
        # The request the current turn is answering, kept for naming the
@@ -292,7 +319,7 @@ defmodule Manfrod.Agent.Server do
             "(\"[from: Full Name <slack_id>]\" — the <slack_id> is a unique " <>
             "identifier, not part of the name; use it to tell apart people " <>
             "who share a name). Address the right person; don't assume " <>
-            "there is a single \"the user\"."
+            "there is a single \"the user\"." <> slack_location_line(session_key)
 
         user.name && user.name != "" ->
           "\nUser: #{user.name}"
@@ -308,6 +335,18 @@ defmodule Manfrod.Agent.Server do
     Timezone: #{@timezone} (#{now.zone_abbr}, UTC#{offset_sign}#{abs(utc_offset_hours)})#{user_line}
     """
     |> String.trim()
+  end
+
+  defp slack_location_line(session_key) do
+    case String.split(session_key, ":", parts: 2) do
+      [channel, thread_ts] ->
+        "\nYou are in Slack channel #{channel}, thread_ts #{thread_ts}. " <>
+          "read_slack_thread with no arguments reads this thread, " <>
+          "read_slack_channel with no arguments reads this channel."
+
+      _ ->
+        ""
+    end
   end
 
   # A DM channel ("D...") is inherently single-user, so it never has the
@@ -387,7 +426,14 @@ defmodule Manfrod.Agent.Server do
   end
 
   # Handle idle from FlushHandler-like behavior (self-subscribes to own topic)
+  # Not idle while a turn is still running or messages wait in the inbox —
+  # stopping then would drop the answer, or the messages, without a word.
   @impl true
+  def handle_info({:flush, event_ctx}, %{turn: turn, inbox: inbox} = state)
+      when not is_nil(turn) or inbox != [] do
+    {:noreply, reset_flush_timer(state, event_ctx)}
+  end
+
   def handle_info({:flush, event_ctx}, state) do
     Logger.info("Session idle timeout for session #{state.session_key}")
 
@@ -417,91 +463,24 @@ defmodule Manfrod.Agent.Server do
     {:noreply, state}
   end
 
+  # Loop: a turn is already running — its end sends :loop again, and only
+  # then is the inbox picked up, so two turns never interleave.
+  def handle_info(:loop, %{turn: turn} = state) when not is_nil(turn) do
+    {:noreply, state}
+  end
+
   # Loop: drain inbox, decide whether to respond, start LLM call
   def handle_info(:loop, state) do
-    # Check DB health before processing
-    unless Repo.healthy?() do
-      Logger.error("Agent.Server: database unavailable, cannot process message")
-      # Get last event_ctx for error response
-      {_content, event_ctx} = List.last(state.inbox)
-
-      Events.broadcast(
-        :responding,
-        Map.put(event_ctx, :meta, %{
-          content: "Issues with database. Need manual intervention."
-        })
-      )
-
-      {:noreply, %{state | inbox: []}}
+    if gate_applies?(state) and state.gate_debounce_timer != nil do
+      {:noreply, state}
     else
-      # The gate only applies when every message in this batch is a plain,
-      # ungated thread reply — a DM or explicit @mention in the same batch
-      # always gets a response.
-      gate_applies? = Enum.all?(state.inbox, fn {_content, ctx} -> ctx.requires_gate end)
-      prior_transcript = state.transcript
-      new_contents = Enum.map(state.inbox, fn {content, _ctx} -> content end)
-
-      # Messages are always persisted + folded into shared history, whether
-      # or not the agent decides to actually reply — so the timer resets and
-      # future turns have full context either way.
-      {messages, event_ctx, state} = drain_inbox(state)
-      state = reset_flush_timer(state, event_ctx)
-
-      decision =
-        if gate_applies?, do: ResponseGate.decide(prior_transcript, new_contents), else: :respond
-
-      case decision do
-        :respond ->
-          Events.broadcast(:thinking, event_ctx)
-
-          # Start typing refresher on the triggering author's own topic
-          {:ok, refresher_pid} = TypingRefresher.start(event_ctx.user_id, event_ctx)
-
-          send(self(), {:call_llm, event_ctx, 0, refresher_pid})
-          {:noreply, %{state | messages: messages}}
-
-        {:react, emoji} ->
-          Logger.debug(
-            "Agent.Server: response gate chose to react (:#{emoji}:) for session #{state.session_key}"
-          )
-
-          Events.broadcast(
-            :reacted,
-            Map.put(event_ctx, :meta, %{emoji: emoji, ts: event_ctx.slack_ts})
-          )
-
-          {:noreply, %{state | messages: messages}}
-
-        {:react_and_respond, emoji} ->
-          Logger.debug(
-            "Agent.Server: response gate chose to react (:#{emoji}:) and respond for session #{state.session_key}"
-          )
-
-          Events.broadcast(
-            :reacted,
-            Map.put(event_ctx, :meta, %{emoji: emoji, ts: event_ctx.slack_ts})
-          )
-
-          Events.broadcast(:thinking, event_ctx)
-
-          {:ok, refresher_pid} = TypingRefresher.start(event_ctx.user_id, event_ctx)
-
-          send(self(), {:call_llm, event_ctx, 0, refresher_pid})
-          {:noreply, %{state | messages: messages}}
-
-        :ignore ->
-          Logger.debug(
-            "Agent.Server: response gate declined to reply for session #{state.session_key}"
-          )
-
-          {:noreply, %{state | messages: messages}}
-      end
+      process_inbox(state)
     end
   end
 
   # LLM call: iteration limit
   def handle_info({:call_llm, ctx, iter, refresher_pid}, state) when iter >= 50 do
-    TypingRefresher.stop(refresher_pid)
+    stop_refresher(refresher_pid)
     Logger.error("Agent.Server: max tool iterations reached for session #{state.session_key}")
 
     Events.broadcast(
@@ -512,18 +491,20 @@ defmodule Manfrod.Agent.Server do
     )
 
     send(self(), :loop)
-    {:noreply, state}
+    {:noreply, %{state | turn: nil}}
   end
 
   # LLM call: check for interrupt, then call LLM
   def handle_info({:call_llm, ctx, iter, refresher_pid}, state) do
-    if state.inbox != [] do
-      # Interrupted by new messages
-      TypingRefresher.stop(refresher_pid)
+    if followed_up_by_author?(state.inbox, ctx.user_id) do
+      # The author added to their own request mid-turn — restart with it in
+      # context. Anyone else's message just waits for this turn to finish,
+      # so one person's question can never swallow another's.
+      stop_refresher(refresher_pid)
       Logger.info("Agent.Server: interrupted by new message(s) for session #{state.session_key}")
       Events.broadcast(:interrupted, ctx)
       send(self(), :loop)
-      {:noreply, state}
+      {:noreply, %{state | turn: nil, owed: true}}
     else
       opts = [
         tools:
@@ -540,15 +521,106 @@ defmodule Manfrod.Agent.Server do
           handle_llm_response(response, ctx, iter, refresher_pid, state)
 
         {:error, reason} ->
-          TypingRefresher.stop(refresher_pid)
+          stop_refresher(refresher_pid)
           Logger.error("LLM call failed: #{inspect(reason)}")
           error_text = "Sorry, I encountered an error: #{inspect(reason)}"
 
           Events.broadcast(:responding, Map.put(ctx, :meta, %{content: error_text}))
           send(self(), :loop)
-          {:noreply, state}
+          {:noreply, %{state | turn: nil}}
       end
     end
+  end
+
+  defp gate_applies?(state) do
+    not state.owed and Enum.all?(state.inbox, fn {_content, ctx} -> ctx.requires_gate end)
+  end
+
+  defp followed_up_by_author?(inbox, user_id) do
+    Enum.any?(inbox, fn {_content, ctx} -> ctx.user_id == user_id end)
+  end
+
+  defp start_refresher(event_ctx) do
+    case TypingRefresher.start(event_ctx.user_id, event_ctx) do
+      {:ok, pid} -> pid
+      {:error, _reason} -> nil
+    end
+  end
+
+  defp stop_refresher(nil), do: :ok
+  defp stop_refresher(pid), do: TypingRefresher.stop(pid)
+
+  defp process_inbox(state) do
+    if Repo.healthy?() do
+      # The gate only applies when every message in this batch is a plain,
+      # ungated thread reply and nothing is owed from an interrupted turn —
+      # a DM or explicit @mention in the same batch always gets a response.
+      gate_applies? = gate_applies?(state)
+      prior_transcript = state.transcript
+      new_contents = Enum.map(state.inbox, fn {content, _ctx} -> content end)
+
+      # Messages are always persisted + folded into shared history, whether
+      # or not the agent decides to actually reply — so the timer resets and
+      # future turns have full context either way.
+      {messages, event_ctx, state} = drain_inbox(state)
+      state = reset_flush_timer(%{state | messages: messages, owed: false}, event_ctx)
+
+      decision =
+        if gate_applies?, do: ResponseGate.decide(prior_transcript, new_contents), else: :respond
+
+      case decision do
+        :respond ->
+          {:noreply, start_turn(state, event_ctx)}
+
+        {:react, emoji} ->
+          Logger.debug(
+            "Agent.Server: response gate chose to react (:#{emoji}:) for session #{state.session_key}"
+          )
+
+          react(event_ctx, emoji)
+          {:noreply, state}
+
+        {:react_and_respond, emoji} ->
+          Logger.debug(
+            "Agent.Server: response gate chose to react (:#{emoji}:) and respond for session #{state.session_key}"
+          )
+
+          react(event_ctx, emoji)
+          {:noreply, start_turn(state, event_ctx)}
+
+        :ignore ->
+          Logger.debug(
+            "Agent.Server: response gate declined to reply for session #{state.session_key}"
+          )
+
+          {:noreply, state}
+      end
+    else
+      Logger.error("Agent.Server: database unavailable, cannot process message")
+      {_content, event_ctx} = List.last(state.inbox)
+
+      Events.broadcast(
+        :responding,
+        Map.put(event_ctx, :meta, %{
+          content: "Issues with database. Need manual intervention."
+        })
+      )
+
+      {:noreply, cancel_gate_debounce(%{state | inbox: [], owed: false})}
+    end
+  end
+
+  defp start_turn(state, event_ctx) do
+    Events.broadcast(:thinking, event_ctx)
+    send(self(), {:call_llm, event_ctx, 0, start_refresher(event_ctx)})
+    %{state | turn: event_ctx.user_id}
+  end
+
+  defp react(event_ctx, emoji) do
+    Events.broadcast(
+      :reacted,
+      Map.put(event_ctx, :meta, %{emoji: emoji, ts: event_ctx.slack_ts})
+    )
   end
 
   # Streaming and non-streaming return the same materialized response, so the
@@ -591,13 +663,12 @@ defmodule Manfrod.Agent.Server do
     # from several distinct users landing in the same inbox.
     {user_messages, _} =
       Enum.map_reduce(state.inbox, nil, fn {content, event_ctx}, _acc ->
-        {:ok, _user_msg} =
-          Memory.create_message(event_ctx.user_id, %{
-            role: "user",
-            content: content,
-            session_key: state.session_key,
-            received_at: now
-          })
+        persist_message(event_ctx.user_id, %{
+          role: "user",
+          content: content,
+          session_key: state.session_key,
+          received_at: now
+        })
 
         # Retrieve relevant note context (the note graph is a single shared
         # graph gated by access level, not by user, so this is safe to scope
@@ -755,7 +826,7 @@ defmodule Manfrod.Agent.Server do
 
       _other ->
         # Final response - stop typing, persist, broadcast
-        TypingRefresher.stop(refresher_pid)
+        stop_refresher(refresher_pid)
 
         response_text =
           case ReqLLM.Response.text(response) do
@@ -778,21 +849,12 @@ defmodule Manfrod.Agent.Server do
         # Never let a persistence failure take down the whole session (and
         # with it, any reply to the user) — log and carry on with the
         # in-memory response instead.
-        case Memory.create_message(ctx.user_id, %{
-               role: "assistant",
-               content: response_text,
-               session_key: state.session_key,
-               received_at: DateTime.utc_now() |> DateTime.truncate(:second)
-             }) do
-          {:ok, _assistant_msg} ->
-            :ok
-
-          {:error, changeset} ->
-            Logger.error(
-              "Agent.Server failed to persist assistant message for user #{ctx.user_id}: " <>
-                inspect(changeset.errors)
-            )
-        end
+        persist_message(ctx.user_id, %{
+          role: "assistant",
+          content: response_text,
+          session_key: state.session_key,
+          received_at: DateTime.utc_now() |> DateTime.truncate(:second)
+        })
 
         # Add to conversation history
         assistant_msg = ReqLLM.Context.assistant(response_text)
@@ -807,7 +869,7 @@ defmodule Manfrod.Agent.Server do
 
         # Check for more work
         send(self(), :loop)
-        {:noreply, %{state | messages: messages}}
+        {:noreply, %{state | messages: messages, turn: nil}}
     end
   end
 
@@ -853,10 +915,7 @@ defmodule Manfrod.Agent.Server do
           )
 
         if tool do
-          case ReqLLM.Tool.execute(tool, args) do
-            {:ok, result} -> {result, true}
-            {:error, reason} -> {"Tool error: #{inspect(reason)}", false}
-          end
+          run_tool(tool, args)
         else
           {"Unknown tool: #{tool_name}", false}
         end
@@ -864,6 +923,15 @@ defmodule Manfrod.Agent.Server do
       {:error, _} ->
         {"Failed to parse tool arguments", false}
     end
+  end
+
+  defp run_tool(tool, args) do
+    case ReqLLM.Tool.execute(tool, args) do
+      {:ok, result} -> {result, true}
+      {:error, reason} -> {"Tool error: #{inspect(reason)}", false}
+    end
+  catch
+    :exit, reason -> {"Tool error: #{inspect(reason)}", false}
   end
 
   defp generate_action_id do
@@ -876,8 +944,31 @@ defmodule Manfrod.Agent.Server do
 
   defp truncate_result(result), do: result
 
+  # Note context is an enrichment: a failing search must not take the session
+  # (and the message it was about to answer) down with it.
   defp get_note_context(user_id, readable_levels, query, project_id) do
     Memory.get_note_context(user_id, readable_levels, query, project_id)
+  rescue
+    e ->
+      Logger.error("Agent.Server: note context failed: #{Exception.message(e)}")
+      ""
+  catch
+    :exit, reason ->
+      Logger.error("Agent.Server: note context failed: #{inspect(reason)}")
+      ""
+  end
+
+  defp persist_message(user_id, attrs) do
+    case Memory.create_message(user_id, attrs) do
+      {:ok, _message} ->
+        :ok
+
+      {:error, changeset} ->
+        Logger.error(
+          "Agent.Server failed to persist #{attrs.role} message for user #{user_id}: " <>
+            inspect(changeset.errors)
+        )
+    end
   end
 
   # Identify the inbound Slack message for memory flagging. Only Slack messages

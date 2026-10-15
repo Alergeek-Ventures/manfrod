@@ -1,9 +1,11 @@
 defmodule Manfrod.Tools.SlackRead do
   @moduledoc """
-  Read-only access to other Slack channels: recent channel history and
-  thread replies, formatted with resolved channel/user names so the agent
-  doesn't have to juggle raw IDs. Complements `Manfrod.Tools.SlackAdmin`
-  (which only looks up channel IDs and deletes the bot's own messages).
+  Read-only access to Slack channels: recent channel history and thread
+  replies, formatted with resolved channel/user names so the agent doesn't
+  have to juggle raw IDs. Both default to where the agent is talking right
+  now, so "read this thread" never needs an ID the agent doesn't have.
+  Complements `Manfrod.Tools.SlackAdmin` (which only looks up channel IDs and
+  deletes the bot's own messages).
 
   Requires the bot token to have `channels:history` (and `groups:history` /
   `im:history` / `mpim:history` for private channels/DMs it's a member of)
@@ -15,18 +17,22 @@ defmodule Manfrod.Tools.SlackRead do
 
   @timezone "Europe/Warsaw"
 
-  def definitions(_ctx) do
+  @thread_tail 100
+
+  def definitions(ctx) do
+    current = Map.get(ctx, :msg_ctx) || %{}
+
     [
       ReqLLM.Tool.new!(
         name: "read_slack_channel",
         description:
-          "Read recent messages from a Slack channel other than the current one. Use to catch up on what's been discussed elsewhere. Give a channel name (with or without '#') or a channel ID — use list_slack_channels first if you're not sure of the name.",
+          "Read recent top-level messages from a Slack channel (the current one when no channel is given). Messages that have a thread show its thread_ts - pass it to read_slack_thread to read that thread. Use list_slack_channels first if you're not sure of a channel name.",
         parameter_schema: [
           channel: [
             type: :string,
-            required: true,
+            required: false,
             doc:
-              "Channel name (e.g. 'general' or '#general') or Slack channel ID (e.g. 'C087QF130R3')"
+              "Channel name (e.g. 'general' or '#general') or Slack channel ID (e.g. 'C087QF130R3'). Omit for the current channel."
           ],
           limit: [
             type: :integer,
@@ -34,60 +40,106 @@ defmodule Manfrod.Tools.SlackRead do
             doc: "Max messages to return, newest included (default 20, max 100)"
           ]
         ],
-        callback: fn args -> read_slack_channel(args) end
+        callback: fn args -> read_slack_channel(args, current) end
       ),
       ReqLLM.Tool.new!(
         name: "read_slack_thread",
         description:
-          "Read all replies in a specific Slack thread, given the channel and the parent message's timestamp (ts). Use after read_slack_channel shows a message with replies you want to expand.",
+          "Read a Slack thread: its first message and its latest replies. Call with no arguments to read the thread you are in right now. For another thread, give its thread_ts (shown by read_slack_channel) and its channel.",
         parameter_schema: [
           channel: [
             type: :string,
-            required: true,
-            doc: "Channel name (e.g. 'general' or '#general') or Slack channel ID"
+            required: false,
+            doc: "Channel name or Slack channel ID. Omit for the current channel."
           ],
           thread_ts: [
             type: :string,
-            required: true,
-            doc: "Timestamp ('ts') of the thread's parent message, e.g. '1719000000.123456'"
+            required: false,
+            doc:
+              "thread_ts of the thread's parent message, e.g. '1719000000.123456'. Omit for the current thread."
           ]
         ],
-        callback: fn args -> read_slack_thread(args) end
+        callback: fn args -> read_slack_thread(args, current) end
       )
     ]
   end
 
-  defp read_slack_channel(args) do
+  defp read_slack_channel(args, current) do
     token = bot_token()
     limit = args |> Map.get(:limit, 20) |> clamp_limit()
 
-    with {:ok, channel_id} <- resolve_channel(token, Map.get(args, :channel)),
+    with {:ok, channel_id} <- resolve_channel(token, Map.get(args, :channel), current),
          {:ok, messages} <- API.list_messages(token, channel_id, limit: limit) do
       format_messages(token, messages)
     else
+      {:error, :no_channel} -> {:ok, "Nie wiem, który kanał odczytać - podaj nazwę kanału."}
       {:error, :not_found} -> {:ok, "Nie znalazłem kanału: #{Map.get(args, :channel)}"}
       {:error, reason} -> {:ok, "Nie udało się odczytać kanału: #{inspect(reason)}"}
     end
   end
 
-  defp read_slack_thread(%{thread_ts: thread_ts} = args) do
+  defp read_slack_thread(args, current) do
     token = bot_token()
 
-    with {:ok, channel_id} <- resolve_channel(token, Map.get(args, :channel)),
-         {:ok, messages} <- API.list_thread_replies(token, channel_id, thread_ts) do
-      format_messages(token, messages)
+    with {:ok, thread_ts} <- thread_ts(args, current),
+         {:ok, channel_id} <- resolve_channel(token, Map.get(args, :channel), current),
+         {:ok, messages} <- API.list_full_thread(token, channel_id, thread_ts) do
+      format_messages(token, thread_tail(messages))
     else
-      {:error, :not_found} -> {:ok, "Nie znalazłem kanału: #{Map.get(args, :channel)}"}
-      {:error, reason} -> {:ok, "Nie udało się odczytać wątku: #{inspect(reason)}"}
+      {:error, :no_thread} ->
+        {:ok,
+         "Podaj thread_ts wątku - pokazuje go read_slack_channel przy wiadomościach z odpowiedziami."}
+
+      {:error, :no_channel} ->
+        {:ok, "Nie wiem, w którym kanale jest ten wątek - podaj kanał."}
+
+      {:error, :not_found} ->
+        {:ok, "Nie znalazłem kanału: #{Map.get(args, :channel)}"}
+
+      {:error, reason} ->
+        {:ok, "Nie udało się odczytać wątku: #{inspect(reason)}"}
     end
   end
+
+  defp thread_ts(args, current) do
+    explicit = blank_to_nil(Map.get(args, :thread_ts))
+    channel = blank_to_nil(Map.get(args, :channel))
+
+    cond do
+      explicit ->
+        {:ok, explicit}
+
+      channel in [nil, current[:channel]] and is_binary(current[:thread_ts]) ->
+        {:ok, current[:thread_ts]}
+
+      true ->
+        {:error, :no_thread}
+    end
+  end
+
+  defp thread_tail([root | replies]) when length(replies) > @thread_tail do
+    [root | Enum.take(replies, -@thread_tail)]
+  end
+
+  defp thread_tail(messages), do: messages
 
   defp clamp_limit(limit) when is_integer(limit), do: limit |> max(1) |> min(100)
   defp clamp_limit(_), do: 20
 
   defp bot_token, do: Application.get_env(:manfrod, :slack_bot_token)
 
-  defp resolve_channel(token, channel), do: API.resolve_channel(token, channel)
+  defp resolve_channel(token, channel, current) do
+    case blank_to_nil(channel) || current[:channel] do
+      nil -> {:error, :no_channel}
+      channel -> API.resolve_channel(token, channel)
+    end
+  end
+
+  defp blank_to_nil(value) when is_binary(value) do
+    if String.trim(value) == "", do: nil, else: String.trim(value)
+  end
+
+  defp blank_to_nil(_value), do: nil
 
   defp format_messages(_token, []), do: {:ok, "Brak wiadomości."}
 
@@ -117,12 +169,17 @@ defmodule Manfrod.Tools.SlackRead do
     end
   end
 
-  defp thread_note(%{"reply_count" => count}) when is_integer(count) and count > 0,
-    do: " (#{count} #{if count == 1, do: "odpowiedź", else: "odpowiedzi"} w wątku)"
+  defp thread_note(%{"reply_count" => count, "ts" => ts}) when is_integer(count) and count > 0,
+    do:
+      " (#{count} #{if count == 1, do: "odpowiedź", else: "odpowiedzi"} w wątku, thread_ts: #{ts})"
 
   defp thread_note(_msg), do: ""
 
   defp author_name(%{"bot_id" => bot_id, "username" => name}, _user_names)
+       when is_binary(bot_id) and is_binary(name) and name != "",
+       do: "#{name} (bot)"
+
+  defp author_name(%{"bot_id" => bot_id, "bot_profile" => %{"name" => name}}, _user_names)
        when is_binary(bot_id) and is_binary(name) and name != "",
        do: "#{name} (bot)"
 

@@ -20,6 +20,7 @@ defmodule Manfrod.Slack.EventHandler do
   alias Manfrod.Accounts
   alias Manfrod.Agent
   alias Manfrod.Linear
+  alias Manfrod.Memory
   alias Manfrod.Memory.Access
   alias Manfrod.Memory.{Admin, Buffer, ChannelDetector, ChannelMapping, Classifier, Project}
   alias Manfrod.Repo
@@ -30,6 +31,7 @@ defmodule Manfrod.Slack.EventHandler do
   alias Manfrod.Slack.Kick
   alias Manfrod.Slack.SuggestedPrompts
   alias Manfrod.Slack.ThreadPermission
+  alias Manfrod.Slack.ThreadSeen
   alias Manfrod.Slack.UserContext
 
   @kick_callback_id "kick_manfrod"
@@ -382,12 +384,6 @@ defmodule Manfrod.Slack.EventHandler do
       bot.token
     )
 
-    if not dm_channel?(channel) and not bot_mentioned?(text, bot.user_id) and
-         name_dropped?(text) and
-         not kicked_thread?(channel, event["thread_ts"]) do
-      API.add_reaction(bot.token, channel, event["ts"], "eyes")
-    end
-
     cond do
       dm_channel?(channel) ->
         handle_dm_message(bot, event, text, slack_user_id, channel)
@@ -396,8 +392,14 @@ defmodule Manfrod.Slack.EventHandler do
         thread_ts = event["thread_ts"] || event["ts"]
         handle_channel_mention(bot, event, text, slack_user_id, channel, thread_ts)
 
+      handle_channel_thread_reply(event, bot, text, slack_user_id, channel) ->
+        :ok
+
+      name_dropped?(text) and not kicked_thread?(channel, event["thread_ts"]) ->
+        API.add_reaction(bot.token, channel, event["ts"], "eyes")
+
       true ->
-        handle_channel_thread_reply(event, bot, text, slack_user_id, channel)
+        :ok
     end
   end
 
@@ -459,8 +461,6 @@ defmodule Manfrod.Slack.EventHandler do
 
   defp handle_channel_mention(bot, event, raw_text, slack_user_id, channel, thread_ts) do
     if EventDedup.first?({:mention, channel, event["ts"]}) do
-      start_thinking(bot.token, channel, thread_ts)
-
       do_handle_channel_mention(bot, event, raw_text, slack_user_id, channel, thread_ts)
     else
       Logger.debug(
@@ -472,160 +472,209 @@ defmodule Manfrod.Slack.EventHandler do
   defp do_handle_channel_mention(bot, event, raw_text, slack_user_id, channel, thread_ts) do
     session_key = "#{channel}:#{thread_ts}"
 
-    cleaned_text =
-      if raw_text do
-        raw_text
-        |> String.replace(~r/<@#{Regex.escape(bot.user_id)}>/, "")
-        |> String.trim()
-      end
+    case slack_user_id && Accounts.get_user_by_slack_id(slack_user_id) do
+      nil when is_binary(slack_user_id) ->
+        Logger.info(
+          "Slack EventHandler: unknown user #{slack_user_id} in channel, sending DM-first message"
+        )
 
-    if text_present?(cleaned_text) and slack_user_id do
-      case Accounts.get_user_by_slack_id(slack_user_id) do
-        nil ->
-          Logger.info(
-            "Slack EventHandler: unknown user #{slack_user_id} in channel, sending DM-first message"
-          )
+        API.post("chat.postEphemeral", bot.token, %{
+          channel: channel,
+          thread_ts: thread_ts,
+          user: slack_user_id,
+          text:
+            "Najpierw napisz do mnie w wiadomości prywatnej - dopiero wtedy mogę Ci odpowiadać na kanałach."
+        })
 
-          if kicked_thread?(channel, thread_ts) do
-            API.post("chat.postEphemeral", bot.token, %{
-              channel: channel,
-              thread_ts: thread_ts,
-              user: slack_user_id,
-              text: "DM me first to get started!"
-            })
-          else
-            API.post("chat.postMessage", bot.token, %{
-              channel: channel,
-              thread_ts: thread_ts,
-              text: "DM me first to get started!"
-            })
-          end
+      nil ->
+        Logger.debug("Slack EventHandler ignoring mention without an author")
 
-        user ->
-          ThreadPermission.allow(channel, thread_ts)
+      user ->
+        start_thinking(bot.token, channel, thread_ts)
+        ThreadPermission.allow(channel, thread_ts)
 
-          channel_info = resolve_channel_info(bot.token, channel)
-          channel_name = channel_info.name
+        channel_info = resolve_channel_info(bot.token, channel)
+        channel_name = channel_info.name
 
-          access_channel_id = resolve_agent_channel(event, channel, channel_name, channel_info)
-          channel_context = build_channel_context(channel_name, bot.token, slack_user_id)
-          history_block = maybe_thread_history(bot, event, channel, thread_ts, session_key)
-          content_with_context = history_block <> "[#{channel_context}]\n#{cleaned_text}"
+        access_channel_id = resolve_agent_channel(event, channel, channel_name, channel_info)
+        channel_context = build_channel_context(channel_name, bot.token, slack_user_id)
+        history_block = thread_catch_up(bot, event, channel, thread_ts, session_key)
+        mention_text = mention_text(strip_bot_mention(raw_text, bot.user_id), event)
+        content_with_context = history_block <> "[#{channel_context}]\n#{mention_text}"
 
-          Agent.send_message(
-            user.id,
-            session_key,
-            %{
-              content: content_with_context,
-              source: :slack,
-              reply_to: %{channel: channel, thread_ts: thread_ts, slack_user_id: slack_user_id},
-              ts: event["ts"],
-              requires_gate: false
-            },
-            access_channel_id
-          )
-      end
-    else
-      Logger.debug("Slack EventHandler ignoring mention with no text after stripping mention")
+        Agent.send_message(
+          user.id,
+          session_key,
+          %{
+            content: content_with_context,
+            source: :slack,
+            reply_to: %{channel: channel, thread_ts: thread_ts, slack_user_id: slack_user_id},
+            ts: event["ts"],
+            requires_gate: false
+          },
+          access_channel_id
+        )
     end
   end
 
+  defp strip_bot_mention(text, bot_user_id) when is_binary(text) do
+    text
+    |> String.replace(~r/<@#{Regex.escape(bot_user_id)}>/, "")
+    |> String.trim()
+  end
+
+  defp strip_bot_mention(_text, _bot_user_id), do: ""
+
+  defp mention_text("", %{"thread_ts" => thread_ts}) when is_binary(thread_ts),
+    do: "(@mention with no text - answer what was most recently said to you in this thread)"
+
+  defp mention_text("", _event), do: "(@mention with no text)"
+  defp mention_text(text, _event), do: text
+
+  # Returns whether the reply was handed to the agent.
   defp handle_channel_thread_reply(event, bot, text, slack_user_id, channel) do
     thread_ts = event["thread_ts"]
+    session_key = "#{channel}:#{thread_ts}"
+    cleaned_text = strip_bot_mention(text, bot.user_id)
 
-    if thread_ts do
-      session_key = "#{channel}:#{thread_ts}"
+    with true <- is_binary(thread_ts),
+         %{} = user <- Accounts.get_user_by_slack_id(slack_user_id),
+         true <- text_present?(cleaned_text),
+         true <- ThreadPermission.allowed?(bot, channel, thread_ts) do
+      channel_info = resolve_channel_info(bot.token, channel)
+      access_channel_id = resolve_agent_channel(event, channel, channel_info.name, channel_info)
 
-      case Accounts.get_user_by_slack_id(slack_user_id) do
-        nil ->
-          Logger.debug(
-            "Slack EventHandler ignoring channel thread reply from unknown user #{slack_user_id}"
-          )
+      ThreadSeen.mark(session_key, [event["ts"]])
 
-        user ->
-          if ThreadPermission.allowed?(bot, channel, thread_ts) do
-            cleaned_text =
-              text
-              |> String.replace(~r/<@#{Regex.escape(bot.user_id)}>/, "")
-              |> String.trim()
+      Agent.send_message(
+        user.id,
+        session_key,
+        %{
+          content: tag_author(cleaned_text, user.name, slack_user_id),
+          source: :slack,
+          reply_to: %{channel: channel, thread_ts: thread_ts, slack_user_id: slack_user_id},
+          ts: event["ts"],
+          requires_gate: true
+        },
+        access_channel_id
+      )
 
-            if text_present?(cleaned_text) do
-              channel_info = resolve_channel_info(bot.token, channel)
-              channel_name = channel_info.name
-
-              access_channel_id =
-                resolve_agent_channel(event, channel, channel_name, channel_info)
-
-              tagged_text = tag_author(cleaned_text, user.name, slack_user_id)
-
-              Agent.send_message(
-                user.id,
-                session_key,
-                %{
-                  content: tagged_text,
-                  source: :slack,
-                  reply_to: %{
-                    channel: channel,
-                    thread_ts: thread_ts,
-                    slack_user_id: slack_user_id
-                  },
-                  ts: event["ts"],
-                  requires_gate: true
-                },
-                access_channel_id
-              )
-            end
-          else
-            Logger.debug(
-              "Slack EventHandler ignoring channel thread reply — bot not @mentioned in #{session_key}"
-            )
-          end
-      end
+      true
     else
-      Logger.debug("Slack EventHandler ignoring top-level channel message without @mention")
+      _ ->
+        Logger.debug(
+          "Slack EventHandler not forwarding channel message #{channel}/#{event["ts"]} " <>
+            "(top-level, unknown author, or thread the bot was not invited into)"
+        )
+
+        false
     end
   end
 
-  defp session_exists?(session_key) do
-    Registry.lookup(Manfrod.Agent.Registry, session_key) != []
-  end
+  @catch_up_limit 50
 
-  @thread_history_limit 50
-
-  defp maybe_thread_history(bot, event, channel, thread_ts, session_key) do
-    if event["thread_ts"] != nil and not session_exists?(session_key) do
-      case API.list_thread_replies(bot.token, channel, thread_ts, limit: @thread_history_limit) do
+  # What of this thread the session has not seen yet, as a block prepended to
+  # the mention. On the first mention that is everything before it; later only
+  # what never reached the session (people who never DMed the bot, replies it
+  # was not routed while uninvited).
+  defp thread_catch_up(bot, event, channel, thread_ts, session_key) do
+    if event["thread_ts"] do
+      case API.list_full_thread(bot.token, channel, thread_ts) do
         {:ok, messages} ->
-          format_thread_history(bot, messages, event["ts"])
+          prior = Enum.reject(messages, &(&1["ts"] == event["ts"]))
+          catch_up = unseen_messages(bot, prior, session_key)
+          ThreadSeen.mark(session_key, [event["ts"] | Enum.map(messages, & &1["ts"])])
+          format_catch_up(bot, catch_up)
 
         {:error, reason} ->
           Logger.warning(
-            "Slack EventHandler: failed to backfill thread history for #{session_key}: " <>
+            "Slack EventHandler: failed to read thread #{session_key} for catch-up: " <>
               inspect(reason)
           )
 
+          ThreadSeen.mark(session_key, [event["ts"]])
           ""
       end
     else
+      ThreadSeen.mark(session_key, [event["ts"]])
       ""
     end
   end
 
-  defp format_thread_history(bot, messages, mention_ts) do
-    prior = Enum.reject(messages, &(&1["ts"] == mention_ts))
-    names = resolve_history_authors(bot, prior)
+  defp unseen_messages(bot, messages, session_key) do
+    seen = ThreadSeen.seen(session_key)
+    window_hours = Agent.Server.channel_restore_window_hours()
+
+    cond do
+      MapSet.size(seen) > 0 ->
+        {:unseen,
+         Enum.reject(messages, &(MapSet.member?(seen, &1["ts"]) or own_message?(bot, &1)))}
+
+      last_at = Memory.last_session_message_at(session_key, window_hours) ->
+        since = DateTime.to_unix(last_at)
+
+        {:unseen,
+         Enum.filter(messages, &(ts_after?(&1["ts"], since) and not own_message?(bot, &1)))}
+
+      true ->
+        {:joined, messages}
+    end
+  end
+
+  defp own_message?(bot, msg), do: msg["user"] == bot.user_id or msg["bot_id"] == bot.id
+
+  defp ts_after?(ts, unix) when is_binary(ts) do
+    case Float.parse(ts) do
+      {value, _rest} -> value > unix
+      :error -> false
+    end
+  end
+
+  defp ts_after?(_ts, _unix), do: false
+
+  defp format_catch_up(bot, {kind, messages}) do
+    messages = Enum.filter(messages, &text_present?(&1["text"]))
+    names = resolve_history_authors(bot, messages)
 
     lines =
-      for msg <- prior, text_present?(msg["text"]) do
-        "#{history_author(bot, msg, names)}: #{msg["text"]}"
+      for msg <- cap_catch_up(kind, messages) do
+        "#{history_author(bot, msg, names)}: #{history_text(bot, msg["text"], names)}"
+      end
+
+    header =
+      case kind do
+        :joined ->
+          "[Thread history — you were just mentioned in an ongoing thread. " <>
+            "These messages were sent before you joined:]"
+
+        :unseen ->
+          "[Thread messages you have not seen yet, posted since you were last " <>
+            "in this conversation:]"
       end
 
     if lines == [] do
       ""
     else
-      "[Thread history — you were just mentioned in an ongoing thread. " <>
-        "These messages were sent before you joined:]\n" <>
-        Enum.join(lines, "\n") <> "\n[End of thread history]\n"
+      header <> "\n" <> Enum.join(lines, "\n") <> "\n[End of thread history]\n"
+    end
+  end
+
+  defp cap_catch_up(:joined, [root | rest]) when length(rest) >= @catch_up_limit,
+    do: [root | Enum.take(rest, -(@catch_up_limit - 1))]
+
+  defp cap_catch_up(_kind, messages), do: Enum.take(messages, -@catch_up_limit)
+
+  defp history_text(bot, text, names) do
+    if SecretDetector.contains_secret?(text) do
+      "[message withheld - looks like a secret]"
+    else
+      Regex.replace(~r/<@([A-Z0-9]+)>/, text, fn whole, id ->
+        cond do
+          id == bot.user_id -> "@Manfrod"
+          names[id] -> "@#{names[id]}"
+          true -> whole
+        end
+      end)
     end
   end
 
@@ -641,9 +690,9 @@ defmodule Manfrod.Slack.EventHandler do
 
   defp history_author(bot, msg, names) do
     cond do
-      msg["user"] == bot.user_id -> "Manfrod"
+      own_message?(bot, msg) -> "Manfrod"
       msg["user"] -> format_author(names[msg["user"]], msg["user"])
-      true -> msg["username"] || "bot"
+      true -> msg["username"] || get_in(msg, ["bot_profile", "name"]) || "bot"
     end
   end
 
