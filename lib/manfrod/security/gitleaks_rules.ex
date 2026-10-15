@@ -3,8 +3,11 @@ defmodule Manfrod.Security.GitleaksRules do
   Loads and caches gitleaks' public regex ruleset
   (https://github.com/gitleaks/gitleaks/blob/master/config/gitleaks.toml) —
   ~220 provider-specific secret patterns (Stripe, AWS, GitHub, ...) — for
-  `Manfrod.Security.SecretDetector` to check before falling back to its own
-  generic entropy-free heuristic.
+  `Manfrod.Security.SecretDetector`.
+
+  The `generic-*` rules are left out: gitleaks pairs them with entropy checks
+  and stopword lists, and on their own they match ordinary sentences
+  ("zapisywanie kontekstu, nieprzerywanie...").
 
   Rules are cached in `:persistent_term` for fast concurrent reads. Booted
   from the vendored copy at `priv/security/gitleaks.toml` (so startup never
@@ -131,6 +134,7 @@ defmodule Manfrod.Security.GitleaksRules do
     entries
     |> Enum.reverse()
     |> Enum.filter(&(&1.regex not in [nil, ""]))
+    |> Enum.reject(&String.starts_with?(&1.id, "generic-"))
     |> Enum.flat_map(fn %{id: id, regex: pattern, keywords: keywords} ->
       case Regex.compile(pattern) do
         {:ok, regex} ->
