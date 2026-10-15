@@ -85,9 +85,9 @@ defmodule Manfrod.Agent.Server do
   ### Reminders
   - User asks to be reminded of something → call set_reminder in the same response.
 
-  Note context is injected with each message, showing relevant notes with
-  their UUIDs. Use search_notes to find more, get_note to explore
-  specific notes and their connections.
+  Relevant notes are injected as a [Note context] block right before the
+  messages you are answering, with their UUIDs. Use search_notes to find
+  more, get_note to explore specific notes and their connections.
 
   Recurring reminders are linked to notes - the note content becomes your prompt
   when the reminder fires, along with all notes linked to it. Create a note with
@@ -146,12 +146,19 @@ defmodule Manfrod.Agent.Server do
 
   # Server Callbacks
 
-  # How long a session may sit idle before it terminates and its messages go
-  # to memory extraction. Deliberately short: retrospection should run every
-  # few messages, not once an hour. Termination is no longer destructive —
-  # the next process replays this session's history from the DB (see init/1),
-  # so a short flush costs a rebuild, not the conversation.
-  @flush_delay :timer.minutes(1)
+  # Shortly after a session goes quiet its new messages go to memory
+  # extraction — retrospection should run every few messages, not once an
+  # hour. The process itself stays up much longer: rebuilding it costs a
+  # fresh system prompt, tool list and history restore from the DB (init/1).
+  @extract_delay :timer.minutes(1)
+  @shutdown_delay :timer.minutes(15)
+
+  # The [Current Context] clock in the system prompt goes stale in a
+  # long-lived session; past this age it is rebuilt before the next turn.
+  @system_prompt_ttl :timer.minutes(10)
+
+  # How much of the batch being answered is used as the note-search query.
+  @note_query_chars 2_000
 
   # How much of a session's history is replayed into a fresh process. A DM
   # thread gets all of it, with no age cutoff: it's one continuous
@@ -198,6 +205,9 @@ defmodule Manfrod.Agent.Server do
       |> MapSet.new()
       |> MapSet.put(user_id)
 
+    unextracted =
+      for %{conversation_id: nil, user_id: author} <- restored, into: MapSet.new(), do: author
+
     # If we restored messages, add a system notice so agent knows it restarted
     messages =
       if restored_messages != [] do
@@ -224,7 +234,10 @@ defmodule Manfrod.Agent.Server do
        write_access: write_access,
        readable_levels: readable_levels,
        participants: participants,
+       # Authors with messages not yet handed to memory extraction.
+       unextracted: unextracted,
        messages: messages,
+       prompt_built_at: System.monotonic_time(:millisecond),
        # Seed the response gate's view of the thread with the restored tail,
        # so a rebuilt session judges replies in context instead of blind.
        transcript: restored |> Enum.map(&transcript_line/1) |> Enum.take(-@transcript_window),
@@ -235,7 +248,14 @@ defmodule Manfrod.Agent.Server do
        # Set when a turn is interrupted by its own author's follow-up: the
        # next batch must be answered, never re-judged by the response gate.
        owed: false,
+       # Tools and [Note context] blocks of the turn in progress, built once
+       # per turn. Notes are {index, message} pairs spliced into the history
+       # only when calling the model, so they never pile up in it.
+       turn_tools: nil,
+       turn_notes: [],
+       last_ctx: nil,
        flush_timer: nil,
+       shutdown_timer: Process.send_after(self(), :shutdown_idle, @shutdown_delay),
        gate_debounce_timer: nil,
        # The request the current turn is answering, kept for naming the
        # progress card (see Manfrod.Agent.PlanTitle).
@@ -425,22 +445,28 @@ defmodule Manfrod.Agent.Server do
     {:stop, :normal, state}
   end
 
-  # Handle idle from FlushHandler-like behavior (self-subscribes to own topic)
-  # Not idle while a turn is still running or messages wait in the inbox —
-  # stopping then would drop the answer, or the messages, without a word.
+  # Short idle: hand the new messages to memory extraction and keep going.
+  # Never while a turn is still running or messages wait in the inbox.
   @impl true
   def handle_info({:flush, event_ctx}, %{turn: turn, inbox: inbox} = state)
       when not is_nil(turn) or inbox != [] do
-    {:noreply, reset_flush_timer(state, event_ctx)}
+    {:noreply, schedule_extract(state, event_ctx)}
   end
 
   def handle_info({:flush, event_ctx}, state) do
-    Logger.info("Session idle timeout for session #{state.session_key}")
+    Logger.info("Session #{state.session_key} idle, extracting memory")
+    {:noreply, extract_pending(%{state | flush_timer: nil}, event_ctx)}
+  end
 
-    # Broadcast one idle event per participant (see trigger_idle for why).
-    broadcast_idle_for_participants(state, event_ctx)
+  # Long idle: stop the process. The next message rebuilds it from the DB.
+  def handle_info(:shutdown_idle, %{turn: turn, inbox: inbox} = state)
+      when not is_nil(turn) or inbox != [] do
+    {:noreply, schedule_shutdown(state)}
+  end
 
-    # Terminate - will be restarted on next message
+  def handle_info(:shutdown_idle, state) do
+    Logger.info("Session #{state.session_key} idle, stopping")
+    state = if state.last_ctx, do: extract_pending(state, state.last_ctx), else: state
     {:stop, :normal, state}
   end
 
@@ -491,7 +517,7 @@ defmodule Manfrod.Agent.Server do
     )
 
     send(self(), :loop)
-    {:noreply, %{state | turn: nil}}
+    {:noreply, end_turn(state)}
   end
 
   # LLM call: check for interrupt, then call LLM
@@ -504,13 +530,10 @@ defmodule Manfrod.Agent.Server do
       Logger.info("Agent.Server: interrupted by new message(s) for session #{state.session_key}")
       Events.broadcast(:interrupted, ctx)
       send(self(), :loop)
-      {:noreply, %{state | turn: nil, owed: true}}
+      {:noreply, %{state | turn: nil, owed: true, turn_tools: nil}}
     else
       opts = [
-        tools:
-          Manfrod.Tools.definitions(
-            tool_context(ctx.user_id, ctx.readable_levels, state.write_access, msg_ctx(ctx))
-          ),
+        tools: state.turn_tools,
         purpose: :agent,
         user_id: ctx.user_id,
         session_key: state.session_key
@@ -527,7 +550,7 @@ defmodule Manfrod.Agent.Server do
 
           Events.broadcast(:responding, Map.put(ctx, :meta, %{content: error_text}))
           send(self(), :loop)
-          {:noreply, %{state | turn: nil}}
+          {:noreply, end_turn(state)}
       end
     end
   end
@@ -562,15 +585,15 @@ defmodule Manfrod.Agent.Server do
       # Messages are always persisted + folded into shared history, whether
       # or not the agent decides to actually reply — so the timer resets and
       # future turns have full context either way.
-      {messages, event_ctx, state} = drain_inbox(state)
-      state = reset_flush_timer(%{state | messages: messages, owed: false}, event_ctx)
+      {batch, event_ctx, state} = drain_inbox(state)
+      state = touch(%{state | owed: false}, event_ctx)
 
       decision =
         if gate_applies?, do: ResponseGate.decide(prior_transcript, new_contents), else: :respond
 
       case decision do
         :respond ->
-          {:noreply, start_turn(state, event_ctx)}
+          {:noreply, start_turn(state, event_ctx, batch)}
 
         {:react, emoji} ->
           Logger.debug(
@@ -586,7 +609,7 @@ defmodule Manfrod.Agent.Server do
           )
 
           react(event_ctx, emoji)
-          {:noreply, start_turn(state, event_ctx)}
+          {:noreply, start_turn(state, event_ctx, batch)}
 
         :ignore ->
           Logger.debug(
@@ -610,10 +633,69 @@ defmodule Manfrod.Agent.Server do
     end
   end
 
-  defp start_turn(state, event_ctx) do
+  defp start_turn(state, event_ctx, batch) do
     Events.broadcast(:thinking, event_ctx)
+
+    tools =
+      Manfrod.Tools.definitions(
+        tool_context(
+          event_ctx.user_id,
+          event_ctx.readable_levels,
+          state.write_access,
+          msg_ctx(event_ctx)
+        )
+      )
+
+    state = refresh_system_prompt(state)
     send(self(), {:call_llm, event_ctx, 0, start_refresher(event_ctx)})
-    %{state | turn: event_ctx.user_id}
+
+    %{
+      state
+      | turn: event_ctx.user_id,
+        turn_tools: tools,
+        turn_notes: state.turn_notes ++ note_context_message(event_ctx, batch)
+    }
+  end
+
+  defp end_turn(state), do: %{state | turn: nil, turn_tools: nil, turn_notes: []}
+
+  defp note_context_message(ctx, %{index: index, text: text}) do
+    project_id = Access.project_id_for_channel(ctx.meta.slack_channel_id)
+
+    case get_note_context(ctx.user_id, ctx.readable_levels, query_tail(text), project_id) do
+      "" -> []
+      notes -> [{index, ReqLLM.Context.user("[Note context]\n#{notes}")}]
+    end
+  end
+
+  defp query_tail(text) do
+    if String.length(text) > @note_query_chars,
+      do: String.slice(text, -@note_query_chars..-1//1),
+      else: text
+  end
+
+  # The history the model sees: the stored conversation with this turn's
+  # note blocks spliced in front of the messages they were retrieved for.
+  defp llm_messages(state) do
+    state.turn_notes
+    |> Enum.sort_by(&elem(&1, 0), :desc)
+    |> Enum.reduce(state.messages, fn {index, note}, acc -> List.insert_at(acc, index, note) end)
+  end
+
+  defp refresh_system_prompt(state) do
+    age = System.monotonic_time(:millisecond) - state.prompt_built_at
+
+    if age > @system_prompt_ttl do
+      system = ReqLLM.Context.system(build_system_prompt(state.user_id, state.session_key))
+
+      %{
+        state
+        | messages: [system | tl(state.messages)],
+          prompt_built_at: System.monotonic_time(:millisecond)
+      }
+    else
+      state
+    end
   end
 
   defp react(event_ctx, emoji) do
@@ -631,13 +713,13 @@ defmodule Manfrod.Agent.Server do
   defp call_model(opts, ctx, state) do
     if Application.get_env(:manfrod, :llm_streaming, true) do
       LLM.stream_text(
-        state.messages,
+        llm_messages(state),
         Keyword.put(opts, :on_chunk, fn text ->
           Events.broadcast(:response_chunk, Map.put(ctx, :meta, %{text: text}))
         end)
       )
     else
-      LLM.generate_text(state.messages, opts)
+      LLM.generate_text(llm_messages(state), opts)
     end
   end
 
@@ -654,60 +736,39 @@ defmodule Manfrod.Agent.Server do
 
   # Private
 
-  # Drain all messages from inbox, persist to DB, build LLM context
+  # Drain all messages from inbox into the history and the DB. Returns the
+  # batch (where it starts in the history and its text) for the note search
+  # a turn runs if the agent ends up answering it.
   defp drain_inbox(state) do
     now = DateTime.utc_now() |> DateTime.truncate(:second)
 
-    # Build user messages with note context, persist each to DB under its
-    # own author (not a fixed session owner) — a shared thread has messages
-    # from several distinct users landing in the same inbox.
-    {user_messages, _} =
-      Enum.map_reduce(state.inbox, nil, fn {content, event_ctx}, _acc ->
-        persist_message(event_ctx.user_id, %{
-          role: "user",
-          content: content,
-          session_key: state.session_key,
-          received_at: now
-        })
+    # Persisted under each message's own author, not a fixed session owner —
+    # a shared thread has messages from several people in the same inbox.
+    Enum.each(state.inbox, fn {content, event_ctx} ->
+      persist_message(event_ctx.user_id, %{
+        role: "user",
+        content: content,
+        session_key: state.session_key,
+        received_at: now
+      })
+    end)
 
-        # Retrieve relevant note context (the note graph is a single shared
-        # graph gated by access level, not by user, so this is safe to scope
-        # to whichever author sent this particular message)
-        project_id = Access.project_id_for_channel(event_ctx.meta.slack_channel_id)
-
-        note_context =
-          get_note_context(event_ctx.user_id, event_ctx.readable_levels, content, project_id)
-
-        # Build user message with note context prepended for LLM
-        user_content =
-          if note_context == "" do
-            content
-          else
-            "[Note context]\n#{note_context}\n\n[User message]\n#{content}"
-          end
-
-        {ReqLLM.Context.user(user_content), event_ctx}
-      end)
-
-    # Get the last event_ctx for responses
     {_content, last_ctx} = List.last(state.inbox)
-
     new_contents = Enum.map(state.inbox, fn {content, _ctx} -> content end)
-    transcript = Enum.take(state.transcript ++ new_contents, -@transcript_window)
-
-    messages = state.messages ++ user_messages
+    authors = MapSet.new(state.inbox, fn {_content, ctx} -> ctx.user_id end)
+    batch = %{index: length(state.messages), text: Enum.join(new_contents, "\n\n")}
 
     state =
       cancel_gate_debounce(%{
         state
         | inbox: [],
-          transcript: transcript,
-          # The raw text, before note context is prepended — that injected
-          # block is far longer than the question and would drown it out.
+          messages: state.messages ++ Enum.map(new_contents, &ReqLLM.Context.user/1),
+          transcript: Enum.take(state.transcript ++ new_contents, -@transcript_window),
+          unextracted: MapSet.union(state.unextracted, authors),
           last_user_content: List.last(new_contents)
       })
 
-    {messages, last_ctx, state}
+    {batch, last_ctx, state}
   end
 
   # Schedule (or restart) the gate debounce timer — fires :gate_debounce_elapsed
@@ -725,14 +786,34 @@ defmodule Manfrod.Agent.Server do
     %{state | gate_debounce_timer: nil}
   end
 
-  # Reset the idle/flush debounce timer. Called after every processed batch
-  # (whether or not the agent actually replied), so a busy multi-author
-  # thread where the agent is mostly silently absorbing messages doesn't get
-  # torn down mid-conversation.
-  defp reset_flush_timer(state, ctx) do
+  # Restart both idle timers. Called after every processed batch (whether or
+  # not the agent actually replied) and every answer, so a busy multi-author
+  # thread where the agent mostly absorbs messages silently stays alive.
+  defp touch(state, ctx) do
+    %{state | last_ctx: ctx}
+    |> schedule_extract(ctx)
+    |> schedule_shutdown()
+  end
+
+  defp schedule_extract(state, ctx) do
     if state.flush_timer, do: Process.cancel_timer(state.flush_timer)
-    timer_ref = Process.send_after(self(), {:flush, ctx}, @flush_delay)
-    %{state | flush_timer: timer_ref}
+    %{state | flush_timer: Process.send_after(self(), {:flush, ctx}, @extract_delay)}
+  end
+
+  defp schedule_shutdown(state) do
+    if state.shutdown_timer, do: Process.cancel_timer(state.shutdown_timer)
+    %{state | shutdown_timer: Process.send_after(self(), :shutdown_idle, @shutdown_delay)}
+  end
+
+  # Extraction (Manfrod.Memory.Extractor, via FlushHandler) is scoped to a
+  # single (user_id, session_key) pair, so every author with new messages
+  # needs its own :idle broadcast.
+  defp extract_pending(state, event_ctx) do
+    Enum.each(state.unextracted, fn author ->
+      Events.broadcast(:idle, Map.put(event_ctx, :user_id, author))
+    end)
+
+    %{state | unextracted: MapSet.new()}
   end
 
   defp record_transcript(state, line) do
@@ -793,16 +874,9 @@ defmodule Manfrod.Agent.Server do
               })
             )
 
-            # Execute and time the action, on behalf of this turn's actual
-            # triggering author (not a fixed session owner)
-            {result, duration_ms, success} =
-              timed_execute_tool(
-                ctx.user_id,
-                ctx.readable_levels,
-                state.write_access,
-                ctx,
-                tool_call
-              )
+            # Tools were built for this turn's actual triggering author (not a
+            # fixed session owner) when the turn started
+            {result, duration_ms, success} = timed_execute_tool(state.turn_tools, tool_call)
 
             # Broadcast action completed
             Events.broadcast(
@@ -865,11 +939,11 @@ defmodule Manfrod.Agent.Server do
         Events.broadcast(:responding, Map.put(ctx, :meta, %{content: response_text}))
         Logger.info("Agent.Server broadcast response for user #{ctx.user_id} (#{ctx.source})")
 
-        state = reset_flush_timer(state, ctx)
+        state = touch(%{state | unextracted: MapSet.put(state.unextracted, ctx.user_id)}, ctx)
 
         # Check for more work
         send(self(), :loop)
-        {:noreply, %{state | messages: messages, turn: nil}}
+        {:noreply, end_turn(%{state | messages: messages})}
     end
   end
 
@@ -890,29 +964,22 @@ defmodule Manfrod.Agent.Server do
     :ok
   end
 
-  defp timed_execute_tool(user_id, readable_levels, write_access, ctx, tool_call) do
+  defp timed_execute_tool(tools, tool_call) do
     start_time = System.monotonic_time(:millisecond)
-    {result, success} = execute_tool(user_id, readable_levels, write_access, ctx, tool_call)
+    {result, success} = execute_tool(tools, tool_call)
     end_time = System.monotonic_time(:millisecond)
     duration_ms = end_time - start_time
 
     {result, duration_ms, success}
   end
 
-  defp execute_tool(user_id, readable_levels, write_access, ctx, tool_call) do
+  defp execute_tool(tools, tool_call) do
     tool_name = tool_call.function.name
     args_json = tool_call.function.arguments
 
     case Jason.decode(args_json) do
       {:ok, args} ->
-        # Find and execute the tool
-        tool =
-          Enum.find(
-            Manfrod.Tools.definitions(
-              tool_context(user_id, readable_levels, write_access, msg_ctx(ctx))
-            ),
-            &(&1.name == tool_name)
-          )
+        tool = Enum.find(tools || [], &(&1.name == tool_name))
 
         if tool do
           run_tool(tool, args)

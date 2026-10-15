@@ -689,6 +689,39 @@ defmodule Manfrod.Memory do
     |> Repo.all()
   end
 
+  # Dates, weekdays, months and one-off-event words — a note matching this
+  # may describe something that is already over.
+  @time_bound_pattern ~S"\d{4}-\d{2}-\d{2}|\m\d{1,2}[./]\d{1,2}\M|\m(jutr\w*|pojutrze|dzisiaj|dziś|wczoraj|tomorrow|today|yesterday|urlop\w*|wolne\w*|spotkani\w*|deadline\w*|termin\w*|poniedział\w*|wtor\w*|środ\w*|czwart\w*|piąt\w*|sobot\w*|niedziel\w*|stycz\w*|lut\w*|marc\w*|kwie\w*|maj[au]?|czerw\w*|lip\w*|sierp\w*|wrze[sś]\w*|październik\w*|listopad\w*|grud\w*|january|february|april|june|july|august|september|october|november|december|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\M"
+
+  @doc """
+  Processed nodes of an access bucket that mention dates or one-off events
+  and are at least `:min_age_days` old — candidates for retiring once what
+  they describe is over. Random order, so notes that turn out to still be
+  relevant don't crowd out the rest day after day. Never returns a user's
+  soul (their oldest node, see `get_soul/1`).
+  """
+  def get_time_bound_nodes_by_access(access, opts \\ []) do
+    limit = Keyword.get(opts, :limit, 40)
+    min_age_days = Keyword.get(opts, :min_age_days, 1)
+    cutoff = NaiveDateTime.add(NaiveDateTime.utc_now(), -min_age_days * 86_400)
+
+    souls =
+      from(m in Node,
+        distinct: m.user_id,
+        order_by: [asc: m.user_id, asc: m.inserted_at],
+        select: m.id
+      )
+
+    Node
+    |> where([n], n.access == ^access and not is_nil(n.processed_at))
+    |> where([n], n.inserted_at < ^cutoff)
+    |> where([n], fragment("? ~* ?", n.content, ^@time_bound_pattern))
+    |> where([n], n.id not in subquery(souls))
+    |> order_by(fragment("RANDOM()"))
+    |> limit(^limit)
+    |> Repo.all()
+  end
+
   @doc """
   Get a random sample of processed nodes for an access bucket instead of a
   single author's `user_id` — see `mark_processed_accessible/2`.

@@ -25,6 +25,7 @@ defmodule Manfrod.Slack.Supervisor do
     ActivityHandler,
     EventDedup,
     EventHandler,
+    LookupCache,
     Socket,
     ThreadPermission,
     ThreadSeen,
@@ -64,6 +65,8 @@ defmodule Manfrod.Slack.Supervisor do
       # Once-only guard for duplicate event deliveries (message + app_mention
       # for the same @mention, Socket Mode redeliveries)
       EventDedup,
+      # users.info / conversations.info answers, reused across messages
+      LookupCache,
       # Which channel threads the bot has been invited into (@mentioned in)
       ThreadPermission,
       # Which thread messages each thread session already has in context

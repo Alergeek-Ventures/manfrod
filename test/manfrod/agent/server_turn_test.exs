@@ -24,12 +24,18 @@ defmodule Manfrod.Agent.ServerTurnTest do
         write_access: ["internal"],
         readable_levels: ["internal"],
         participants: MapSet.new(["alice"]),
+        unextracted: MapSet.new(),
         messages: [],
+        prompt_built_at: System.monotonic_time(:millisecond),
         transcript: [],
         inbox: [],
         turn: nil,
         owed: false,
+        turn_tools: nil,
+        turn_notes: [],
+        last_ctx: nil,
         flush_timer: nil,
+        shutdown_timer: nil,
         gate_debounce_timer: nil,
         last_user_content: nil
       },
@@ -63,6 +69,26 @@ defmodule Manfrod.Agent.ServerTurnTest do
       assert new_state.turn == nil
       assert new_state.owed
       assert_received :loop
+    end
+  end
+
+  describe "idle timers" do
+    test "a short idle hands messages to extraction but keeps the session" do
+      assert {:noreply, new_state} = Server.handle_info({:flush, ctx("alice")}, state(%{}))
+
+      assert new_state.flush_timer == nil
+      assert new_state.unextracted == MapSet.new()
+    end
+
+    test "a long idle stops the session" do
+      assert {:stop, :normal, _state} = Server.handle_info(:shutdown_idle, state(%{}))
+    end
+
+    test "a long idle does not stop the session in the middle of a turn" do
+      assert {:noreply, new_state} = Server.handle_info(:shutdown_idle, state(%{turn: "alice"}))
+
+      assert is_reference(new_state.shutdown_timer)
+      Process.cancel_timer(new_state.shutdown_timer)
     end
   end
 

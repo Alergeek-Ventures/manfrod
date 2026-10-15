@@ -7,6 +7,8 @@ defmodule Manfrod.Slack.API do
 
   require Logger
 
+  alias Manfrod.Slack.LookupCache
+
   @base_url "https://slack.com/api"
 
   @doc """
@@ -96,10 +98,15 @@ defmodule Manfrod.Slack.API do
   Returns `{:ok, name}` or `:error`. Prefers `real_name`, falls back to `name`.
   """
   def fetch_user_name(token, slack_user_id) do
-    case get("users.info", token, %{user: slack_user_id}) do
-      {:ok, %{"user" => %{"real_name" => name}}} when name != "" -> {:ok, name}
-      {:ok, %{"user" => %{"name" => name}}} when name != "" -> {:ok, name}
-      _ -> :error
+    case user_info(token, slack_user_id) do
+      {:ok, user} ->
+        case display_name(user) do
+          nil -> :error
+          name -> {:ok, name}
+        end
+
+      _ ->
+        :error
     end
   end
 
@@ -111,23 +118,25 @@ defmodule Manfrod.Slack.API do
   If the scope is missing, `email` will be nil.
   """
   def fetch_user_info(token, slack_user_id) do
-    case get("users.info", token, %{user: slack_user_id}) do
-      {:ok, %{"user" => user}} ->
-        name =
-          case user do
-            %{"real_name" => name} when name != "" -> name
-            %{"name" => name} when name != "" -> name
-            _ -> nil
-          end
-
-        email = get_in(user, ["profile", "email"])
-
-        {:ok, %{name: name, email: email}}
-
-      _ ->
-        :error
+    case user_info(token, slack_user_id) do
+      {:ok, user} -> {:ok, %{name: display_name(user), email: get_in(user, ["profile", "email"])}}
+      _ -> :error
     end
   end
+
+  defp user_info(token, slack_user_id) do
+    LookupCache.fetch({:user, slack_user_id}, fn ->
+      case get("users.info", token, %{user: slack_user_id}) do
+        {:ok, %{"user" => user}} -> {:ok, user}
+        {:ok, _body} -> {:error, :no_user}
+        {:error, reason} -> {:error, reason}
+      end
+    end)
+  end
+
+  defp display_name(%{"real_name" => name}) when is_binary(name) and name != "", do: name
+  defp display_name(%{"name" => name}) when is_binary(name) and name != "", do: name
+  defp display_name(_user), do: nil
 
   @doc """
   Add an emoji reaction to a message.
@@ -366,14 +375,18 @@ defmodule Manfrod.Slack.API do
 
   @doc """
   Look up channel info (name, im/mpim flags) by ID. Returns Slack's raw
-  `conversations.info` `"channel"` map, or `{:error, reason}`.
+  `conversations.info` `"channel"` map, or `{:error, reason}`. Cached
+  briefly (`Manfrod.Slack.LookupCache`).
   """
   @spec get_channel_info(String.t(), String.t()) :: {:ok, map()} | {:error, term()}
   def get_channel_info(token, channel) do
-    case get("conversations.info", token, %{channel: channel}) do
-      {:ok, %{"channel" => info}} -> {:ok, info}
-      {:error, reason} -> {:error, reason}
-    end
+    LookupCache.fetch({:channel, channel}, fn ->
+      case get("conversations.info", token, %{channel: channel}) do
+        {:ok, %{"channel" => info}} -> {:ok, info}
+        {:ok, _body} -> {:error, :no_channel}
+        {:error, reason} -> {:error, reason}
+      end
+    end)
   end
 
   @doc """
