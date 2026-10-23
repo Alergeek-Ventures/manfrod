@@ -55,4 +55,26 @@ defmodule Manfrod.Tools.VacationTest do
       refute msg =~ "urlop"
     end
   end
+
+  describe "cancel_vacation (direct write, no Slack context)" do
+    test "deletes the recorded absence" do
+      user = insert_user!(%{name: "Ola Test"})
+
+      {:ok, _} =
+        run("report_vacation", user.id, %{start_date: "2026-10-22", end_date: "2026-10-24"})
+
+      assert {:ok, msg} =
+               run("cancel_vacation", user.id, %{start_date: "2026-10-22", end_date: "2026-10-24"})
+
+      assert msg =~ "Usunięto nieobecność"
+      assert Manfrod.Facts.list_facts_by_user_unscoped("absence:", user.id) == []
+    end
+
+    test "says so when there is nothing to cancel" do
+      user = insert_user!(%{name: "Ola Test"})
+
+      assert {:ok, msg} = run("cancel_vacation", user.id, %{start_date: "2026-10-22"})
+      assert msg =~ "Brak zapisanej nieobecności"
+    end
+  end
 end

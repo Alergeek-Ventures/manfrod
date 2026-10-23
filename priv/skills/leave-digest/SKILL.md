@@ -35,6 +35,9 @@ user to ask questions or wait for. Just do this:
      zdalnie"), never "urlop", "wolne" or "nie będzie"
    - if the record doesn't say which it is, don't assume vacation: say they
      won't be in the office ("Jana Kowalskiego nie będzie jutro w biurze")
+   - a record or newer note saying the absence was called off ("odwołany",
+     "anulowany", "będzie jednak") → the person is in the office; leave them
+     out entirely, and if that leaves nobody, reply with exactly `EMPTY`
    Copy proper names (clients, companies, places) exactly as they are
    spelled in the record or notes. Never "correct" a name that looks like a
    typo or a more familiar word.

@@ -21,7 +21,8 @@ defmodule Manfrod.Tools.Vacation do
             "visit, remote work from elsewhere). The memory saves it and decides on its own whether " <>
             "to propose sharing with all clients. Call whenever the user mentions being absent — do " <>
             "NOT ask the user about client visibility. When someone corrects an absence that is " <>
-            "already recorded, call it again with the corrected dates and details: it replaces the old record.",
+            "already recorded, call it again with the corrected dates and details: it replaces the old record. " <>
+            "Never use it to record that an absence was called off — use cancel_vacation for that.",
         parameter_schema: [
           start_date: [type: :string, required: true, doc: "Start date ISO8601 (YYYY-MM-DD)"],
           end_date: [type: :string, required: true, doc: "End date ISO8601 (YYYY-MM-DD)"],
@@ -39,6 +40,26 @@ defmodule Manfrod.Tools.Vacation do
           ]
         ],
         callback: fn args -> report_vacation(user_id, msg_ctx, args) end
+      ),
+      ReqLLM.Tool.new!(
+        name: "cancel_vacation",
+        description:
+          "Delete the user's own recorded absence when they call it off entirely (they will be in the " <>
+            "office after all, the trip is cancelled). Removes every absence of theirs overlapping the " <>
+            "given dates. When only the dates or details change, use report_vacation instead.",
+        parameter_schema: [
+          start_date: [
+            type: :string,
+            required: true,
+            doc: "First day of the cancelled absence, ISO8601 (YYYY-MM-DD)"
+          ],
+          end_date: [
+            type: :string,
+            required: false,
+            doc: "Last day of the cancelled absence, ISO8601 (YYYY-MM-DD). Omit for a single day."
+          ]
+        ],
+        callback: fn args -> cancel_vacation(user_id, msg_ctx, args) end
       )
     ]
   end
@@ -79,6 +100,35 @@ defmodule Manfrod.Tools.Vacation do
 
       {:error, e} ->
         {:ok, "Błąd zapisu: #{inspect(e)}"}
+    end
+  end
+
+  defp cancel_vacation(user_id, msg_ctx, %{start_date: start_date} = args) do
+    end_date = Map.get(args, :end_date) || start_date
+
+    case Manfrod.Facts.delete_absences(user_id, start_date, end_date) do
+      [] ->
+        {:ok, "Brak zapisanej nieobecności w #{start_date}..#{end_date}, nic nie usunięto."}
+
+      deleted ->
+        values = Enum.map_join(deleted, "; ", & &1.value)
+        note = "#{user_name(user_id)} odwołuje nieobecność, jest już nieaktualna: #{values}"
+        record_cancellation(user_id, msg_ctx, note, deleted)
+        {:ok, "Usunięto nieobecność: #{values}"}
+    end
+  end
+
+  defp record_cancellation(user_id, msg_ctx, note, deleted) do
+    case Support.flaggable(msg_ctx) do
+      {:ok, channel_id, ts} ->
+        PendingOps.flag_message(channel_id, ts, "create_memory", %{content: note})
+
+      :error ->
+        access = deleted |> Enum.flat_map(& &1.access) |> Enum.uniq()
+
+        with {:ok, embedding} <- Voyage.embed_query(note) do
+          Memory.create_node(user_id, access, %{content: note, embedding: embedding})
+        end
     end
   end
 
