@@ -22,7 +22,9 @@ defmodule Manfrod.FactsAbsenceTest do
     test "replaces an overlapping absence and keeps its access" do
       user = insert_user!(%{name: "Ola Test"})
       shared = ["internal", "external/all"]
-      {:ok, _old, :created} = Facts.put_absence(user.id, "2026-10-08", "2026-10-16", "urlop", shared)
+
+      {:ok, _old, :created} =
+        Facts.put_absence(user.id, "2026-10-08", "2026-10-16", "urlop", shared)
 
       assert {:ok, fact, :replaced} =
                Facts.put_absence(
@@ -41,18 +43,55 @@ defmodule Manfrod.FactsAbsenceTest do
 
     test "leaves absences on other dates alone" do
       user = insert_user!(%{name: "Ola Test"})
-      {:ok, _, :created} = Facts.put_absence(user.id, "2026-08-01", "2026-08-05", "urlop", ["internal"])
-      {:ok, _, :created} = Facts.put_absence(user.id, "2026-10-08", "2026-10-16", "urlop", ["internal"])
+
+      {:ok, _, :created} =
+        Facts.put_absence(user.id, "2026-08-01", "2026-08-05", "urlop", ["internal"])
+
+      {:ok, _, :created} =
+        Facts.put_absence(user.id, "2026-10-08", "2026-10-16", "urlop", ["internal"])
 
       assert length(absences(user.id)) == 2
+    end
+  end
+
+  describe "delete_absences/3" do
+    test "deletes the overlapping absence and leaves the others alone" do
+      user = insert_user!(%{name: "Ola Test"})
+
+      {:ok, cancelled, _} =
+        Facts.put_absence(user.id, "2026-10-22", "2026-10-24", "urlop", ["internal"])
+
+      {:ok, kept, _} =
+        Facts.put_absence(user.id, "2026-11-10", "2026-11-12", "urlop", ["internal"])
+
+      assert [deleted] = Facts.delete_absences(user.id, "2026-10-23", "2026-10-23")
+      assert deleted.id == cancelled.id
+
+      refute Repo.get(Fact, cancelled.id)
+      assert Repo.get(Fact, kept.id)
+    end
+
+    test "never touches another user's absence" do
+      user = insert_user!(%{name: "Ola Test"})
+      other = insert_user!(%{name: "Jan Test"})
+
+      {:ok, theirs, _} =
+        Facts.put_absence(other.id, "2026-10-22", "2026-10-24", "urlop", ["internal"])
+
+      assert [] = Facts.delete_absences(user.id, "2026-10-22", "2026-10-24")
+      assert Repo.get(Fact, theirs.id)
     end
   end
 
   describe "delete_absences_ended_before/1" do
     test "deletes only absences that are over" do
       user = insert_user!(%{name: "Ola Test"})
-      {:ok, past, _} = Facts.put_absence(user.id, "2026-09-01", "2026-09-05", "urlop", ["internal"])
-      {:ok, current, _} = Facts.put_absence(user.id, "2026-10-01", "2026-10-20", "urlop", ["internal"])
+
+      {:ok, past, _} =
+        Facts.put_absence(user.id, "2026-09-01", "2026-09-05", "urlop", ["internal"])
+
+      {:ok, current, _} =
+        Facts.put_absence(user.id, "2026-10-01", "2026-10-20", "urlop", ["internal"])
 
       assert Facts.delete_absences_ended_before(~D[2026-10-10]) >= 1
 

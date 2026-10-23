@@ -1,6 +1,6 @@
 ---
 name: vacation-tracking
-description: Records and looks up vacations/absences for the user or team members. Use when the user says they will be absent, on vacation, off, or unavailable on specific dates, or asks when someone has vacation/leave/absence scheduled.
+description: Records, cancels and looks up vacations/absences for the user or team members. Use when the user says they will be absent, on vacation, off, or unavailable on specific dates, calls a recorded absence off, or asks when someone has vacation/leave/absence scheduled.
 ---
 
 # Vacation tracking
@@ -28,6 +28,19 @@ again with the corrected dates, `working` and `details`. It replaces the
 overlapping record instead of adding a second one. Only the person whose
 absence it is can correct it this way, since it is recorded for the author
 of the message.
+
+## Cancelling an absence
+Someone calls a recorded absence off entirely ("będę jednak", "odwołaj
+urlop", the trip is cancelled) → call `cancel_vacation` with its dates. It
+deletes the record, so nobody is reported absent on those days. Never record
+a cancellation with `report_vacation` (e.g. details "odwołany urlop"): that
+keeps the person listed as absent. If only part of it is called off, call
+`report_vacation` with the remaining dates instead. Only say it is cancelled
+once `cancel_vacation` confirms it removed something.
+
+If the person has Firmowid connected, check `firmowid__list_leave_requests`
+for a leave request on those dates; if there is one, tell them to withdraw it
+in Firmowid themselves, since you can't.
 
 ## Looking up absences
 User asks when they have vacation/leave/absence → call `list_facts` with

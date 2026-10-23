@@ -184,6 +184,21 @@ defmodule Manfrod.Facts do
   end
 
   @doc """
+  Delete the user's absences whose dates overlap `start_date..end_date`
+  (ISO dates), regardless of access: a cancelled absence is removed, not
+  kept with a note saying it was called off.
+
+  Returns the deleted facts.
+  """
+  @spec delete_absences(binary(), String.t(), String.t()) :: [Fact.t()]
+  def delete_absences(user_id, start_date, end_date) do
+    absences = overlapping_absences(user_id, start_date, end_date)
+    ids = Enum.map(absences, & &1.id)
+    Repo.delete_all(from f in Fact, where: f.id in ^ids)
+    absences
+  end
+
+  @doc """
   Delete absences that ended before `date`. They are only noise once over:
   the leave digest, holiday checks and the agent all care about upcoming or
   current absences, and Firmowid keeps the real leave history.
