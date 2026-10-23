@@ -1,6 +1,6 @@
 ---
 name: firmowid-session-check
-description: Checks whether the user has a forgotten (active >2h) Firmowid session; if so, DM them suggesting to end/edit it. Timed to roughly 20 minutes after the user's own average end-of-workday time. Not for manual use via use_skill — Manfrod.Workers.FirmowidSessionCheckWorker triggers this automatically in the context of a specific user.
+description: Checks whether the user has a forgotten (active >2h) Firmowid session; if so, DM them suggesting to end/edit it. Timed to roughly 20 minutes after the user's own average end-of-workday time. Not for manual use via use_skill — the firmowid-evening-scheduler job triggers this automatically in the context of a specific user.
 ---
 
 # Firmowid session check (per-user scheduled skill)

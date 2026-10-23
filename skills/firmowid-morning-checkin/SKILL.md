@@ -1,6 +1,6 @@
 ---
 name: firmowid-morning-checkin
-description: DMs the user because Kalafiornia's office-door log shows they entered the office today but never started a Firmowid session. Asks what they're working on and starts a session from their reply. Timed to roughly 20 minutes after the user's own average start-of-workday time. Not for manual use via use_skill — Manfrod.Workers.FirmowidMorningSessionCheckWorker only triggers this in the context of a specific user, and only once it has already confirmed (in Elixir, not via a tool call) that they entered the office and have no active session.
+description: DMs the user because Kalafiornia's office-door log shows they entered the office today but never started a Firmowid session. Asks what they're working on and starts a session from their reply. Timed to roughly 20 minutes after the user's own average start-of-workday time. Not for manual use via use_skill — the firmowid-morning-scheduler job only triggers this in the context of a specific user, and only once it has already confirmed (in code, not via a tool call) that they entered the office and have no active session.
 ---
 
 # Firmowid morning check-in (per-user scheduled skill)

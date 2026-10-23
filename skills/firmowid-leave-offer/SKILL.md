@@ -1,6 +1,6 @@
 ---
 name: firmowid-leave-offer
-description: Proactive DM offering to submit a just-recorded absence as a Firmowid leave request. Not for on-demand use via use_skill — Manfrod.Memory.Classifier loads this body directly and sends it via Proactive.send after recording a new absence for a user with Firmowid connected.
+description: Proactive DM offering to submit a just-recorded absence as a Firmowid leave request. Not for on-demand use via use_skill — the memory classifier loads this body directly and sends it as a proactive message after recording a new absence for a user with Firmowid connected.
 ---
 
 [Proactive offer: Firmowid leave request]
