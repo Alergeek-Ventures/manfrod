@@ -38,7 +38,7 @@ services:
       - "35233"
 
   postgres:
-    image: docker.io/paradedb/paradedb@sha256:17fbec03c8543eb12267edb06345779f239505654609c4376ade53b4ec4ad1e9
+    image: docker.io/paradedb/paradedb:0.26.3-pg18@sha256:9b15fc383bcd771f1e32e222bd1603c4c29856c481f6bd06f1960e89608c02f0
     restart: unless-stopped
     environment:
       POSTGRES_USER: manfrod
