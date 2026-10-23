@@ -12,27 +12,17 @@ jobs:
   test:
     runs-on: ubuntu-latest
     env:
-      MIX_ENV: test
       # Same paradedb image as deployment/local/compose.yml — plain postgres
       # lacks the pgvector/pg_search extensions the migrations require.
-      DATABASE_URL: ecto://manfrod:manfrod@localhost:5432/manfrod_test
-      SECRET_KEY_BASE: ci_only_secret_key_base_not_used_in_production_1234567890
-      # Empty strings are treated as nil by runtime.exs for optional integrations.
-      ZEN_API_KEY: ""
-      OPENROUTER_API_KEY: ""
-      VOYAGE_API_KEY: ""
-      GROQ_API_KEY: ""
-      BRAVE_SEARCH_API_KEY: ""
-      SLACK_APP_TOKEN: ""
-      SLACK_BOT_TOKEN: ""
-      GOOGLE_CLIENT_ID: ""
-      GOOGLE_CLIENT_SECRET: ""
+      DATABASE_URL: postgres://manfrod:manfrod@localhost:5432/manfrod_test
+      TEST_DATABASE_URL: postgres://manfrod:manfrod@localhost:5432/manfrod_test
     services:
       postgres:
         image: docker.io/paradedb/paradedb@sha256:17fbec03c8543eb12267edb06345779f239505654609c4376ade53b4ec4ad1e9
         env:
           POSTGRES_USER: manfrod
           POSTGRES_PASSWORD: manfrod
+          POSTGRES_DB: manfrod_test
         ports:
           - 5432:5432
         options: >-
@@ -47,32 +37,25 @@ jobs:
       - name: Set up tools
         uses: jdx/mise-action@9e7f7633ff6f6d6048a9418a68d48f288f50eb14 # v4
 
-      - name: Cache deps and build
+      - name: Cache pnpm store
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
-          path: |
-            deps
-            _build
-          key: mix-${{ runner.os }}-${{ hashFiles('mise.toml', 'mix.lock') }}
+          path: ~/.local/share/pnpm/store
+          key: pnpm-${{ runner.os }}-${{ hashFiles('mise.toml', 'pnpm-lock.yaml') }}
           restore-keys: |
-            mix-${{ runner.os }}-
+            pnpm-${{ runner.os }}-
 
       - name: Install dependencies
-        run: mix deps.get
+        run: pnpm install --frozen-lockfile
 
-      - name: Compile (warnings as errors)
-        run: mix compile --warnings-as-errors
+      - name: Typecheck
+        run: pnpm typecheck
 
-      - name: Check formatting
-        run: mix format --check-formatted
+      - name: Migrate database
+        run: node scripts/migrate.mjs
 
-      - name: Set up database
-        run: |
-          mix ecto.create
-          mix ecto.migrate
-
-      # external_api tests hit real third-party APIs (Groq, etc.) and need
-      # secrets we don't provision here; db/slow-tagged agent tests need a
-      # live LLM key end-to-end and are excluded to keep CI fast and stable.
       - name: Run tests
-        run: mix test --exclude external_api --exclude db --exclude slow
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build

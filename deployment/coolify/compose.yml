@@ -1,41 +1,62 @@
-# Coolify deployment: import this repo as a "Docker Compose" resource in
-# Coolify, pointing the "Base Directory"/compose file path at
-# deployment/coolify/compose.yml (build context below is the repo root).
-#
-# ParadeDB (not vanilla postgres) is required: migrations enable the
-# `pg_search` extension alongside `vector`, which only ParadeDB ships.
-#
-# Configure the env vars below as secrets in Coolify's "Environment Variables"
-# tab for this resource — see .env.example in this directory for the full list.
+# Coolify: import this repo as a "Docker Compose" resource pointing at
+# deployment/coolify/compose.yml (build context is the repo root).
+# ParadeDB is required (pg_search + vector). See .env.example for secrets.
 services:
   app:
     build:
-      # Coolify passes --project-directory pointing at the repo root, which
-      # makes Compose resolve build.context relative to *that* instead of
-      # this file's directory — so this must be "." (repo root), not "../..".
       context: .
       dockerfile: Dockerfile
     restart: unless-stopped
     depends_on:
       - postgres
+      - inngest
     environment:
-      DATABASE_URL: ecto://manfrod:${POSTGRES_PASSWORD}@postgres:5432/manfrod
-      SECRET_KEY_BASE: ${SECRET_KEY_BASE}
-      PHX_HOST: ${PHX_HOST}
-      PORT: "35233"
-      ZEN_API_KEY: ${ZEN_API_KEY:-}
+      DATABASE_URL: postgres://manfrod:${POSTGRES_PASSWORD}@postgres:5432/manfrod
+      APP_URL: https://${PHX_HOST}
+      PORT: "3000"
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      TYPESAFE_AI_API_KEY: ${TYPESAFE_AI_API_KEY:-}
       VOYAGE_API_KEY: ${VOYAGE_API_KEY:-}
-      GROQ_API_KEY: ${GROQ_API_KEY:-}
       BRAVE_SEARCH_API_KEY: ${BRAVE_SEARCH_API_KEY:-}
-      SLACK_APP_TOKEN: ${SLACK_APP_TOKEN:-}
       SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-}
+      SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET:-}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
       HOLIDAY_CALENDAR_ID: ${HOLIDAY_CALENDAR_ID:-}
+      KALAFIORNIA_OFFICE_ACCESS_API_KEY: ${KALAFIORNIA_OFFICE_ACCESS_API_KEY:-}
+      LINEAR_ENCRYPTION_KEY: ${LINEAR_ENCRYPTION_KEY}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-}
+      INNGEST_BASE_URL: http://inngest:8288
+      INNGEST_EVENT_KEY: ${INNGEST_EVENT_KEY}
+      INNGEST_SIGNING_KEY: ${INNGEST_SIGNING_KEY}
+      INNGEST_SERVE_HOST: http://app:3000
+    volumes:
+      - eve_workflow:/app/.eve/.workflow-data
     expose:
-      - "35233"
+      - "3000"
+
+  inngest:
+    image: docker.io/inngest/inngest@sha256:7a24ef43322e222c00ebf58d57edb2cf1563e59d92a9d556c3ed380969565b28
+    restart: unless-stopped
+    command:
+      - inngest
+      - start
+      - --sqlite-dir
+      - /data
+      - --sdk-url
+      - http://app:3000/api/inngest
+      - --poll-interval
+      - "60"
+      - --event-key
+      - ${INNGEST_EVENT_KEY}
+      - --signing-key
+      - ${INNGEST_SIGNING_KEY}
+    volumes:
+      - inngest_data:/data
+    expose:
+      - "8288"
+      - "8289"
 
   postgres:
     image: docker.io/paradedb/paradedb:0.26.3-pg18@sha256:9b15fc383bcd771f1e32e222bd1603c4c29856c481f6bd06f1960e89608c02f0
@@ -49,3 +70,5 @@ services:
 
 volumes:
   manfrod_data:
+  inngest_data:
+  eve_workflow:
