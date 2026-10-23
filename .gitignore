@@ -1,53 +1,24 @@
-# The directory Mix will write compiled artifacts to.
-/_build/
-
-# If you run "mix test --cover", coverage assets end up here.
-/cover/
-
-# The directory Mix downloads your dependencies sources to.
-/deps/
-
-# Where 3rd-party dependencies like ExDoc output generated docs.
-/doc/
-
-# Ignore .fetch files in case you like to edit your project deps locally.
-/.fetch
-
-# If the VM crashes, it generates a dump, let's ignore it too.
-erl_crash.dump
-
-# Also ignore archive artifacts (built via "mix archive.build").
-*.ez
-
-# Temporary files, for example, from tests.
-/tmp/
-
-# Ignore package tarball (built via "mix hex.build").
-manfred-*.tar
+node_modules
+.next
+.eve
+.output
+.nitro
+.vercel
+dist
+coverage
+*.tsbuildinfo
+next-env.d.ts
+.DS_Store
 
 # secrets
 .env
-.env.worktree
+.env.*
+!.env.example
 
-# Eval — raw Slack exports and labeled dataset contain real messages, never commit
+# Eval: raw Slack exports and labeled dataset contain real messages, never commit
 /eval/slack_raw.json
 /eval/results_*.json
 /eval/dataset.json
 
-# Tailwind - compiled assets (generated from assets/css/app.css)
-/priv/static/assets/
-
-# Tailwind standalone binary
-/_build/tailwind-*
-
-# LSP
-/.elixir_ls
-/.expert
-
-# Ansible
-deployment/remote/ansible/.vault_pass
-deployment/remote/ansible/.ansible_cache/
-deployment/remote/ansible/*.retry
 manfrod-av-secret-service
 manfrod-av-secret-service.pub
-.DS_Store
