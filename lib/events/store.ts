@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, gte, inArray, lt, lte, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, lt, lte, ne, or, sql } from "drizzle-orm";
 import { db, tables } from "../db/index.ts";
 import { addDays, utcToday } from "../time.ts";
 import { toActivity, type Activity } from "./index.ts";
@@ -32,7 +32,7 @@ export async function listRecentFiltered(limit = 200, filter: RecentFilter = {})
   const conditions = [];
   if (!filter.includeAllLogs) {
     conditions.push(
-      or(sql`${ae.type} <> 'log'`, sql`(${ae.meta}->>'level')::text in ('warning', 'error')`),
+      or(ne(ae.type, "log"), sql`(${ae.meta}->>'level')::text in ('warning', 'error')`),
     );
   }
   if (filter.from) conditions.push(gte(ae.timestamp, filter.from));

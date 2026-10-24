@@ -1,5 +1,5 @@
-import { sql } from "drizzle-orm";
-import { db } from "../db/index.ts";
+import { and, asc, count, countDistinct, eq, gt, gte, isNotNull, lte, max, min, notLike, or, sql, sum } from "drizzle-orm";
+import { db, tables } from "../db/index.ts";
 import { listNegative, stats as feedbackStats } from "../feedback.ts";
 import { isFree, isKnown, label, pricingTable } from "../pricing.ts";
 import { addDays, utcToday } from "../time.ts";
@@ -34,7 +34,11 @@ const INTENT_TOOLS = new Set([
   "linear_get_issue",
 ]);
 
-const ACTIVE = sql.raw("(r.messages_received > 0 OR r.sessions > 0 OR r.tool_calls > 0 OR r.messages_sent > 0)");
+const { usageDailyRollups: usage, activityDailyRollups: activity, toolDailyRollups: toolRollups, users } = tables;
+
+const active = or(gt(activity.messagesReceived, 0), gt(activity.sessions, 0), gt(activity.toolCalls, 0), gt(activity.messagesSent, 0));
+const human = notLike(users.slackId, SYSTEM_PREFIX);
+const week = sql<string>`date_trunc('week', ${activity.date})::date::text`;
 
 const int = (value: unknown) => (value === null || value === undefined ? 0 : Math.trunc(Number(value)));
 const num = (value: unknown) => (value === null || value === undefined ? 0 : Number(value));
@@ -47,51 +51,64 @@ function dateList(days: number): string[] {
   return Array.from({ length: days }, (_, index) => addDays(today, -(days - 1 - index)));
 }
 
-async function rows<T = Record<string, any>>(query: ReturnType<typeof sql>): Promise<T[]> {
-  return (await db.execute(query)).rows as T[];
-}
-
 async function totalsBetween(from: string, to: string) {
-  const [usage] = await rows(sql`
-    SELECT sum(calls) calls, sum(failed_calls) failed_calls, sum(retries) retries, sum(fallbacks) fallbacks,
-      sum(input_tokens) input_tokens, sum(output_tokens) output_tokens, sum(cached_tokens) cached_tokens,
-      sum(cache_creation_tokens) cache_creation_tokens, sum(cost_usd) cost_usd, sum(uncached_cost_usd) uncached_cost_usd,
-      sum(total_latency_ms) total_latency_ms
-    FROM usage_daily_rollups WHERE date >= ${from} AND date <= ${to}`);
-  const [activity] = await rows(sql`
-    SELECT sum(r.messages_received) messages_received, sum(r.messages_sent) messages_sent, sum(r.tool_calls) tool_calls, sum(r.sessions) sessions
-    FROM activity_daily_rollups r JOIN users u ON u.id = r.user_id
-    WHERE r.date >= ${from} AND r.date <= ${to} AND u.slack_id NOT LIKE ${SYSTEM_PREFIX}`);
-  const calls = int(usage?.calls);
+  const [totals] = await db
+    .select({
+      calls: sum(usage.calls),
+      failedCalls: sum(usage.failedCalls),
+      retries: sum(usage.retries),
+      fallbacks: sum(usage.fallbacks),
+      inputTokens: sum(usage.inputTokens),
+      outputTokens: sum(usage.outputTokens),
+      cachedTokens: sum(usage.cachedTokens),
+      cacheCreationTokens: sum(usage.cacheCreationTokens),
+      costUsd: sum(usage.costUsd),
+      uncachedCostUsd: sum(usage.uncachedCostUsd),
+      totalLatencyMs: sum(usage.totalLatencyMs),
+    })
+    .from(usage)
+    .where(and(gte(usage.date, from), lte(usage.date, to)));
+  const [people] = await db
+    .select({
+      messagesReceived: sum(activity.messagesReceived),
+      messagesSent: sum(activity.messagesSent),
+      toolCalls: sum(activity.toolCalls),
+      sessions: sum(activity.sessions),
+    })
+    .from(activity)
+    .innerJoin(users, eq(users.id, activity.userId))
+    .where(and(gte(activity.date, from), lte(activity.date, to), human));
+  const calls = int(totals?.calls);
   return {
     calls,
-    failed_calls: int(usage?.failed_calls),
-    retries: int(usage?.retries),
-    fallbacks: int(usage?.fallbacks),
-    input_tokens: int(usage?.input_tokens),
-    output_tokens: int(usage?.output_tokens),
-    cached_tokens: int(usage?.cached_tokens),
-    cache_creation_tokens: int(usage?.cache_creation_tokens),
-    cost_usd: num(usage?.cost_usd),
-    uncached_cost_usd: num(usage?.uncached_cost_usd),
-    avg_latency_ms: calls === 0 ? 0 : Math.trunc(int(usage?.total_latency_ms) / calls),
-    messages_received: int(activity?.messages_received),
-    messages_sent: int(activity?.messages_sent),
-    tool_calls: int(activity?.tool_calls),
-    sessions: int(activity?.sessions),
+    failed_calls: int(totals?.failedCalls),
+    retries: int(totals?.retries),
+    fallbacks: int(totals?.fallbacks),
+    input_tokens: int(totals?.inputTokens),
+    output_tokens: int(totals?.outputTokens),
+    cached_tokens: int(totals?.cachedTokens),
+    cache_creation_tokens: int(totals?.cacheCreationTokens),
+    cost_usd: num(totals?.costUsd),
+    uncached_cost_usd: num(totals?.uncachedCostUsd),
+    avg_latency_ms: calls === 0 ? 0 : Math.trunc(int(totals?.totalLatencyMs) / calls),
+    messages_received: int(people?.messagesReceived),
+    messages_sent: int(people?.messagesSent),
+    tool_calls: int(people?.toolCalls),
+    sessions: int(people?.sessions),
   };
 }
 
 async function activeUsersBetween(from: string, to: string): Promise<number> {
-  const [row] = await rows(sql`
-    SELECT count(DISTINCT r.user_id) n FROM activity_daily_rollups r JOIN users u ON u.id = r.user_id
-    WHERE r.date >= ${from} AND r.date <= ${to} AND ${ACTIVE} AND u.slack_id NOT LIKE ${SYSTEM_PREFIX}`);
+  const [row] = await db
+    .select({ n: countDistinct(activity.userId) })
+    .from(activity)
+    .innerJoin(users, eq(users.id, activity.userId))
+    .where(and(gte(activity.date, from), lte(activity.date, to), active, human));
   return int(row?.n);
 }
 
 async function peopleCount(): Promise<number> {
-  const [row] = await rows(sql`SELECT count(*) n FROM users WHERE slack_id NOT LIKE ${SYSTEM_PREFIX}`);
-  return int(row?.n);
+  return db.$count(users, human);
 }
 
 async function summary(days: number) {
@@ -119,86 +136,117 @@ async function summary(days: number) {
 
 async function dailySeries(days: number) {
   const from = startDate(days);
-  const usage = new Map(
+  const usageByDate = new Map(
     (
-      await rows(sql`
-        SELECT date::text date, sum(calls) calls, sum(input_tokens) input_tokens, sum(output_tokens) output_tokens,
-          sum(cached_tokens) cached_tokens, sum(cost_usd) cost_usd, sum(failed_calls) failed_calls
-        FROM usage_daily_rollups WHERE date >= ${from} GROUP BY date`)
+      await db
+        .select({
+          date: usage.date,
+          calls: sum(usage.calls),
+          inputTokens: sum(usage.inputTokens),
+          outputTokens: sum(usage.outputTokens),
+          cachedTokens: sum(usage.cachedTokens),
+          costUsd: sum(usage.costUsd),
+          failedCalls: sum(usage.failedCalls),
+        })
+        .from(usage)
+        .where(gte(usage.date, from))
+        .groupBy(usage.date)
     ).map((row) => [row.date, row]),
   );
-  const activity = new Map(
+  const activityByDate = new Map(
     (
-      await rows(sql`
-        SELECT r.date::text date, sum(r.messages_received) messages_received, sum(r.messages_sent) messages_sent,
-          sum(r.tool_calls) tool_calls, count(DISTINCT r.user_id) active_users
-        FROM activity_daily_rollups r JOIN users u ON u.id = r.user_id
-        WHERE r.date >= ${from} AND ${ACTIVE} AND u.slack_id NOT LIKE ${SYSTEM_PREFIX} GROUP BY r.date`)
+      await db
+        .select({
+          date: activity.date,
+          messagesReceived: sum(activity.messagesReceived),
+          messagesSent: sum(activity.messagesSent),
+          toolCalls: sum(activity.toolCalls),
+          activeUsers: countDistinct(activity.userId),
+        })
+        .from(activity)
+        .innerJoin(users, eq(users.id, activity.userId))
+        .where(and(gte(activity.date, from), active, human))
+        .groupBy(activity.date)
     ).map((row) => [row.date, row]),
   );
   return dateList(days).map((date) => {
-    const u = usage.get(date) ?? {};
-    const a = activity.get(date) ?? {};
+    const u = usageByDate.get(date);
+    const a = activityByDate.get(date);
     return {
       date,
-      calls: int(u.calls),
-      failed_calls: int(u.failed_calls),
-      input_tokens: int(u.input_tokens),
-      output_tokens: int(u.output_tokens),
-      cached_tokens: int(u.cached_tokens),
-      cost_usd: num(u.cost_usd),
-      messages_received: int(a.messages_received),
-      messages_sent: int(a.messages_sent),
-      tool_calls: int(a.tool_calls),
-      active_users: int(a.active_users),
+      calls: int(u?.calls),
+      failed_calls: int(u?.failedCalls),
+      input_tokens: int(u?.inputTokens),
+      output_tokens: int(u?.outputTokens),
+      cached_tokens: int(u?.cachedTokens),
+      cost_usd: num(u?.costUsd),
+      messages_received: int(a?.messagesReceived),
+      messages_sent: int(a?.messagesSent),
+      tool_calls: int(a?.toolCalls),
+      active_users: int(a?.activeUsers),
     };
   });
 }
 
 async function byModel(days: number) {
-  const result = await rows(sql`
-    SELECT model, sum(calls) calls, sum(failed_calls) failed_calls, sum(retries) retries, sum(fallbacks) fallbacks,
-      sum(input_tokens) input_tokens, sum(output_tokens) output_tokens, sum(cached_tokens) cached_tokens,
-      sum(cost_usd) cost_usd, sum(uncached_cost_usd) uncached_cost_usd, sum(total_latency_ms) total_latency_ms,
-      min(date)::text first_seen, max(date)::text last_seen
-    FROM usage_daily_rollups WHERE date >= ${startDate(days)} GROUP BY model`);
+  const result = await db
+    .select({
+      model: usage.model,
+      calls: sum(usage.calls),
+      failedCalls: sum(usage.failedCalls),
+      retries: sum(usage.retries),
+      fallbacks: sum(usage.fallbacks),
+      inputTokens: sum(usage.inputTokens),
+      outputTokens: sum(usage.outputTokens),
+      cachedTokens: sum(usage.cachedTokens),
+      costUsd: sum(usage.costUsd),
+      uncachedCostUsd: sum(usage.uncachedCostUsd),
+      totalLatencyMs: sum(usage.totalLatencyMs),
+      firstSeen: min(usage.date),
+      lastSeen: max(usage.date),
+    })
+    .from(usage)
+    .where(gte(usage.date, startDate(days)))
+    .groupBy(usage.model);
   return result
     .map((row) => {
       const calls = int(row.calls);
       return {
-        model: row.model as string,
+        model: row.model,
         calls,
-        failed_calls: int(row.failed_calls),
+        failed_calls: int(row.failedCalls),
         retries: int(row.retries),
         fallbacks: int(row.fallbacks),
-        input_tokens: int(row.input_tokens),
-        output_tokens: int(row.output_tokens),
-        cached_tokens: int(row.cached_tokens),
-        cost_usd: num(row.cost_usd),
-        uncached_cost_usd: num(row.uncached_cost_usd),
-        first_seen: row.first_seen as string,
-        last_seen: row.last_seen as string,
+        input_tokens: int(row.inputTokens),
+        output_tokens: int(row.outputTokens),
+        cached_tokens: int(row.cachedTokens),
+        cost_usd: num(row.costUsd),
+        uncached_cost_usd: num(row.uncachedCostUsd),
+        first_seen: row.firstSeen as string,
+        last_seen: row.lastSeen as string,
         label: label(row.model),
         free: isFree(row.model),
         unpriced: !isKnown(row.model),
-        avg_latency_ms: calls === 0 ? 0 : Math.trunc(int(row.total_latency_ms) / calls),
-        cache_hit_rate: safeRatio(int(row.cached_tokens), int(row.input_tokens)),
+        avg_latency_ms: calls === 0 ? 0 : Math.trunc(int(row.totalLatencyMs) / calls),
+        cache_hit_rate: safeRatio(int(row.cachedTokens), int(row.inputTokens)),
       };
     })
     .sort((a, b) => b.cost_usd - a.cost_usd);
 }
 
 async function modelTimeline(days: number) {
-  const result = await rows(sql`
-    SELECT date::text date, model, sum(calls) calls, sum(cost_usd) cost_usd
-    FROM usage_daily_rollups WHERE date >= ${startDate(days)} GROUP BY date, model`);
-  const models = [...new Set(result.map((row) => row.model as string))].sort();
+  const result = await db
+    .select({ date: usage.date, model: usage.model, calls: sum(usage.calls), costUsd: sum(usage.costUsd) })
+    .from(usage)
+    .where(gte(usage.date, startDate(days)))
+    .groupBy(usage.date, usage.model);
+  const models = [...new Set(result.map((row) => row.model))].sort();
   const series = dateList(days).map((date) => ({
     date,
     models: Object.fromEntries(
       models.map((model) => {
         const row = result.find((candidate) => candidate.date === date && candidate.model === model);
-        return [model, { calls: row ? int(row.calls) : 0, cost_usd: row ? num(row.cost_usd) : 0 }];
+        return [model, { calls: row ? int(row.calls) : 0, cost_usd: row ? num(row.costUsd) : 0 }];
       }),
     ),
   }));
@@ -206,20 +254,26 @@ async function modelTimeline(days: number) {
 }
 
 async function byPurpose(days: number) {
-  const result = await rows(sql`
-    SELECT purpose, sum(calls) calls, sum(cost_usd) cost_usd
-    FROM usage_daily_rollups WHERE date >= ${startDate(days)} GROUP BY purpose`);
+  const result = await db
+    .select({ purpose: usage.purpose, calls: sum(usage.calls), costUsd: sum(usage.costUsd) })
+    .from(usage)
+    .where(gte(usage.date, startDate(days)))
+    .groupBy(usage.purpose);
   return result
-    .map((row) => ({ purpose: row.purpose as string, calls: int(row.calls), cost_usd: num(row.cost_usd) }))
+    .map((row) => ({ purpose: row.purpose, calls: int(row.calls), cost_usd: num(row.costUsd) }))
     .sort((a, b) => b.cost_usd - a.cost_usd);
 }
 
 async function byTool(days: number) {
   const result = (
-    await rows(sql`SELECT tool, sum(calls) calls FROM tool_daily_rollups WHERE date >= ${startDate(days)} GROUP BY tool`)
+    await db
+      .select({ tool: toolRollups.tool, calls: sum(toolRollups.calls) })
+      .from(toolRollups)
+      .where(gte(toolRollups.date, startDate(days)))
+      .groupBy(toolRollups.tool)
   )
     .map((row) => ({
-      tool: row.tool as string,
+      tool: row.tool,
       calls: int(row.calls),
       category: INTENT_TOOLS.has(row.tool) ? ("intent" as const) : ("everyday" as const),
     }))
@@ -234,45 +288,66 @@ async function byTool(days: number) {
 
 async function byUser(days: number) {
   const from = startDate(days);
-  const activity = new Map(
+  const activityByUser = new Map(
     (
-      await rows(sql`
-        SELECT user_id, sum(messages_received) messages_received, sum(messages_sent) messages_sent, sum(tool_calls) tool_calls,
-          sum(sessions) sessions, sum(memory_searches) memory_searches, sum(notes_created) notes_created,
-          count(DISTINCT date) active_days, max(date)::text last_active
-        FROM activity_daily_rollups WHERE date >= ${from} GROUP BY user_id`)
-    ).map((row) => [row.user_id, row]),
+      await db
+        .select({
+          userId: activity.userId,
+          messagesReceived: sum(activity.messagesReceived),
+          messagesSent: sum(activity.messagesSent),
+          toolCalls: sum(activity.toolCalls),
+          sessions: sum(activity.sessions),
+          memorySearches: sum(activity.memorySearches),
+          notesCreated: sum(activity.notesCreated),
+          activeDays: countDistinct(activity.date),
+          lastActive: max(activity.date),
+        })
+        .from(activity)
+        .where(gte(activity.date, from))
+        .groupBy(activity.userId)
+    ).map((row) => [row.userId, row]),
   );
-  const usage = new Map(
+  const usageByUser = new Map(
     (
-      await rows(sql`
-        SELECT user_id, sum(calls) calls, sum(input_tokens) input_tokens, sum(output_tokens) output_tokens, sum(cost_usd) cost_usd
-        FROM usage_daily_rollups WHERE date >= ${from} AND user_id IS NOT NULL GROUP BY user_id`)
-    ).map((row) => [row.user_id, row]),
+      await db
+        .select({
+          userId: usage.userId,
+          calls: sum(usage.calls),
+          inputTokens: sum(usage.inputTokens),
+          outputTokens: sum(usage.outputTokens),
+          costUsd: sum(usage.costUsd),
+        })
+        .from(usage)
+        .where(and(gte(usage.date, from), isNotNull(usage.userId)))
+        .groupBy(usage.userId)
+    ).map((row) => [row.userId, row]),
   );
-  const users = await rows(sql`SELECT id, name, email, slack_id FROM users ORDER BY name`);
-  return users
+  const people = await db
+    .select({ id: users.id, name: users.name, email: users.email, slackId: users.slackId })
+    .from(users)
+    .orderBy(asc(users.name));
+  return people
     .map((user) => {
-      const a = activity.get(user.id) ?? {};
-      const p = usage.get(user.id) ?? {};
+      const a = activityByUser.get(user.id);
+      const p = usageByUser.get(user.id);
       return {
-        user_id: user.id as string,
-        name: (user.name || user.email || user.slack_id) as string,
-        email: user.email as string | null,
-        system: String(user.slack_id ?? "").startsWith("system:"),
-        messages_received: int(a.messages_received),
-        messages_sent: int(a.messages_sent),
-        tool_calls: int(a.tool_calls),
-        sessions: int(a.sessions),
-        memory_searches: int(a.memory_searches),
-        notes_created: int(a.notes_created),
-        active_days: int(a.active_days),
-        last_active: (a.last_active as string) ?? null,
-        calls: int(p.calls),
-        input_tokens: int(p.input_tokens),
-        output_tokens: int(p.output_tokens),
-        cost_usd: num(p.cost_usd),
-        attributed: int(p.calls) > 0,
+        user_id: user.id,
+        name: user.name || user.email || user.slackId,
+        email: user.email,
+        system: user.slackId.startsWith("system:"),
+        messages_received: int(a?.messagesReceived),
+        messages_sent: int(a?.messagesSent),
+        tool_calls: int(a?.toolCalls),
+        sessions: int(a?.sessions),
+        memory_searches: int(a?.memorySearches),
+        notes_created: int(a?.notesCreated),
+        active_days: int(a?.activeDays),
+        last_active: a?.lastActive ?? null,
+        calls: int(p?.calls),
+        input_tokens: int(p?.inputTokens),
+        output_tokens: int(p?.outputTokens),
+        cost_usd: num(p?.costUsd),
+        attributed: int(p?.calls) > 0,
       };
     })
     .filter((user) => !(user.messages_received === 0 && user.calls === 0 && user.active_days === 0))
@@ -282,25 +357,31 @@ async function byUser(days: number) {
 async function adoption(days: number) {
   const from = startDate(days);
   const weekly = (
-    await rows(sql`
-      SELECT date_trunc('week', r.date)::date::text week, count(DISTINCT r.user_id) active_users,
-        sum(r.messages_received) messages, sum(r.sessions) sessions
-      FROM activity_daily_rollups r JOIN users u ON u.id = r.user_id
-      WHERE r.date >= ${from} AND ${ACTIVE} AND u.slack_id NOT LIKE ${SYSTEM_PREFIX}
-      GROUP BY date_trunc('week', r.date) ORDER BY date_trunc('week', r.date)`)
-  ).map((row) => ({ week: row.week as string, active_users: int(row.active_users), messages: int(row.messages), sessions: int(row.sessions) }));
-  const active = await activeUsersBetween(from, utcToday());
+    await db
+      .select({
+        week,
+        activeUsers: countDistinct(activity.userId),
+        messages: sum(activity.messagesReceived),
+        sessions: sum(activity.sessions),
+      })
+      .from(activity)
+      .innerJoin(users, eq(users.id, activity.userId))
+      .where(and(gte(activity.date, from), active, human))
+      .groupBy(week)
+      .orderBy(week)
+  ).map((row) => ({ week: row.week, active_users: int(row.activeUsers), messages: int(row.messages), sessions: int(row.sessions) }));
+  const activeUsers = await activeUsersBetween(from, utcToday());
   const people = await peopleCount();
   const series = await dailySeries(days);
   const avgDaily = series.length === 0 ? 0 : series.reduce((sum, day) => sum + day.active_users, 0) / series.length;
   return {
     weekly,
-    active_users: active,
+    active_users: activeUsers,
     total_people: people,
-    never_used: Math.max(people - active, 0),
-    reach: safeRatio(active, people),
+    never_used: Math.max(people - activeUsers, 0),
+    reach: safeRatio(activeUsers, people),
     avg_daily_active: Math.round(avgDaily * 10) / 10,
-    stickiness: active > 0 ? Math.round((avgDaily / active) * 1000) / 1000 : 0,
+    stickiness: activeUsers > 0 ? Math.round((avgDaily / activeUsers) * 1000) / 1000 : 0,
   };
 }
 

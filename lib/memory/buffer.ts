@@ -1,4 +1,4 @@
-import { and, asc, count, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, count, eq, inArray, isNull, lt } from "drizzle-orm";
 import { db, tables } from "../db/index.ts";
 import type { BufferedMessage } from "../db/schema.ts";
 import { EVENTS, ROOT_THREAD_KEY, sendEvent } from "../inngest/client.ts";
@@ -56,6 +56,6 @@ export async function staleKeys(olderThanSeconds = 120): Promise<{ channelId: st
   const rows = await db
     .selectDistinct({ channelId: memoryBuffer.channelId, threadTs: memoryBuffer.threadTs })
     .from(memoryBuffer)
-    .where(sql`${memoryBuffer.insertedAt} < timezone('UTC', now()) - make_interval(secs => ${olderThanSeconds})`);
+    .where(lt(memoryBuffer.insertedAt, new Date(Date.now() - olderThanSeconds * 1000)));
   return rows;
 }

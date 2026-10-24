@@ -1,34 +1,60 @@
-import { sql } from "drizzle-orm";
+import { asc, countDistinct, desc, eq, like, sql } from "drizzle-orm";
 import { listUsers } from "../accounts.ts";
-import { db } from "../db/index.ts";
+import { db, tables } from "../db/index.ts";
 import { listPendingJobs } from "../jobs/index.ts";
-import { tables } from "../db/index.ts";
 import { listConnections } from "../linear/index.ts";
 import { listAllRecurringReminders } from "../memory/reminders.ts";
 import { listCronSkills } from "../skills.ts";
 
-const rows = async <T = Record<string, any>>(query: ReturnType<typeof sql>) => (await db.execute(query)).rows as T[];
+const { agentSecrets, channelMappings, facts, projectMemberships, projects: projectsTable, users: usersTable } = tables;
 const stamp = (value: unknown) => (value instanceof Date ? value.toISOString() : value ? String(value) : null);
 
 export async function loadAccessData() {
-  const projects = await rows(sql`
-    SELECT p.id, p.slug, p.name, count(DISTINCT cm.id)::int channel_count, count(DISTINCT pm.id)::int member_count
-    FROM projects p LEFT JOIN channel_mappings cm ON cm.project_id = p.id LEFT JOIN project_memberships pm ON pm.project_id = p.id
-    GROUP BY p.id ORDER BY p.slug`);
+  const projects = await db
+    .select({
+      id: projectsTable.id,
+      slug: projectsTable.slug,
+      name: projectsTable.name,
+      channel_count: countDistinct(channelMappings.id),
+      member_count: countDistinct(projectMemberships.id),
+    })
+    .from(projectsTable)
+    .leftJoin(channelMappings, eq(channelMappings.projectId, projectsTable.id))
+    .leftJoin(projectMemberships, eq(projectMemberships.projectId, projectsTable.id))
+    .groupBy(projectsTable.id)
+    .orderBy(asc(projectsTable.slug));
 
-  const channels = await rows(sql`
-    SELECT cm.id, cm.slack_channel_id, cm.slack_channel_name, cm.client_id, cm.status, cm.source, p.slug project_slug
-    FROM channel_mappings cm LEFT JOIN projects p ON p.id = cm.project_id ORDER BY cm.inserted_at DESC`);
+  const channels = await db
+    .select({
+      id: channelMappings.id,
+      slack_channel_id: channelMappings.slackChannelId,
+      slack_channel_name: channelMappings.slackChannelName,
+      client_id: channelMappings.clientId,
+      status: channelMappings.status,
+      source: channelMappings.source,
+      project_slug: projectsTable.slug,
+    })
+    .from(channelMappings)
+    .leftJoin(projectsTable, eq(projectsTable.id, channelMappings.projectId))
+    .orderBy(desc(channelMappings.insertedAt));
 
-  const memberRows = await rows(sql`
-    SELECT u.name user_name, u.slack_id user_slack_id, p.name project_name, p.slug project_slug, pm.source
-    FROM project_memberships pm JOIN users u ON u.id = pm.user_id JOIN projects p ON p.id = pm.project_id
-    ORDER BY u.name, p.slug`);
+  const memberRows = await db
+    .select({
+      user_name: usersTable.name,
+      user_slack_id: usersTable.slackId,
+      project_name: projectsTable.name,
+      project_slug: projectsTable.slug,
+      source: projectMemberships.source,
+    })
+    .from(projectMemberships)
+    .innerJoin(usersTable, eq(usersTable.id, projectMemberships.userId))
+    .innerJoin(projectsTable, eq(projectsTable.id, projectMemberships.projectId))
+    .orderBy(asc(usersTable.name), asc(projectsTable.slug));
   const membersBySlack = new Map<string, { user_slack_id: string; user_name: string | null; memberships: { project_name: string; project_slug: string }[] }>();
   for (const row of memberRows) {
     const entry = membersBySlack.get(row.user_slack_id) ?? {
-      user_slack_id: row.user_slack_id as string,
-      user_name: row.user_name as string | null,
+      user_slack_id: row.user_slack_id,
+      user_name: row.user_name,
       memberships: [] as { project_name: string; project_slug: string }[],
     };
     entry.memberships.push({ project_name: row.project_name, project_slug: row.project_slug });
@@ -39,9 +65,21 @@ export async function loadAccessData() {
   const users = await listUsers();
 
   const vacations = (
-    await rows<{ id: string; key: string; value: string; access: string[]; user_name: string | null; user_slack_id: string | null; inserted_at: unknown; updated_at: unknown }>(sql`
-      SELECT f.id, f.key, f.value, f.access, u.name user_name, u.slack_id user_slack_id, f.inserted_at, f.updated_at
-      FROM facts f LEFT JOIN users u ON u.id = f.set_by_user_id WHERE f.key LIKE 'absence:%' ORDER BY f.inserted_at DESC`)
+    await db
+      .select({
+        id: facts.id,
+        key: facts.key,
+        value: facts.value,
+        access: facts.access,
+        user_name: usersTable.name,
+        user_slack_id: usersTable.slackId,
+        inserted_at: facts.insertedAt,
+        updated_at: facts.updatedAt,
+      })
+      .from(facts)
+      .leftJoin(usersTable, eq(usersTable.id, facts.setByUserId))
+      .where(like(facts.key, "absence:%"))
+      .orderBy(desc(facts.insertedAt))
   ).map((row) => ({ ...row, inserted_at: stamp(row.inserted_at), updated_at: stamp(row.updated_at) }));
 
   const cronRows = [
@@ -95,11 +133,11 @@ export async function loadAccessData() {
   }));
 
   const secrets = (
-    await rows<{ name: string; description: string | null; updated_by: string | null; updated_at: unknown }>(sql`
-      SELECT s.name, s.description, u.name updated_by, s.updated_at
-      FROM agent_secrets s LEFT JOIN users u ON u.id = s.updated_by_user_id
-      ORDER BY s.name
-    `)
+    await db
+      .select({ name: agentSecrets.name, description: agentSecrets.description, updated_by: usersTable.name, updated_at: agentSecrets.updatedAt })
+      .from(agentSecrets)
+      .leftJoin(usersTable, eq(usersTable.id, agentSecrets.updatedByUserId))
+      .orderBy(asc(agentSecrets.name))
   ).map((row) => ({ ...row, updated_at: stamp(row.updated_at) }));
 
   return {

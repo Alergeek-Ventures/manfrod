@@ -1,4 +1,4 @@
-import { and, eq, isNotNull, sql, type SQL, type AnyColumn } from "drizzle-orm";
+import { and, arrayOverlaps, eq, isNotNull, sql, type Column, type SQL } from "drizzle-orm";
 import { db, tables } from "../db/index.ts";
 import type { ChannelMapping, Project } from "../db/schema.ts";
 
@@ -19,20 +19,12 @@ export function mappingWriteAccess(mapping: Pick<ChannelMapping, "clientId">): s
   return mapping.clientId ? ["internal", `external/${mapping.clientId}`] : ["internal"];
 }
 
-export function levelsArray(levels: readonly string[]): SQL {
-  if (levels.length === 0) return sql`ARRAY[]::varchar[]`;
-  return sql`ARRAY[${sql.join(
-    levels.map((level) => sql`${level}`),
-    sql`, `,
-  )}]::varchar[]`;
+export function accessOverlaps(column: Column, readableLevels: readonly string[]): SQL {
+  return readableLevels.length === 0 ? sql`false` : arrayOverlaps(column, [...readableLevels]);
 }
 
-export function accessOverlaps(column: AnyColumn, readableLevels: readonly string[]): SQL {
-  return sql`${column} && ${levelsArray(readableLevels)}`;
-}
-
-export function accessEquals(column: AnyColumn, access: readonly string[]): SQL {
-  return sql`${column} = ${levelsArray(access)}`;
+export function accessEquals(column: Column, access: readonly string[]): SQL {
+  return eq(column, [...access]);
 }
 
 export async function getActiveMapping(channelId: string | null | undefined): Promise<MappingWithProject | null> {

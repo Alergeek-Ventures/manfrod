@@ -18,16 +18,18 @@ export type FeedbackAttrs = {
 
 export async function record(attrs: FeedbackAttrs): Promise<void> {
   if (!["good", "bad"].includes(attrs.rating)) throw new Error("rating: is invalid");
-  await db.execute(sql`
-    INSERT INTO message_feedback (id, user_id, slack_user_id, slack_user_name, slack_channel_id, slack_channel_name,
-      message_ts, session_key, rating, permalink, inserted_at, updated_at)
-    VALUES (${crypto.randomUUID()}, ${attrs.userId}, ${attrs.slackUserId}, ${attrs.slackUserName}, ${attrs.slackChannelId},
-      ${attrs.slackChannelName}, ${attrs.messageTs}, ${attrs.sessionKey}, ${attrs.rating}, ${attrs.permalink},
-      timezone('UTC', now()), timezone('UTC', now()))
-    ON CONFLICT (slack_channel_id, message_ts, slack_user_id)
-    DO UPDATE SET rating = EXCLUDED.rating, permalink = EXCLUDED.permalink,
-      slack_user_name = EXCLUDED.slack_user_name, updated_at = EXCLUDED.updated_at
-  `);
+  await db
+    .insert(messageFeedback)
+    .values(attrs)
+    .onConflictDoUpdate({
+      target: [messageFeedback.slackChannelId, messageFeedback.messageTs, messageFeedback.slackUserId],
+      set: {
+        rating: sql`excluded.rating`,
+        permalink: sql`excluded.permalink`,
+        slackUserName: sql`excluded.slack_user_name`,
+        updatedAt: sql`excluded.updated_at`,
+      },
+    });
 }
 
 const since = (days: number) => new Date(Math.floor((Date.now() - days * 86_400_000) / 1000) * 1000);

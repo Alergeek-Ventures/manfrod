@@ -1,9 +1,10 @@
-import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lte, notInArray, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, inArray, isNotNull, isNull, lt, lte, notInArray, or, sql, type SQL } from "drizzle-orm";
+import { unionAll } from "drizzle-orm/pg-core";
 import { db, tables } from "../db/index.ts";
 import type { Link, Node, User } from "../db/schema.ts";
 import { emit } from "../events/index.ts";
 import { isUuid } from "../accounts.ts";
-import { accessEquals, accessOverlaps, isPrivate, levelsArray } from "./access.ts";
+import { accessEquals, accessOverlaps, isPrivate } from "./access.ts";
 
 const { nodes, links, users, projects } = tables;
 
@@ -346,7 +347,7 @@ export async function getTimeBoundNodesByAccess(
       and(
         accessEquals(nodes.access, access),
         isNotNull(nodes.processedAt),
-        sql`${nodes.insertedAt} < ${cutoff}`,
+        lt(nodes.insertedAt, cutoff),
         sql`${nodes.content} ~* ${TIME_BOUND_PATTERN}`,
         notInArray(nodes.id, souls),
       ),
@@ -364,85 +365,87 @@ export interface GraphStats {
   link_to_note_ratio: number;
 }
 
-async function computeGraphStats(scope: SQL): Promise<GraphStats> {
-  const result = await db.execute<{
-    total_nodes: string;
-    total_links: string;
-    slipbox_count: string;
-    orphan_count: string;
-    weakly_connected_count: string;
-  }>(sql`
-    WITH scoped AS (SELECT id, processed_at FROM nodes WHERE ${scope}),
-    degrees AS (
-      SELECT s.id,
-             (SELECT count(DISTINCT la.id) FROM links la WHERE la.node_a_id = s.id) +
-             (SELECT count(DISTINCT lb.id) FROM links lb WHERE lb.node_b_id = s.id) AS degree
-      FROM scoped s WHERE s.processed_at IS NOT NULL
-    )
-    SELECT
-      (SELECT count(*) FROM scoped) AS total_nodes,
-      (SELECT count(*) FROM links l WHERE l.node_a_id IN (SELECT id FROM scoped) AND l.node_b_id IN (SELECT id FROM scoped)) AS total_links,
-      (SELECT count(*) FROM scoped WHERE processed_at IS NULL) AS slipbox_count,
-      (SELECT count(*) FROM degrees WHERE degree = 0) AS orphan_count,
-      (SELECT count(*) FROM degrees WHERE degree = 1) AS weakly_connected_count
-  `);
-  const row = result.rows[0];
-  const totalNodes = Number(row.total_nodes);
-  const totalLinks = Number(row.total_links);
+function linkEnds() {
+  return unionAll(
+    db.select({ nodeId: links.nodeAId, linkId: links.id }).from(links),
+    db.select({ nodeId: links.nodeBId, linkId: links.id }).from(links),
+  ).as("link_ends");
+}
+
+function processedDegrees(scope: SQL | undefined) {
+  const ends = linkEnds();
+  return db
+    .select({ id: nodes.id, degree: count(ends.linkId).as("degree") })
+    .from(nodes)
+    .leftJoin(ends, eq(ends.nodeId, nodes.id))
+    .where(and(scope, isNotNull(nodes.processedAt)))
+    .groupBy(nodes.id)
+    .as("degrees");
+}
+
+async function countWithDegree(scope: SQL | undefined, degree: number): Promise<number> {
+  const degrees = processedDegrees(scope);
+  const [row] = await db.select({ n: count() }).from(degrees).where(eq(degrees.degree, degree));
+  return row?.n ?? 0;
+}
+
+async function computeGraphStats(scope: SQL | undefined): Promise<GraphStats> {
+  const scoped = db.select({ id: nodes.id }).from(nodes).where(scope);
+  const [totalNodes, slipbox, totalLinks, orphans, weak] = await Promise.all([
+    db.$count(nodes, scope),
+    db.$count(nodes, and(scope, isNull(nodes.processedAt))),
+    db.$count(links, and(inArray(links.nodeAId, scoped), inArray(links.nodeBId, scoped))),
+    countWithDegree(scope, 0),
+    countWithDegree(scope, 1),
+  ]);
   return {
     total_nodes: totalNodes,
     total_links: totalLinks,
-    slipbox_count: Number(row.slipbox_count),
-    orphan_count: Number(row.orphan_count),
-    weakly_connected_count: Number(row.weakly_connected_count),
+    slipbox_count: slipbox,
+    orphan_count: orphans,
+    weakly_connected_count: weak,
     link_to_note_ratio: totalNodes > 0 ? Math.round((totalLinks / totalNodes) * 100) / 100 : 0,
   };
 }
 
 export function graphStats(userId: string | null = null): Promise<GraphStats> {
-  return computeGraphStats(userId ? sql`user_id = ${userId}` : sql`true`);
+  return computeGraphStats(userId ? eq(nodes.userId, userId) : undefined);
 }
 
 export function graphStatsByAccess(access: string[]): Promise<GraphStats> {
-  return computeGraphStats(sql`access = ${levelsArray(access)}`);
+  return computeGraphStats(accessEquals(nodes.access, access));
 }
 
 type DegreeFilter = "orphan" | "weak";
 
 async function nodesByDegree(scope: SQL, degree: DegreeFilter, limit: number): Promise<Node[]> {
-  const target = degree === "orphan" ? 0 : 1;
-  const ids = await db.execute<{ id: string }>(sql`
-    SELECT n.id FROM nodes n
-    WHERE ${scope} AND n.processed_at IS NOT NULL
-      AND ((SELECT count(*) FROM links la WHERE la.node_a_id = n.id) +
-           (SELECT count(*) FROM links lb WHERE lb.node_b_id = n.id)) = ${target}
-    ORDER BY n.inserted_at ASC
-    LIMIT ${limit}
-  `);
-  return nodesInOrder(ids.rows.map((row) => row.id));
-}
-
-async function nodesInOrder(ids: string[]): Promise<Node[]> {
-  if (ids.length === 0) return [];
-  const rows = await db.select().from(nodes).where(inArray(nodes.id, ids));
-  const byId = new Map(rows.map((row) => [row.id, row]));
-  return ids.map((id) => byId.get(id)).filter((node): node is Node => node !== undefined);
+  const ends = linkEnds();
+  const rows = await db
+    .select({ node: nodes })
+    .from(nodes)
+    .leftJoin(ends, eq(ends.nodeId, nodes.id))
+    .where(and(scope, isNotNull(nodes.processedAt)))
+    .groupBy(nodes.id)
+    .having(eq(count(ends.linkId), degree === "orphan" ? 0 : 1))
+    .orderBy(asc(nodes.insertedAt))
+    .limit(limit);
+  return rows.map((row) => row.node);
 }
 
 export function getOrphanNodes(userId: string, limit = 25) {
-  return nodesByDegree(sql`n.user_id = ${userId}`, "orphan", limit);
+  return nodesByDegree(eq(nodes.userId, userId), "orphan", limit);
 }
 
 export function getWeaklyConnectedNodes(userId: string, limit = 25) {
-  return nodesByDegree(sql`n.user_id = ${userId}`, "weak", limit);
+  return nodesByDegree(eq(nodes.userId, userId), "weak", limit);
 }
 
 export function getOrphanNodesByAccess(access: string[], limit = 25) {
-  return nodesByDegree(sql`n.access = ${levelsArray(access)}`, "orphan", limit);
+  return nodesByDegree(accessEquals(nodes.access, access), "orphan", limit);
 }
 
 export function getWeaklyConnectedNodesByAccess(access: string[], limit = 25) {
-  return nodesByDegree(sql`n.access = ${levelsArray(access)}`, "weak", limit);
+  return nodesByDegree(accessEquals(nodes.access, access), "weak", limit);
 }
 
 export async function getStalestNodes(userId: string, limit = 25): Promise<Node[]> {
