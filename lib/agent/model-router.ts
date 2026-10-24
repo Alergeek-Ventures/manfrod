@@ -29,7 +29,17 @@ const DEFAULT_ROUTE: Route = "sonnet";
 
 export type Route = keyof typeof ROUTES;
 
-const turns = new Map<string, { userMessages: number; route: Route }>();
+export const MAX_STEPS_PER_TURN = 40;
+const STEP_WARNING_AT = 25;
+
+const turns = new Map<string, { userMessages: number; route: Route; steps: number }>();
+
+export class StepBudgetExceededError extends Error {
+  constructor(sessionId: string) {
+    super(`Turn in session ${sessionId} exceeded ${MAX_STEPS_PER_TURN} model steps and was stopped`);
+    this.name = "StepBudgetExceededError";
+  }
+}
 
 function text(message: ModelMessage): string {
   if (typeof message.content === "string") return message.content;
@@ -76,10 +86,16 @@ export async function routeStep(sessionId: string, messages: readonly ModelMessa
   const userMessages = messages.filter((message) => message.role === "user").length;
   let current = turns.get(sessionId);
   if (!current || current.userMessages !== userMessages) {
-    current = { userMessages, route: await chooseRoute(messages) };
+    current = { userMessages, route: await chooseRoute(messages), steps: 0 };
     turns.set(sessionId, current);
     log.info(`ModelRouter: ${sessionId} → ${current.route}`);
   }
+  current.steps += 1;
+  if (current.steps > MAX_STEPS_PER_TURN) {
+    log.error(`ModelRouter: ${sessionId} hit the ${MAX_STEPS_PER_TURN}-step limit on ${current.route}, stopping the turn`);
+    throw new StepBudgetExceededError(sessionId);
+  }
+  if (current.steps === STEP_WARNING_AT) log.warn(`ModelRouter: ${sessionId} is at step ${STEP_WARNING_AT} of this turn on ${current.route}`);
   return {
     model: openrouterProvider().chat(ROUTES[current.route].model, {
       usage: { include: true },

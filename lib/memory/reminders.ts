@@ -12,13 +12,21 @@ const { recurringReminders, users } = tables;
 
 export type ReminderWithUser = RecurringReminder & { user: User | null };
 
+export const MIN_INTERVAL_MINUTES = 30;
+const INTERVAL_SAMPLE_RUNS = 48;
+
 export function validateCron(cron: string): string | null {
+  let schedule: Cron;
   try {
-    new Cron(cron, { paused: true });
-    return null;
+    schedule = new Cron(cron, { paused: true });
   } catch (error) {
     return `invalid cron expression: ${(error as Error).message}`;
   }
+  const runs = schedule.nextRuns(INTERVAL_SAMPLE_RUNS);
+  const shortest = runs.slice(1).reduce((min, run, index) => Math.min(min, run.getTime() - runs[index].getTime()), Infinity);
+  return shortest < MIN_INTERVAL_MINUTES * 60_000
+    ? `runs more often than every ${MIN_INTERVAL_MINUTES} minutes; each run is a full agent turn, so pick a sparser schedule`
+    : null;
 }
 
 function validate(attrs: Partial<RecurringReminder>, requireAll: boolean) {

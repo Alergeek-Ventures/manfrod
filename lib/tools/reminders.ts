@@ -130,7 +130,7 @@ export const tools = {
       cron: z
         .string()
         .describe(
-          "Cron expression (5 fields: minute hour day-of-month month day-of-week). Examples: '0 8 * * *' (daily at 8:00), '0 9 * * 1' (Mondays at 9:00)",
+          "Cron expression (5 fields: minute hour day-of-month month day-of-week). Must not fire more often than every 30 minutes. Examples: '0 8 * * *' (daily at 8:00), '0 9 * * 1' (Mondays at 9:00)",
         ),
       instructions: z
         .string()

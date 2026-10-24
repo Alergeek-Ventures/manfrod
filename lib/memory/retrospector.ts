@@ -49,8 +49,23 @@ const ABSENCE_GRACE_DAYS = 7;
 const NEIGHBOR_LIMIT = 3;
 const NEIGHBOR_MAX_DISTANCE = 0.5;
 const LIKELY_DUPLICATE_DISTANCE = 0.15;
-const MAX_ITERATIONS = 150;
+const MAX_ITERATIONS = 40;
+const RUN_ITERATION_BUDGET = 200;
 const COMPACT_EVERY = 10;
+const HEALTHY_LINK_RATIO = 3;
+const MIN_REVIEW_NODES = 5;
+
+interface RunBudget {
+  iterations: number;
+}
+
+const newBudget = (): RunBudget => ({ iterations: RUN_ITERATION_BUDGET });
+
+async function graphHealthy(bucket: string[]): Promise<boolean> {
+  const stats = await graphStatsByAccess(bucket);
+  if (stats.total_nodes < MIN_REVIEW_NODES) return true;
+  return stats.orphan_count === 0 && stats.link_to_note_ratio >= HEALTHY_LINK_RATIO;
+}
 
 const SYSTEM_PROMPT_HEAD = `You are iteratively building a zettelkasten - a personal knowledge graph for
 yourself, composed of atomic notes.
@@ -222,13 +237,18 @@ export async function processAllBuckets(opts: ProcessOptions = {}): Promise<void
     return;
   }
   log.info(`Retrospector: processing ${buckets.length} access bucket(s)`);
+  const budget = newBudget();
   for (const bucket of buckets) {
+    if (budget.iterations <= 0) {
+      log.warn("Retrospector: run iteration budget exhausted, leaving the remaining buckets for the next run");
+      return;
+    }
     const userId = await findBucketUserId(bucket);
     if (!userId) {
       log.warn(`Retrospector: no user found for bucket ${JSON.stringify(bucket)}, skipping`);
       continue;
     }
-    await processBucket(userId, bucketReadableLevels(bucket), bucket, opts);
+    await processBucket(userId, bucketReadableLevels(bucket), bucket, opts, budget);
   }
 }
 
@@ -242,16 +262,29 @@ export async function reviewProcessedGraph(opts: { reviewBudget?: number } = {})
     return;
   }
   log.info(`Retrospector: deep-reviewing ${buckets.length} access bucket(s)`);
+  const runBudget = newBudget();
   for (const bucket of buckets) {
+    if (runBudget.iterations <= 0) {
+      log.warn("Retrospector: run iteration budget exhausted, leaving the remaining buckets for the next review");
+      return;
+    }
     const userId = await findBucketUserId(bucket);
     if (!userId) {
       log.warn(`Retrospector: no user found for bucket ${JSON.stringify(bucket)}, skipping`);
       continue;
     }
-    const reviewSample = await buildReviewSample(bucket, budget);
     const timeBound = await getTimeBoundNodesByAccess(bucket, { limit: TIME_BOUND_BUDGET });
+    const healthy = await graphHealthy(bucket);
+    if (healthy && timeBound.length === 0) {
+      log.info(
+        `Retrospector: bucket ${JSON.stringify(bucket)} needs no review (no orphans and link ratio ≥ ${HEALTHY_LINK_RATIO}, or under ${MIN_REVIEW_NODES} notes)`,
+      );
+      continue;
+    }
+    const reviewSample = healthy ? [] : await buildReviewSample(bucket, budget);
     if (reviewSample.length === 0 && timeBound.length === 0) continue;
-    await runAgent(userId, bucketReadableLevels(bucket), bucket, [], reviewSample, "graph_review", timeBound);
+    const stopWhenHealthy = timeBound.length === 0 ? () => graphHealthy(bucket) : undefined;
+    await runAgent(userId, bucketReadableLevels(bucket), bucket, [], reviewSample, "graph_review", timeBound, runBudget, stopWhenHealthy);
   }
 }
 
@@ -344,6 +377,7 @@ async function processBucket(
   readableLevels: string[],
   writeAccess: string[],
   opts: ProcessOptions,
+  budget: RunBudget,
 ): Promise<void> {
   const batchSize = opts.batchSize ?? 20;
   const reviewBudget = opts.reviewBudget ?? 25;
@@ -355,7 +389,7 @@ async function processBucket(
       log.debug(`Retrospector: slipbox empty for bucket ${JSON.stringify(writeAccess)}`);
       return;
     }
-    if (batchNo > maxBatches) {
+    if (batchNo > maxBatches || budget.iterations <= 0) {
       log.info(
         `Retrospector: batch cap (${maxBatches}) reached for bucket ${JSON.stringify(writeAccess)}, ${slipbox.length}+ slipbox nodes left for next run`,
       );
@@ -365,7 +399,7 @@ async function processBucket(
 
     const reviewSample = await buildReviewSample(writeAccess, reviewBudget);
     const batchIds = slipbox.map((node) => node.id);
-    if (!(await runAgent(userId, readableLevels, writeAccess, slipbox, reviewSample, "slipbox_drain"))) return;
+    if (!(await runAgent(userId, readableLevels, writeAccess, slipbox, reviewSample, "slipbox_drain", [], budget))) return;
     if ((await unprocessedCount(batchIds)) >= batchIds.length) {
       log.warn(`Retrospector: batch ${batchNo} made no slipbox progress for bucket ${JSON.stringify(writeAccess)}, stopping`);
       return;
@@ -508,6 +542,8 @@ async function runAgent(
   reviewSample: Node[],
   kind: Kind,
   timeBound: Node[] = [],
+  budget: RunBudget = newBudget(),
+  stopWhen?: () => Promise<boolean>,
 ): Promise<boolean> {
   const slipboxText = await formatNodes(slipbox, readableLevels);
   const reviewText = await formatNodes(reviewSample, readableLevels);
@@ -531,7 +567,7 @@ async function runAgent(
   };
 
   try {
-    await callWithTools(userId, readableLevels, writeAccess, messages, stats);
+    await callWithTools(userId, readableLevels, writeAccess, messages, stats, budget, stopWhen);
     log.info(`Retrospector: agent completed successfully for user ${userId}`);
     await broadcast("retrospection_completed", { userId, source: "retrospector", meta: { ...stats } });
     return true;
@@ -548,12 +584,23 @@ async function callWithTools(
   writeAccess: string[],
   initial: ModelMessage[],
   stats: Stats,
+  budget: RunBudget,
+  stopWhen?: () => Promise<boolean>,
 ): Promise<string> {
   const toolset = definitions();
   const handlers = await toolHandlers(userId, readableLevels, writeAccess);
   let messages = initial;
 
-  for (let iteration = 0; iteration <= MAX_ITERATIONS; iteration += 1) {
+  for (let iteration = 0; iteration < MAX_ITERATIONS; iteration += 1) {
+    if (budget.iterations <= 0) {
+      log.warn(`Retrospector: run iteration budget exhausted at iteration ${iteration}, stopping`);
+      return "";
+    }
+    if (iteration > 0 && stopWhen && (await stopWhen())) {
+      log.info(`Retrospector: graph reached the target health at iteration ${iteration}, stopping`);
+      return "";
+    }
+    budget.iterations -= 1;
     const response = await generateText(messages, { purpose: "retrospector", userId, tools: toolset, chain: MEMORY_CHAIN });
     stats.input_tokens_used += response.usage.inputTokens ?? 0;
 
@@ -614,7 +661,8 @@ async function callWithTools(
     const full = [...prior, ...turn];
     messages = (iteration + 1) % COMPACT_EVERY === 0 ? [...full.slice(0, 2), user(progressSummary(stats, iteration + 1)), ...turn] : full;
   }
-  throw new Error("max_iterations");
+  log.warn(`Retrospector: reached ${MAX_ITERATIONS} iterations, stopping this run`);
+  return "";
 }
 
 function progressSummary(stats: Stats, iteration: number): string {
