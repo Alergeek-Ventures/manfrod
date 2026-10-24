@@ -122,6 +122,8 @@ const scopeFilter = scopeIndex === -1 ? null : (args[scopeIndex + 1] ?? null);
 const deciderIndex = args.indexOf("--decider");
 const decider = (deciderIndex === -1 ? "legacy" : args[deciderIndex + 1]) as Decider;
 if (!["legacy", "production", "jev", "hybrid"].includes(decider)) throw new Error("--decider must be legacy, production, jev or hybrid");
+const modelIndex = args.indexOf("--model");
+const evalModel = modelIndex === -1 ? null : (args[modelIndex + 1] ?? null);
 const CONCURRENCY = 5;
 const PRODUCTION_PROMPT = readFileSync("lib/prompts/classifier.md", "utf8");
 const latencies: { jev: number[]; llm: number[] } = { jev: [], llm: [] };
@@ -209,7 +211,8 @@ async function productionLlm(sample: Sample): Promise<Result> {
     `Message 0:\n${formatSample(sample)}`;
   const started = Date.now();
   try {
-    const text = (await generateText([system(PRODUCTION_PROMPT), user(prompt)], { purpose: "eval" })).text ?? "";
+    const chain = evalModel ? [{ provider: "openrouter" as const, model: evalModel, tier: "paid" as const }] : undefined;
+    const text = (await generateText([system(PRODUCTION_PROMPT), user(prompt)], { purpose: "eval", chain })).text ?? "";
     latencies.llm.push(Date.now() - started);
     const predicted = parseFirst(text);
     if (!predicted) return { sample, predicted: null, correct: false, error: `parse_error | raw: ${text.slice(0, 200)}` };
@@ -420,7 +423,7 @@ if (scopeFilter) samples = samples.filter((sample) => sample.channel_kind === sc
 info("==> Memory Classification Eval");
 info(`    Dataset: ${samples.length} samples${scopeFilter ? ` (filter: ${scopeFilter})` : ""}`);
 info(`    Mode: ${dryRun ? "dry-run (no LLM calls)" : "live"}`);
-info(`    Decider: ${decider}`);
+info(`    Decider: ${decider}${evalModel ? ` (LLM: ${evalModel})` : ""}`);
 info("");
 
 if (dryRun) {
