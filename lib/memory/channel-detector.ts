@@ -1,7 +1,11 @@
 import { eq } from "drizzle-orm";
 import { db, tables } from "../db/index.ts";
 import { logger } from "../log.ts";
+import { getChannelInfo } from "../slack/api.ts";
+import { shared } from "../slack/state.ts";
 import { getActiveMapping, mappingWriteAccess } from "./access.ts";
+import { suggestProject } from "./action-decider.ts";
+import { listProjects } from "./projects.ts";
 
 const { channelMappings, projects } = tables;
 const log = logger("ChannelDetector");
@@ -79,6 +83,39 @@ export async function ensureMapping(channelId: string, channelName: string | nul
 
   if (detected?.kind !== "priv_channel") {
     log.info(`ChannelDetector: ${channelId} (${channelName ?? "unknown"}) has no mapping, defaulting to internal`);
+    await proposeProjectMapping(channelId, channelName);
   }
   return ["internal"];
+}
+
+const suggestionsChecked = shared("channelProjectSuggestions", () => new Set<string>());
+
+async function proposeProjectMapping(channelId: string, channelName: string | null) {
+  if (suggestionsChecked.has(channelId)) return;
+  suggestionsChecked.add(channelId);
+  const [existing] = await db
+    .select({ id: channelMappings.id })
+    .from(channelMappings)
+    .where(eq(channelMappings.slackChannelId, channelId))
+    .limit(1);
+  if (existing) return;
+
+  const info = await getChannelInfo(channelId);
+  const known = await listProjects();
+  const slug = await suggestProject(
+    {
+      name: channelName ?? info?.name ?? channelId,
+      purpose: info?.purpose?.value ?? "",
+      topic: info?.topic?.value ?? "",
+    },
+    known.map((project) => ({ slug: project.slug, name: project.name })),
+  );
+  const project = slug ? known.find((candidate) => candidate.slug === slug) : null;
+  if (!project) return;
+
+  await db
+    .insert(channelMappings)
+    .values({ slackChannelId: channelId, slackChannelName: channelName, projectId: project.id, source: "jev_suggested", status: "pending" })
+    .onConflictDoNothing({ target: channelMappings.slackChannelId });
+  log.info(`ChannelDetector: suggested project ${project.slug} for ${channelId} (${channelName}), waiting for an admin to activate it`);
 }

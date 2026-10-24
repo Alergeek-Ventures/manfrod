@@ -1,6 +1,7 @@
 import { broadcast } from "../events/index.ts";
 import { generateText, user } from "../llm/index.ts";
 import { logger } from "../log.ts";
+import { worthSummarizing } from "./action-decider.ts";
 import { closeConversation, getPendingMessages, pendingAuthorsForSession } from "./messages.ts";
 
 const log = logger("Extractor");
@@ -12,6 +13,8 @@ const SUMMARY_PROMPT = `Summarize this conversation in 2-3 sentences. Focus on:
 
 Conversation:
 `;
+
+const SMALL_TALK_SUMMARY = "Small talk with no decisions, facts or tasks.";
 
 export async function extractAndStore(
   userId: string,
@@ -37,12 +40,10 @@ export async function extractAndStore(
     .join("\n\n");
 
   try {
-    const response = await generateText([user(SUMMARY_PROMPT + conversationText)], {
-      purpose: "extractor",
-      userId,
-      sessionKey,
-    });
-    const summary = response.text.trim();
+    const summary =
+      (await worthSummarizing(conversationText)) === false
+        ? SMALL_TALK_SUMMARY
+        : (await generateText([user(SUMMARY_PROMPT + conversationText)], { purpose: "extractor", userId, sessionKey })).text.trim();
     const conversation = await closeConversation(userId, sessionKey, {
       summary,
       access: writeAccess,

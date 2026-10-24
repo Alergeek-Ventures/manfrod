@@ -1,6 +1,8 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import type { ModelMessage } from "ai";
 import { assistant, generateText, system, user } from "../lib/llm/index.ts";
+import { decideAction } from "../lib/memory/action-decider.ts";
+import { localToday, weekdayName } from "../lib/time.ts";
 
 const CLASSIFIER_SYSTEM_PROMPT = `You are a memory decision classifier for an AI assistant operating in a company Slack workspace.
 
@@ -105,16 +107,24 @@ interface Sample {
 
 interface Result {
   sample: Sample;
-  predicted: { action?: string; reasoning?: string } | null;
+  predicted: { action?: string; reasoning?: string; source?: "jev" | "llm"; probability?: number | null } | null;
   correct: boolean | null;
   error: string | null;
 }
+
+type Decider = "legacy" | "production" | "jev" | "hybrid";
 
 const info = (message: string) => console.log(message);
 const args = process.argv.slice(2);
 const dryRun = args.includes("--dry-run");
 const scopeIndex = args.indexOf("--scope");
 const scopeFilter = scopeIndex === -1 ? null : (args[scopeIndex + 1] ?? null);
+const deciderIndex = args.indexOf("--decider");
+const decider = (deciderIndex === -1 ? "legacy" : args[deciderIndex + 1]) as Decider;
+if (!["legacy", "production", "jev", "hybrid"].includes(decider)) throw new Error("--decider must be legacy, production, jev or hybrid");
+const CONCURRENCY = 5;
+const PRODUCTION_PROMPT = readFileSync("lib/prompts/classifier.md", "utf8");
+const latencies: { jev: number[]; llm: number[] } = { jev: [], llm: [] };
 
 const CHANNEL_TYPES: Record<string, string> = {
   project_internal: "private project channel (team only — client cannot see this)",
@@ -180,7 +190,85 @@ async function runChunk(chunk: Sample[], chunkIndex: number, total: number): Pro
   return results;
 }
 
+function parseFirst(text: string): Result["predicted"] | null {
+  const cleaned = text.replace(/```json\s*/gi, "").replaceAll("```", "").trim();
+  try {
+    const parsed = JSON.parse(cleaned);
+    const first = Array.isArray(parsed) ? parsed[0] : parsed;
+    return first && typeof first === "object" && "action" in first ? first : null;
+  } catch {
+    return null;
+  }
+}
+
+async function productionLlm(sample: Sample): Promise<Result> {
+  const today = localToday();
+  const prompt =
+    `Current date: ${today} (${weekdayName(today)}).\n` +
+    "Classify each of the following 1 message(s). Return a JSON array with exactly 1 objects in the same order.\n\n" +
+    `Message 0:\n${formatSample(sample)}`;
+  const started = Date.now();
+  try {
+    const text = (await generateText([system(PRODUCTION_PROMPT), user(prompt)], { purpose: "eval" })).text ?? "";
+    latencies.llm.push(Date.now() - started);
+    const predicted = parseFirst(text);
+    if (!predicted) return { sample, predicted: null, correct: false, error: `parse_error | raw: ${text.slice(0, 200)}` };
+    return { sample, predicted: { ...predicted, source: "llm" }, correct: predicted.action === sample.expected_action, error: null };
+  } catch (error) {
+    return { sample, predicted: null, correct: false, error: `llm_error: ${(error as Error).message}` };
+  }
+}
+
+async function jevDecision(sample: Sample): Promise<Result> {
+  const kind = sample.channel_kind ?? "unknown";
+  const started = Date.now();
+  const decision = await decideAction(
+    {
+      text: sample.message_text ?? "",
+      author: sample.user_name ?? "unknown",
+      channelKind: kind,
+      channelType: CHANNEL_TYPES[kind] ?? "unknown",
+      resolvedScope: RESOLVED_SCOPES[kind] ?? "none",
+    },
+    localToday(),
+  );
+  latencies.jev.push(Date.now() - started);
+  if (!decision) return { sample, predicted: null, correct: false, error: "jev_error" };
+  return {
+    sample,
+    predicted: { action: decision.action, source: "jev", probability: decision.probability },
+    correct: decision.action === sample.expected_action,
+    error: null,
+  };
+}
+
+async function evaluate(sample: Sample): Promise<Result> {
+  if (decider === "production") return productionLlm(sample);
+  const jev = await jevDecision(sample);
+  if (decider === "jev") return jev;
+  const action = jev.predicted?.action;
+  if (action === "ignore" || action === "flag_sensitive") return jev;
+  return productionLlm(sample);
+}
+
+async function runConcurrent(all: Sample[]): Promise<Result[]> {
+  const results: Result[] = new Array(all.length);
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: CONCURRENCY }, async () => {
+      while (next < all.length) {
+        const index = next++;
+        results[index] = await evaluate(all[index]);
+        const result = results[index];
+        info(`  [${index + 1}/${all.length}] ${all[index].id} ${result.correct ? "✓" : "✗"} ${prediction(result)} (${result.predicted?.source ?? "error"})`);
+      }
+    }),
+  );
+  return results;
+}
+
 const prediction = (result: Result) => result.predicted?.action ?? "error";
+const average = (values: number[]) => (values.length === 0 ? 0 : Math.round(values.reduce((sum, value) => sum + value, 0) / values.length));
 const pad = (value: unknown, width: number) => String(value).padEnd(width);
 const fmtPct = (value: number | null) => (value === null ? "—" : `${value}%`);
 const round1 = (value: number) => Math.round(value * 10) / 10;
@@ -307,6 +395,9 @@ function saveResults(results: Result[]) {
         predicted_action: prediction(result),
         correct: result.correct,
         predicted_reasoning: result.predicted?.reasoning ?? null,
+        decider,
+        source: result.predicted?.source ?? null,
+        probability: result.predicted?.probability ?? null,
         error: result.error,
       })),
       null,
@@ -329,11 +420,19 @@ if (scopeFilter) samples = samples.filter((sample) => sample.channel_kind === sc
 info("==> Memory Classification Eval");
 info(`    Dataset: ${samples.length} samples${scopeFilter ? ` (filter: ${scopeFilter})` : ""}`);
 info(`    Mode: ${dryRun ? "dry-run (no LLM calls)" : "live"}`);
+info(`    Decider: ${decider}`);
 info("");
 
 if (dryRun) {
   info("");
   info(`Dry-run complete. ${samples.length} samples validated. Run without --dry-run to evaluate.`);
+} else if (decider !== "legacy") {
+  const results = await runConcurrent(samples);
+  printReport(results);
+  const llmCalls = results.filter((result) => result.predicted?.source === "llm").length;
+  info(`  LLM calls: ${llmCalls}/${results.length}${decider === "hybrid" ? ` (${results.length - llmCalls} settled by Jev)` : ""}`);
+  info(`  Avg latency: Jev ${average(latencies.jev)}ms, LLM ${average(latencies.llm)}ms`);
+  saveResults(results);
 } else {
   const chunks = Array.from({ length: Math.ceil(samples.length / CHUNK_SIZE) }, (_, index) => samples.slice(index * CHUNK_SIZE, (index + 1) * CHUNK_SIZE));
   info(`  Chunks: ${chunks.length} (max ${CHUNK_SIZE} samples each)`);

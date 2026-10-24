@@ -5,6 +5,7 @@ import { getUserBySlackId } from "../accounts.ts";
 import { broadcast } from "../events/index.ts";
 import { addAccess, overlappingAbsences, putAbsence, setFact } from "../facts.ts";
 import { generateText, system, user } from "../llm/index.ts";
+import { decideAction, type MemoryAction } from "./action-decider.ts";
 import { logger } from "../log.ts";
 import { ensureValidToken, getConnection } from "../mcp/index.ts";
 import { sendProactive } from "../proactive.ts";
@@ -63,9 +64,30 @@ function resolveKind(channelId: string, channelName: string | null, writeAccess:
   return writeAccess.some((level) => level.startsWith("external/")) ? "project_external" : "company_channel";
 }
 
-async function doClassifyBatch(messages: BufferedMessage[], channelId: string, kind: string, writeAccess: string[]) {
+const SETTLED_BY_JEV: ReadonlySet<MemoryAction> = new Set(["ignore", "flag_sensitive"]);
+
+async function jevActions(messages: BufferedMessage[], kind: string, today: string, flagged: boolean[]) {
+  return Promise.all(
+    messages.map(async (message, index) => {
+      if (flagged[index]) return null;
+      const decision = await decideAction(
+        {
+          text: message.text ?? "",
+          author: message.user_name ?? message.user ?? "unknown",
+          channelKind: kind,
+          channelType: CHANNEL_TYPES[kind] ?? "unknown",
+          resolvedScope: RESOLVED_SCOPES[kind] ?? "none",
+        },
+        today,
+      );
+      return decision && SETTLED_BY_JEV.has(decision.action) ? decision.action : null;
+    }),
+  );
+}
+
+async function llmResults(messages: BufferedMessage[], kind: string, today: string): Promise<Result[] | null> {
+  if (messages.length === 0) return [];
   const formatted = messages.map((message, index) => `Message ${index}:\n${formatMessage(message, kind)}`).join("\n---\n");
-  const today = localToday();
   const userMessage =
     `Current date: ${today} (${weekdayName(today)}).\n` +
     `Classify each of the following ${messages.length} message(s). ` +
@@ -77,20 +99,44 @@ async function doClassifyBatch(messages: BufferedMessage[], channelId: string, k
     raw = (await generateText([system(systemPrompt()), user(userMessage)], { purpose: "classifier" })).text || "[]";
   } catch (error) {
     log.error(`Classifier LLM error: ${(error as Error).message}`);
-    return;
+    return null;
   }
-
   const parsed = parseBulkResponse(raw);
   if (!parsed.ok) {
     log.warn(`Classifier bulk parse failed: ${parsed.error} / raw: ${raw.slice(0, 200)}`);
-    return;
+    return null;
   }
+  return parsed.results;
+}
 
-  const count = Math.min(parsed.results.length, messages.length);
-  for (let index = 0; index < count; index += 1) {
-    const message = messages[index];
-    const pending = await take(channelId, message.ts);
-    const [action, result] = applyPendingFlag(pending.flag, parsed.results[index] ?? {});
+async function doClassifyBatch(messages: BufferedMessage[], channelId: string, kind: string, writeAccess: string[]) {
+  const today = localToday();
+  const pendings = await Promise.all(messages.map((message) => take(channelId, message.ts)));
+  const settled = await jevActions(
+    messages,
+    kind,
+    today,
+    pendings.map((pending) => pending.flag !== null),
+  );
+  const forLlm = messages.map((_, index) => index).filter((index) => settled[index] === null);
+  const llm = await llmResults(
+    forLlm.map((index) => messages[index]),
+    kind,
+    today,
+  );
+  if (forLlm.length > 0) log.info(`Classifier [${channelId}] ${messages.length - forLlm.length}/${messages.length} settled by Jev`);
+
+  for (const [index, message] of messages.entries()) {
+    const pending = pendings[index];
+    const jevAction = settled[index];
+    let decided: Result | null;
+    if (jevAction) decided = { action: jevAction, reasoning: "decided by Jev" };
+    else decided = llm?.[forLlm.indexOf(index)] ?? null;
+    if (!decided) {
+      await runOps(pending.ops);
+      continue;
+    }
+    const [action, result] = applyPendingFlag(pending.flag, decided);
     const flagged = pending.flag ? " (agent-flagged)" : "";
     log.info(`Classifier [${channelId}] msg ${index}: ${action}${flagged} — ${result.reasoning ?? ""}`);
 
