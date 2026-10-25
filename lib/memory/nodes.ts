@@ -514,8 +514,7 @@ export async function getGraphData(
   };
 }
 
-const ownSoul = () =>
-  and(eq(nodes.id, users.soulNodeId), eq(nodes.userId, users.id), sql`${nodes.access} = ARRAY['private/' || ${users.id}::text]::varchar[]`);
+const ownSoul = () => eq(nodes.id, users.soulNodeId);
 
 export async function getSoul(userId: string): Promise<Node | null> {
   if (!isUuid(userId)) return null;
@@ -532,6 +531,13 @@ export async function isSoul(nodeId: string): Promise<boolean> {
 export async function soulNodeIds(): Promise<Set<string>> {
   const rows = await db.select({ id: nodes.id }).from(users).innerJoin(nodes, ownSoul());
   return new Set(rows.map((row) => row.id));
+}
+
+export async function setSoul(userId: string, nodeId: string): Promise<Node | null> {
+  const node = await getNodeById(nodeId);
+  if (!node) return null;
+  const updated = await db.update(users).set({ soulNodeId: node.id }).where(eq(users.id, userId)).returning({ id: users.id });
+  return updated.length > 0 ? node : null;
 }
 
 export const SOUL_LINK_LIMIT = 12;
@@ -556,7 +562,7 @@ export async function updateSoul(userId: string, content: string, embedding: num
   const soul = await getSoul(userId);
   if (!soul) {
     const node = await createNode(userId, [privateLevel(userId)], { content, embedding, processedAt: nowSeconds() });
-    await db.update(users).set({ soulNodeId: node.id }).where(eq(users.id, userId));
+    await setSoul(userId, node.id);
     return node;
   }
   const [updated] = await db.update(nodes).set({ content, embedding }).where(eq(nodes.id, soul.id)).returning();

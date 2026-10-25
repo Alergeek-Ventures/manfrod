@@ -1,21 +1,16 @@
 import { z } from "zod";
-import { getNodeAccessible, updateSoul } from "../../lib/memory/nodes.ts";
-import { embedQuery } from "../../lib/voyage.ts";
+import { getNodeAccessible, setSoul } from "../../lib/memory/nodes.ts";
+import { isUuid } from "../../lib/accounts.ts";
 import { defineManfrodTool } from "../lib/define-tool.ts";
 
 export default defineManfrodTool({
   keepSecretPlaceholders: true,
   description:
-    "Replace your soul for the person you are talking to with the content of an existing note. The note itself stays as it is; the soul remains private to this person. Only on their explicit request.",
-  inputSchema: z.object({ note_id: z.string().describe("UUID of the note whose content becomes the soul") }),
+    "Make an existing note your soul for the person you are talking to, replacing the current one (which stays as an ordinary note). Only on their explicit request.",
+  inputSchema: z.object({ note_id: z.string().describe("UUID of the note to make the soul") }),
   async execute({ note_id }, ctx) {
-    const note = await getNodeAccessible(ctx.readableLevels, note_id);
-    if (!note) return `Note not found: ${note_id}`;
-    try {
-      const soul = await updateSoul(ctx.userId, note.content, note.embedding ?? (await embedQuery(note.content)));
-      return `The soul [${soul.id}] now reads:\n${soul.content}`;
-    } catch (error) {
-      return `Failed to save the soul: ${(error as Error).message}`;
-    }
+    if (!isUuid(note_id) || !(await getNodeAccessible(ctx.readableLevels, note_id))) return `Note not found: ${note_id}`;
+    const soul = await setSoul(ctx.userId, note_id);
+    return soul ? `Note [${soul.id}] is now the soul:\n${soul.content}` : `Note not found: ${note_id}`;
   },
 });

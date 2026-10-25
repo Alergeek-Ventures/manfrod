@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { readFileSync } from "node:fs";
+import { eq, sql } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 
 const enabled = Boolean(process.env.TEST_DATABASE_URL);
@@ -20,18 +21,35 @@ describe.skipIf(!enabled)("souls", () => {
     expect(await getSoul(user.id)).toBeNull();
   });
 
-  it("ignores a legacy soul pointer to a shared note and replaces it with a private soul", async () => {
+  it("keeps an existing user's soul where it points", async () => {
     const user = await insertUser();
-    const shared = await createNode(user.id, ["internal"], { content: "deploys happen on Fridays", embedding: EMBEDDING });
-    await db.update(tables.users).set({ soulNodeId: shared.id }).where(eq(tables.users.id, user.id));
-    expect(await getSoul(user.id)).toBeNull();
-    expect(await isSoul(shared.id)).toBe(false);
+    const first = await createNode(user.id, ["internal"], { content: "deploys happen on Fridays", embedding: EMBEDDING });
+    await db.update(tables.users).set({ soulNodeId: first.id }).where(eq(tables.users.id, user.id));
+    expect((await getSoul(user.id))?.id).toBe(first.id);
+    expect(await isSoul(first.id)).toBe(true);
 
     const soul = await updateSoul(user.id, "I am a calm, precise Manfrod for Ola, a backend developer.", EMBEDDING);
-    expect(soul.id).not.toBe(shared.id);
+    expect(soul.id).toBe(first.id);
+  });
+
+  it("migrates existing users without a soul to their first note", async () => {
+    const [withNotes, withoutNotes] = await Promise.all([insertUser(), insertUser()]);
+    const first = await createNode(withNotes.id, ["internal"], { content: "first note", embedding: EMBEDDING });
+    const second = await createNode(withNotes.id, ["internal"], { content: "second note", embedding: EMBEDDING });
+    await db
+      .update(tables.nodes)
+      .set({ insertedAt: new Date(first.insertedAt.getTime() + 60_000) })
+      .where(eq(tables.nodes.id, second.id));
+    await db.execute(sql.raw(readFileSync("db/migrations/0009_first_note_souls.sql", "utf8")));
+    expect((await getSoul(withNotes.id))?.id).toBe(first.id);
+    expect(await getSoul(withoutNotes.id)).toBeNull();
+  });
+
+  it("creates a private soul for a new user", async () => {
+    const user = await insertUser();
+    const soul = await updateSoul(user.id, "Manfrod for a new teammate", EMBEDDING);
     expect(soul.access).toEqual([privateLevel(user.id)]);
     expect((await getSoul(user.id))?.id).toBe(soul.id);
-    expect(await isSoul(soul.id)).toBe(true);
   });
 
   it("gives every user their own soul", async () => {
