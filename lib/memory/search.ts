@@ -2,7 +2,7 @@ import { and, cosineDistance, eq, inArray, isNotNull, lt, ne, or, sql, type SQL 
 import { db, tables } from "../db/index.ts";
 import type { Node } from "../db/schema.ts";
 import { emit } from "../events/index.ts";
-import { embedQuery, rerank } from "../voyage.ts";
+import { embed, rerank } from "../voyage.ts";
 import { accessOverlaps } from "./access.ts";
 import { getNodeLinksAccessible, getSoul } from "./nodes.ts";
 import { expand } from "./query-expander.ts";
@@ -18,19 +18,13 @@ function projectBound(projectId: string | null | undefined): SQL | undefined {
   return projectId ? eq(nodes.projectId, projectId) : undefined;
 }
 
-export async function searchVector(
-  readableLevels: string[],
-  queryText: string,
-  limit = 10,
-  projectId: string | null = null,
-): Promise<Scored[]> {
-  let embedding: number[];
+async function embedQueries(queries: string[]): Promise<(number[] | null)[]> {
+  if (queries.length === 0) return [];
   try {
-    embedding = await embedQuery(queryText);
+    return await embed(queries, { inputType: "query" });
   } catch {
-    return [];
+    return queries.map(() => null);
   }
-  return vectorSearchWithDistance(readableLevels, embedding, limit, projectId);
 }
 
 async function vectorSearchWithDistance(
@@ -150,6 +144,17 @@ async function expandWithLinks(found: Node[], readableLevels: string[], max: num
   return all.slice(0, max);
 }
 
+async function retrieveLists(readableLevels: string[], queries: string[], limit: number, projectId: string | null) {
+  const [embeddings, bm25] = await Promise.all([
+    embedQueries(queries),
+    Promise.all(queries.map((query) => searchBm25(readableLevels, query, limit, projectId))),
+  ]);
+  const vector = await Promise.all(
+    embeddings.map((embedding) => (embedding ? vectorSearchWithDistance(readableLevels, embedding, limit, projectId) : [])),
+  );
+  return { vector, bm25 };
+}
+
 export interface SearchOptions {
   limit?: number;
   expandQuery?: boolean;
@@ -168,21 +173,15 @@ export async function search(
   const rerankEnabled = opts.rerank ?? true;
   const projectId = opts.projectId ?? null;
 
-  const queries = expandQuery ? await expand(queryText) : [queryText];
+  const retrieve = (batch: string[]) => retrieveLists(readableLevels, batch, limit, projectId);
+  const [original, queries] = await Promise.all([retrieve([queryText]), expandQuery ? expand(queryText) : [queryText]]);
+  const expanded = await retrieve(queries.filter((query) => query !== queryText));
 
-  const perQuery = await Promise.all(
-    queries.map(async (query) => {
-      const [vector, bm25] = await Promise.all([
-        searchVector(readableLevels, query, limit, projectId),
-        searchBm25(readableLevels, query, limit, projectId),
-      ]);
-      return { vector, bm25 };
-    }),
-  );
-
-  const vectorResults = perQuery.flatMap((result) => result.vector);
-  const bm25Results = perQuery.flatMap((result) => result.bm25);
-  const merged = rrfMerge([vectorResults, bm25Results]);
+  const vectorLists = [...original.vector, ...expanded.vector];
+  const bm25Lists = [...original.bm25, ...expanded.bm25];
+  const vectorResults = vectorLists.flat();
+  const bm25Results = bm25Lists.flat();
+  const merged = rrfMerge([...vectorLists, ...bm25Lists]);
 
   const rerankRan = rerankEnabled && merged.length > 1;
   const { nodes: reranked, scores: rerankScores } = rerankRan
@@ -241,13 +240,15 @@ export async function getNoteContext(
   query: string,
   projectId: string | null = null,
 ): Promise<string> {
-  const soul = await getSoul(userId);
-  const linkedToSoul = soul ? (await getNodeLinksAccessible(readableLevels, soul.id)).filter((node) => node.userId === userId) : [];
-  const relevant = await search(userId, readableLevels, query, { limit: 10, projectId });
+  const anchored = async () => {
+    const soul = await getSoul(userId);
+    if (!soul) return [];
+    const linked = await getNodeLinksAccessible(readableLevels, soul.id);
+    return [soul, ...linked.filter((node) => node.userId === userId)];
+  };
+  const [soulNodes, relevant] = await Promise.all([anchored(), search(userId, readableLevels, query, { limit: 10, projectId })]);
 
   const seen = new Set<string>();
-  const combined = [soul, ...linkedToSoul, ...relevant]
-    .filter((node): node is Node => node !== null)
-    .filter((node) => (seen.has(node.id) ? false : (seen.add(node.id), true)));
+  const combined = [...soulNodes, ...relevant].filter((node) => (seen.has(node.id) ? false : (seen.add(node.id), true)));
   return buildContext(combined);
 }
