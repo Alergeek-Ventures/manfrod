@@ -11,7 +11,7 @@ export default async function GraphPage() {
   const user = await requireAdmin();
   const [graph, soul, stats, users, projects, clients] = await Promise.all([
     getGraphData({ accessLevel: "internal" }),
-    getSoul(),
+    getSoul(user.id),
     graphStats(),
     listUsers(),
     listProjects(),

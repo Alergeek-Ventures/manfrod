@@ -425,6 +425,8 @@ export const memoryBuffer = pgTable("memory_buffer", {
 	channelName: text("channel_name"),
 	message: jsonb().notNull(),
 	insertedAt: timestamp("inserted_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
+	claimedAt: timestamp("claimed_at", { mode: 'date' }),
+	attempts: integer().default(0).notNull(),
 }, (table) => [
 	index("memory_buffer_key_index").using("btree", table.channelId.asc().nullsLast().op("text_ops"), table.threadTs.asc().nullsLast().op("int8_ops"), table.id.asc().nullsLast().op("text_ops")),
 ]);

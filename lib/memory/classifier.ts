@@ -13,12 +13,13 @@ import { getBody } from "../routines.ts";
 import { post } from "../slack/api.ts";
 import { isValidIsoDate, localToday, weekdayName } from "../time.ts";
 import { embedQuery } from "../voyage.ts";
-import { clientIdForChannel, ensureMembership, getActiveMapping, isPrivate, privateLevel, projectIdForChannel } from "./access.ts";
+import { clientIdForProject, ensureMembership, getActiveMapping, isPrivate, privateLevel } from "./access.ts";
 import { detect, ensureMapping } from "./channel-detector.ts";
-import { createLink, createNode, deleteLink, deleteNode, escalateNoteAccess } from "./nodes.ts";
+import { createLink, createNode, deleteLinkAs, deleteNodeAs, escalateNoteAccess } from "./nodes.ts";
 import {
   deleteConfirmation,
   getConfirmation,
+  peek,
   putConfirmation,
   take,
   type ConfirmationPayload,
@@ -38,25 +39,42 @@ function systemPrompt(): string {
   return readFileSync(path.join(process.cwd(), "lib", "prompts", "classifier.md"), "utf8");
 }
 
-async function findUserId(slackUserId: string | null | undefined): Promise<string | null> {
-  return (await getUserBySlackId(slackUserId))?.id ?? null;
+interface Batch {
+  channelId: string;
+  kind: string;
+  writeAccess: string[];
+  projectId: string | null;
+  clientId: string | null;
+  userIds: Map<string, string>;
 }
+
+class ClassifierUnavailableError extends Error {}
 
 export async function classifyBatch(messages: BufferedMessage[], channelId: string, channelName: string | null) {
   const writeAccess = await ensureMapping(channelId, channelName);
-  const kind = resolveKind(channelId, channelName, writeAccess);
-  await ensureAuthorMemberships(messages, channelId);
-  await doClassifyBatch(messages, channelId, kind, writeAccess);
+  const mapping = await getActiveMapping(channelId);
+  const userIds = await resolveAuthors(messages);
+  if (mapping?.projectId) {
+    for (const userId of new Set(userIds.values())) await ensureMembership(userId, mapping.projectId);
+  }
+  const projectId = mapping?.projectId ?? null;
+  await doClassifyBatch(messages, {
+    channelId,
+    kind: resolveKind(channelId, channelName, writeAccess),
+    writeAccess,
+    projectId,
+    clientId: mapping?.clientId ?? (projectId ? await clientIdForProject(projectId) : null),
+    userIds,
+  });
 }
 
-async function ensureAuthorMemberships(messages: BufferedMessage[], channelId: string) {
-  const mapping = await getActiveMapping(channelId);
-  if (!mapping?.projectId) return;
-  for (const slackUserId of new Set(messages.map((message) => message.user))) {
-    const userId = await findUserId(slackUserId);
-    if (userId) await ensureMembership(userId, mapping.projectId);
-  }
+async function resolveAuthors(messages: BufferedMessage[]): Promise<Map<string, string>> {
+  const slackIds = [...new Set(messages.map((message) => message.user).filter((id): id is string => Boolean(id)))];
+  const users = await Promise.all(slackIds.map(async (slackId) => [slackId, (await getUserBySlackId(slackId))?.id] as const));
+  return new Map(users.filter((entry): entry is readonly [string, string] => Boolean(entry[1])));
 }
+
+const authorId = (batch: Batch, message: BufferedMessage) => (message.user ? (batch.userIds.get(message.user) ?? null) : null);
 
 function resolveKind(channelId: string, channelName: string | null, writeAccess: string[]): string {
   const detected = detect(channelId, channelName);
@@ -85,7 +103,7 @@ async function jevActions(messages: BufferedMessage[], kind: string, today: stri
   );
 }
 
-async function llmResults(messages: BufferedMessage[], kind: string, today: string): Promise<Result[] | null> {
+async function llmResults(messages: BufferedMessage[], kind: string, today: string): Promise<Result[]> {
   if (messages.length === 0) return [];
   const formatted = messages.map((message, index) => `Message ${index}:\n${formatMessage(message, kind)}`).join("\n---\n");
   const userMessage =
@@ -98,26 +116,21 @@ async function llmResults(messages: BufferedMessage[], kind: string, today: stri
   try {
     raw = (await generateText([system(systemPrompt()), user(userMessage)], { purpose: "classifier" })).text || "[]";
   } catch (error) {
-    log.error(`Classifier LLM error: ${(error as Error).message}`);
-    return null;
+    throw new ClassifierUnavailableError(`Classifier LLM error: ${(error as Error).message}`);
   }
   const parsed = parseBulkResponse(raw);
-  if (!parsed.ok) {
-    log.warn(`Classifier bulk parse failed: ${parsed.error} / raw: ${raw.slice(0, 200)}`);
-    return null;
+  if (!parsed.ok) throw new ClassifierUnavailableError(`Classifier bulk parse failed: ${parsed.error} / raw: ${raw.slice(0, 200)}`);
+  if (parsed.results.length !== messages.length) {
+    throw new ClassifierUnavailableError(`Classifier returned ${parsed.results.length} result(s) for ${messages.length} message(s)`);
   }
   return parsed.results;
 }
 
-async function doClassifyBatch(messages: BufferedMessage[], channelId: string, kind: string, writeAccess: string[]) {
+async function doClassifyBatch(messages: BufferedMessage[], batch: Batch) {
+  const { channelId, kind } = batch;
   const today = localToday();
-  const pendings = await Promise.all(messages.map((message) => take(channelId, message.ts)));
-  const settled = await jevActions(
-    messages,
-    kind,
-    today,
-    pendings.map((pending) => pending.flag !== null),
-  );
+  const flagged = await Promise.all(messages.map(async (message) => (await peek(channelId, message.ts)).flag !== null));
+  const settled = await jevActions(messages, kind, today, flagged);
   const forLlm = messages.map((_, index) => index).filter((index) => settled[index] === null);
   const llm = await llmResults(
     forLlm.map((index) => messages[index]),
@@ -127,22 +140,15 @@ async function doClassifyBatch(messages: BufferedMessage[], channelId: string, k
   if (forLlm.length > 0) log.info(`Classifier [${channelId}] ${messages.length - forLlm.length}/${messages.length} settled by Jev`);
 
   for (const [index, message] of messages.entries()) {
-    const pending = pendings[index];
+    const pending = await take(channelId, message.ts);
     const jevAction = settled[index];
-    let decided: Result | null;
-    if (jevAction) decided = { action: jevAction, reasoning: "decided by Jev" };
-    else decided = llm?.[forLlm.indexOf(index)] ?? null;
-    if (!decided) {
-      await runOps(pending.ops);
-      continue;
-    }
+    const decided: Result = jevAction ? { action: jevAction, reasoning: "decided by Jev" } : llm[forLlm.indexOf(index)];
     const [action, result] = applyPendingFlag(pending.flag, decided);
-    const flagged = pending.flag ? " (agent-flagged)" : "";
-    log.info(`Classifier [${channelId}] msg ${index}: ${action}${flagged} — ${result.reasoning ?? ""}`);
+    const agentFlagged = pending.flag ? " (agent-flagged)" : "";
+    log.info(`Classifier [${channelId}] msg ${index}: ${action}${agentFlagged} — ${result.reasoning ?? ""}`);
 
-    const messageAccess = await messageWriteAccess(channelId, message, writeAccess);
     try {
-      await dispatchAction(action, result, message, channelId, kind, messageAccess);
+      await dispatchAction(action, result, message, batch, messageWriteAccess(batch, message));
     } catch (error) {
       log.error(`Classifier ${action} failed: ${(error as Error).message}`);
     }
@@ -150,20 +156,14 @@ async function doClassifyBatch(messages: BufferedMessage[], channelId: string, k
   }
 }
 
-async function messageWriteAccess(channelId: string, message: BufferedMessage, fallback: string[]) {
-  if (!channelId.startsWith("D")) return fallback;
-  const userId = await findUserId(message.user);
-  return userId ? [privateLevel(userId)] : fallback;
+function messageWriteAccess(batch: Batch, message: BufferedMessage) {
+  if (!batch.channelId.startsWith("D")) return batch.writeAccess;
+  const userId = authorId(batch, message);
+  return userId ? [privateLevel(userId)] : batch.writeAccess;
 }
 
-async function dispatchAction(
-  action: string,
-  result: Result,
-  message: BufferedMessage,
-  channelId: string,
-  kind: string,
-  writeAccess: string[],
-) {
+async function dispatchAction(action: string, result: Result, message: BufferedMessage, batch: Batch, writeAccess: string[]) {
+  const { channelId } = batch;
   switch (action) {
     case "ignore":
       return;
@@ -175,22 +175,22 @@ async function dispatchAction(
       });
       return;
     case "create_memory":
-      return createMemory(result, message, channelId, writeAccess);
+      return createMemory(result, message, batch, writeAccess);
     case "create_absence":
-      return createAbsence(result, message, channelId, kind, writeAccess);
+      return createAbsence(result, message, batch, writeAccess);
     case "create_meeting":
       await setFact(`meeting:${channelId}:${message.ts || "0"}`, message.text ?? "", writeAccess, "system");
       return;
     case "ask_human":
-      return askHuman(result, message, channelId, kind, writeAccess);
+      return askHuman(result, message, batch, writeAccess);
     default:
       log.warn(`Classifier unknown action: ${action}`);
   }
 }
 
-async function createMemory(result: Result, message: BufferedMessage, channelId: string, writeAccess: string[]) {
+async function createMemory(result: Result, message: BufferedMessage, batch: Batch, writeAccess: string[]) {
   const note = noteOrText(result, message);
-  const userId = await findUserId(message.user);
+  const userId = authorId(batch, message);
   if (!userId) {
     log.debug(`Classifier create_memory: skipping — user ${message.user} not in system`);
     return;
@@ -202,20 +202,20 @@ async function createMemory(result: Result, message: BufferedMessage, channelId:
     log.error(`Classifier embed error: ${(error as Error).message}`);
     return;
   }
-  await createNode(userId, writeAccess, { content: note, embedding, projectId: await projectIdForChannel(channelId) });
+  await createNode(userId, writeAccess, { content: note, embedding, projectId: batch.projectId });
 }
 
-async function createAbsence(result: Result, message: BufferedMessage, channelId: string, kind: string, writeAccess: string[]) {
+async function createAbsence(result: Result, message: BufferedMessage, batch: Batch, writeAccess: string[]) {
   const text = message.text ?? "";
   const userName = message.user_name ?? message.user ?? "unknown";
-  const userId = await findUserId(message.user);
+  const userId = authorId(batch, message);
   const { startDate, endDate } = absenceDates(result);
   const note = noteOrText(result, message);
   const overlapping = userId !== null && (await overlappingAbsences(userId, startDate, endDate)).length > 0;
 
   if (overlapping && result.flagged === true) {
     const { fact } = await putAbsence(userId!, startDate, endDate, note, writeAccess);
-    await createAbsenceNode(userId!, fact.access, note, channelId);
+    await createAbsenceNode(userId!, fact.access, note, batch);
     return;
   }
   if (overlapping) {
@@ -227,45 +227,41 @@ async function createAbsence(result: Result, message: BufferedMessage, channelId
   await setFact(key, `${startDate}..${endDate} — ${absenceDescription(note, text)}`, writeAccess, userId);
   if (!userId) return;
 
-  const node = await createAbsenceNode(userId, writeAccess, note, channelId);
+  const node = await createAbsenceNode(userId, writeAccess, note, batch);
   if (!node) return;
 
-  const proposal = await escalationProposal(channelId, kind, writeAccess, "absence");
-  if (proposal) await postEscalationQuestion(channelId, message, node, proposal, writeAccess, lang(result), key);
+  const proposal = escalationProposal(batch, writeAccess, "absence");
+  if (proposal) await postEscalationQuestion(batch.channelId, message, node, proposal, writeAccess, lang(result), key);
   if (result.working !== true) await maybeOfferFirmowidLeaveRequest(userId, startDate, endDate);
 }
 
-async function askHuman(result: Result, message: BufferedMessage, channelId: string, kind: string, writeAccess: string[]) {
+async function askHuman(result: Result, message: BufferedMessage, batch: Batch, writeAccess: string[]) {
   const note = noteOrText(result, message);
-  const proposal = await escalationProposal(channelId, kind, writeAccess, "note");
+  const proposal = escalationProposal(batch, writeAccess, "note");
   if (!proposal) {
-    log.info(`Classifier ask_human skipped for ${channelId}: no escalation target`);
+    log.info(`Classifier ask_human skipped for ${batch.channelId}: no escalation target`);
     return;
   }
-  const userId = await findUserId(message.user);
+  const userId = authorId(batch, message);
   if (!userId) {
     log.debug(`Classifier ask_human: skipping — user ${message.user} not in system`);
     return;
   }
   try {
     const embedding = await embedQuery(note);
-    const node = await createNode(userId, writeAccess, {
-      content: note,
-      embedding,
-      projectId: await projectIdForChannel(channelId),
-    });
-    await postEscalationQuestion(channelId, message, node, proposal, writeAccess, lang(result), null);
+    const node = await createNode(userId, writeAccess, { content: note, embedding, projectId: batch.projectId });
+    await postEscalationQuestion(batch.channelId, message, node, proposal, writeAccess, lang(result), null);
   } catch (error) {
-    log.info(`Classifier ask_human skipped for ${channelId}: ${(error as Error).message}`);
+    log.info(`Classifier ask_human skipped for ${batch.channelId}: ${(error as Error).message}`);
   }
 }
 
 const absenceDescription = (note: string, text: string) => (note === text ? `"${text}"` : `${note} ("${text}")`);
 
-async function createAbsenceNode(userId: string, access: string[], note: string, channelId: string): Promise<Node | null> {
+async function createAbsenceNode(userId: string, access: string[], note: string, batch: Batch): Promise<Node | null> {
   try {
     const embedding = await embedQuery(note);
-    return await createNode(userId, access, { content: note, embedding, projectId: await projectIdForChannel(channelId) });
+    return await createNode(userId, access, { content: note, embedding, projectId: batch.projectId });
   } catch (error) {
     log.error(`Classifier create_absence node error: ${(error as Error).message}`);
     return null;
@@ -284,22 +280,26 @@ function applyPendingFlag(flag: Flag | null, result: Result): [string, Result] {
 
 async function runOps(ops: PendingOp[]) {
   for (const op of ops) {
-    switch (op.op) {
-      case "escalate":
-        await escalateNoteAccess(op.node_id, op.level, op.readable_levels);
-        break;
-      case "delete":
-        await deleteNode(op.user_id, op.node_id);
-        break;
-      case "link":
-        await createLink(op.user_id, op.a, op.b);
-        break;
-      case "unlink":
-        await deleteLink(op.user_id, op.a, op.b);
-        break;
-      default:
-        log.warn(`Classifier: unknown pending op ${JSON.stringify(op)}`);
+    try {
+      await runOp(op);
+    } catch (error) {
+      log.error(`Classifier pending op ${op.op} failed: ${(error as Error).message}`);
     }
+  }
+}
+
+async function runOp(op: PendingOp) {
+  switch (op.op) {
+    case "escalate":
+      return escalateNoteAccess(op.node_id, op.level, op.readable_levels);
+    case "delete":
+      return deleteNodeAs({ userId: op.user_id, readableLevels: op.readable_levels ?? [] }, op.node_id);
+    case "link":
+      return createLink(op.user_id, op.a, op.b);
+    case "unlink":
+      return deleteLinkAs({ userId: op.user_id, readableLevels: op.readable_levels ?? [] }, op.a, op.b);
+    default:
+      log.warn(`Classifier: unknown pending op ${JSON.stringify(op)}`);
   }
 }
 
@@ -332,12 +332,8 @@ interface Proposal {
   preselected: string[];
 }
 
-async function escalationProposal(
-  channelId: string,
-  kind: string,
-  writeAccess: string[],
-  purpose: "absence" | "note",
-): Promise<Proposal | null> {
+function escalationProposal(batch: Batch, writeAccess: string[], purpose: "absence" | "note"): Proposal | null {
+  const { kind } = batch;
   if (kind === "project_external") return null;
   if (isPrivate(writeAccess)) {
     return purpose === "absence"
@@ -349,8 +345,7 @@ async function escalationProposal(
   }
   if (kind === "priv_channel") return { options: ["external/all"], preselected: ["external/all"] };
   if (kind === "project_internal") {
-    const clientId = await clientIdForChannel(channelId);
-    return clientId ? { options: [`external/${clientId}`], preselected: [`external/${clientId}`] } : null;
+    return batch.clientId ? { options: [`external/${batch.clientId}`], preselected: [`external/${batch.clientId}`] } : null;
   }
   return null;
 }
