@@ -25,7 +25,7 @@ for (const user of users) {
   summary.drafted += 1;
   const current = await getSoul(user.id);
   console.log(`\n=== ${user.name ?? user.id}`);
-  console.log(`current: ${current ? current.content.slice(0, 200) : "(none)"}`);
+  console.log(`current: ${current ? `[${current.id}] ${current.content.slice(0, 200)}` : "(none)"}`);
   console.log(`new:\n${draft}`);
   if (values.apply) {
     const soul = await saveWelcomeSoul(user.id, draft);
