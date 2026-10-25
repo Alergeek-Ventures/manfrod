@@ -90,6 +90,7 @@ export async function setNodeProject(accessLevel: string, nodeId: string, projec
 }
 
 export async function clientIds(): Promise<string[]> {
+  await requireAdmin();
   const rows = await db
     .selectDistinct({ clientId: tables.channelMappings.clientId })
     .from(tables.channelMappings)

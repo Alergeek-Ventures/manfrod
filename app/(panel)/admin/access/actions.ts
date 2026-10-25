@@ -2,6 +2,9 @@
 
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
+import { ADMIN_ROLE } from "@/lib/accounts.ts";
+import { auth } from "@/lib/auth.ts";
 import { db, tables } from "@/lib/db/index.ts";
 import { setFact } from "@/lib/facts.ts";
 import { cancelJob } from "@/lib/jobs/index.ts";
@@ -52,6 +55,17 @@ export async function addProjectMember(userId: string, projectId: string): Promi
 export async function removeProjectMember(userId: string, projectId: string): Promise<Result> {
   await requireAdmin();
   return (await removeMembership(userId, projectId)) ? done("Removed from the project") : { ok: false, message: "Membership not found" };
+}
+
+export async function setUserAdmin(userId: string, admin: boolean): Promise<Result> {
+  const current = await requireAdmin();
+  if (userId === current.id) return { ok: false, message: "You can't change your own admin role" };
+  try {
+    await auth.api.setRole({ body: { userId, role: admin ? ADMIN_ROLE : "user" }, headers: await headers() });
+  } catch (error) {
+    return { ok: false, message: `Error: ${errorText(error)}` };
+  }
+  return done(admin ? "Admin added" : "Admin removed");
 }
 
 export async function saveVacation(userId: string, startDate: string, endDate: string, note: string): Promise<Result> {

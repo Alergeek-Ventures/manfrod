@@ -1,6 +1,5 @@
 import { asc, eq } from "drizzle-orm";
-import { findOrCreateBySlackId, getUserBySlackId } from "../accounts.ts";
-import { isAdminEmail } from "../config.ts";
+import { findOrCreateBySlackId, getUserBySlackId, isAdmin } from "../accounts.ts";
 import { db, tables } from "../db/index.ts";
 import { postStatus } from "../linear/status.ts";
 import { getActiveMapping } from "../memory/access.ts";
@@ -16,9 +15,8 @@ export interface SlashCommand {
   channelName?: string;
 }
 
-async function isAdmin(slackUserId: string): Promise<boolean> {
-  const user = await getUserBySlackId(slackUserId);
-  return isAdminEmail(user?.email);
+async function isSlackAdmin(slackUserId: string): Promise<boolean> {
+  return isAdmin(await getUserBySlackId(slackUserId));
 }
 
 async function upsertMapping(
@@ -118,12 +116,12 @@ async function addUserCommand(command: SlashCommand): Promise<string> {
 export async function handleSlashCommand(command: SlashCommand): Promise<void> {
   switch (command.command) {
     case "/status-manfrod": {
-      const text = (await isAdmin(command.userId)) ? await statusCommand(command) : "Tylko admin może używać `/status-manfrod`.";
+      const text = (await isSlackAdmin(command.userId)) ? await statusCommand(command) : "Tylko admin może używać `/status-manfrod`.";
       await post("chat.postMessage", { channel: command.channelId, text });
       return;
     }
     case "/add-user": {
-      const text = (await isAdmin(command.userId)) ? await addUserCommand(command) : "Tylko admin może używać `/add-user`.";
+      const text = (await isSlackAdmin(command.userId)) ? await addUserCommand(command) : "Tylko admin może używać `/add-user`.";
       await post("chat.postMessage", { channel: command.channelId, text });
       return;
     }

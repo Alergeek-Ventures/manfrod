@@ -1,6 +1,5 @@
 import { z } from "zod";
-import { getUser } from "../../lib/accounts.ts";
-import { isAdminEmail } from "../../lib/config.ts";
+import { getUser, isAdmin } from "../../lib/accounts.ts";
 import { type DeskAttrs } from "../../lib/desks.ts";
 import type { Desk } from "../../lib/db/schema.ts";
 import { isValidIsoDate, utcToday } from "../../lib/time.ts";
@@ -16,7 +15,7 @@ export function withDate(date: string | undefined, run: (date: string) => Promis
 
 export async function adminRefusal(userId: string): Promise<string | null> {
   const user = await getUser(userId);
-  return isAdminEmail(user?.email) ? null : "Tylko admin może zarządzać biurkami.";
+  return isAdmin(user) ? null : "Tylko admin może zarządzać biurkami.";
 }
 
 export function splitEquipment(equipment: string | undefined): string[] | undefined {

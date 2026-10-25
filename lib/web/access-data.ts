@@ -1,5 +1,5 @@
 import { and, asc, countDistinct, desc, eq, isNull, like, sql } from "drizzle-orm";
-import { isSystemUser, listUsers } from "../accounts.ts";
+import { isAdmin, isSystemUser, listUsers } from "../accounts.ts";
 import { db, tables } from "../db/index.ts";
 import { listPendingJobs } from "../jobs/index.ts";
 import { listConnections } from "../linear/index.ts";
@@ -59,6 +59,7 @@ export async function loadAccessData() {
       user_id: user.id,
       user_name: user.name,
       user_slack_id: user.slackId,
+      is_admin: isAdmin(user),
       memberships: memberRows
         .filter((row) => row.user_id === user.id)
         .map(({ project_id, project_name, project_slug, source }) => ({ project_id, project_name, project_slug, source })),

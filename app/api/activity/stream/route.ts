@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { isAdminEmail } from "@/lib/config.ts";
+import { isAdmin } from "@/lib/accounts.ts";
 import { db, tables } from "@/lib/db/index.ts";
 import { toActivity } from "@/lib/events/index.ts";
 import { subscribeAuditEvents } from "@/lib/events/listener.ts";
@@ -13,7 +13,7 @@ const PING_INTERVAL_MS = 25_000;
 
 export async function GET(request: Request) {
   const user = await currentUser();
-  if (!user || !isAdminEmail(user.email)) return new Response("forbidden", { status: 403 });
+  if (!user || !isAdmin(user)) return new Response("forbidden", { status: 403 });
 
   const encoder = new TextEncoder();
   let cleanup: (() => void) | null = null;

@@ -1,4 +1,5 @@
 import { eq } from "drizzle-orm";
+import { GOOGLE_CALENDAR_SCOPE } from "./auth-constants.ts";
 import { config } from "./config.ts";
 import { db, tables } from "./db/index.ts";
 import type { Account } from "./db/schema.ts";
@@ -10,6 +11,8 @@ const EXPIRY_BUFFER_SECONDS = 60;
 const log = logger("Google");
 
 export type GResult<T> = { ok: true; value: T } | { ok: false; error: string };
+
+export type CalendarStatus = "connected" | "expired" | "missing_scope" | "not_connected";
 
 export interface CalendarEvent {
   summary: string;
@@ -120,4 +123,10 @@ export async function ensureValidToken(identity: Account): Promise<GResult<strin
     log.error(`Google token refresh HTTP error: ${(error as Error).message}`);
     return { ok: false, error: `{:http_error, ${(error as Error).message}}` };
   }
+}
+
+export async function calendarStatus(identity: Account | null): Promise<CalendarStatus> {
+  if (!identity) return "not_connected";
+  if (!(identity.scope ?? "").includes(GOOGLE_CALENDAR_SCOPE)) return "missing_scope";
+  return (await ensureValidToken(identity)).ok ? "connected" : "expired";
 }

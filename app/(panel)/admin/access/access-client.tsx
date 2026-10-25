@@ -30,6 +30,7 @@ import {
   saveCron,
   saveVacation,
   setMappingStatus,
+  setUserAdmin,
   toggleCron,
   uninstallLinear,
   updateVacation,
@@ -276,11 +277,11 @@ function MemberProjectPicker({ projects, onPick }: { projects: AccessData["proje
   );
 }
 
-function MembersTab({ data, run }: { data: AccessData; run: Run }) {
+function MembersTab({ data, run, currentUserId }: { data: AccessData; run: Run; currentUserId: string }) {
   return (
     <Section
       title="Members"
-      description="Who belongs to which project. Members of a client project can read that client's notes outside its channels, e.g. in DMs. People are added automatically when they post in a project channel; someone you remove stays removed until you add them back."
+      description="Who belongs to which project, and who is an admin. Members of a client project can read that client's notes outside its channels, e.g. in DMs; admins can read every client's notes without being members and can open this panel. People are added to projects automatically when they post in a project channel; someone you remove stays removed until you add them back."
       empty="No people yet."
       isEmpty={data.members.length === 0}
     >
@@ -289,6 +290,7 @@ function MembersTab({ data, run }: { data: AccessData; run: Run }) {
           <TableRow>
             <TableHead>Person</TableHead>
             <TableHead>Slack ID</TableHead>
+            <TableHead>Admin</TableHead>
             <TableHead>Projects</TableHead>
             <TableHead />
           </TableRow>
@@ -301,6 +303,14 @@ function MembersTab({ data, run }: { data: AccessData; run: Run }) {
               <TableRow key={member.user_id}>
                 <TableCell className="font-medium">{member.user_name ?? "–"}</TableCell>
                 <TableCell className="font-mono text-xs text-muted-foreground">{member.user_slack_id}</TableCell>
+                <TableCell>
+                  <Switch
+                    checked={member.is_admin}
+                    disabled={member.user_id === currentUserId}
+                    aria-label={`${name} is an admin`}
+                    onCheckedChange={(checked) => run(() => setUserAdmin(member.user_id, checked))}
+                  />
+                </TableCell>
                 <TableCell className="whitespace-normal">
                   <div className="flex flex-wrap gap-1">
                     {member.memberships.length === 0 && <span className="text-muted-foreground">–</span>}
@@ -765,7 +775,17 @@ function LinearTab({ data, run }: { data: AccessData; run: Run }) {
   );
 }
 
-export function AccessClient({ tab, data, flash }: { tab: Tab; data: AccessData; flash: { error?: string; info?: string } }) {
+export function AccessClient({
+  tab,
+  data,
+  flash,
+  currentUserId,
+}: {
+  tab: Tab;
+  data: AccessData;
+  flash: { error?: string; info?: string };
+  currentUserId: string;
+}) {
   const [pending, startTransition] = useTransition();
 
   const run: Run = (action, onSuccess) =>
@@ -793,7 +813,7 @@ export function AccessClient({ tab, data, flash }: { tab: Tab; data: AccessData;
       )}
       {tab === "channels" && <ChannelsTab data={data} run={run} />}
       {tab === "projects" && <ProjectsTab data={data} run={run} pending={pending} />}
-      {tab === "members" && <MembersTab data={data} run={run} />}
+      {tab === "members" && <MembersTab data={data} run={run} currentUserId={currentUserId} />}
       {tab === "vacations" && <VacationsTab data={data} run={run} pending={pending} />}
       {tab === "cron" && <CronTab data={data} run={run} />}
       {tab === "reminders" && <RemindersTab data={data} run={run} />}

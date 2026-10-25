@@ -32,6 +32,10 @@ export async function listUsers(): Promise<User[]> {
   return db.select().from(users).orderBy(asc(users.insertedAt));
 }
 
+export const ADMIN_ROLE = "admin";
+
+export const isAdmin = (user: Pick<User, "role"> | null | undefined) => (user?.role ?? "").split(",").includes(ADMIN_ROLE);
+
 export function isSystemUser(user: Pick<User, "slackId">): boolean {
   return user.slackId.startsWith("system:");
 }

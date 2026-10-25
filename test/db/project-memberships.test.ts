@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 
 const enabled = Boolean(process.env.TEST_DATABASE_URL);
@@ -33,5 +34,16 @@ describe.skipIf(!enabled)("project memberships", () => {
     await addMembership(user.id, project.id);
     expect(await isMember(user.id, project.id)).toBe(true);
     expect(await resolveForRead(user.id, "D0001")).toContain(level);
+  });
+
+  it("lets admins read every client's notes in DMs without memberships", async () => {
+    const [admin, teammate] = await Promise.all(
+      [1, 2].map(() => findOrCreateBySlackId(`U${randomUUID().slice(0, 10)}`, `D${randomUUID().slice(0, 10)}`)),
+    );
+    const { level } = await clientProject();
+    await db.update(tables.users).set({ role: "admin" }).where(eq(tables.users.id, admin.id));
+    expect(await resolveForRead(admin.id, "D0001")).toContain(level);
+    expect(await resolveForRead(teammate.id, "D0001")).not.toContain(level);
+    expect(await resolveForRead(admin.id, `C${randomUUID().slice(0, 8)}`)).not.toContain(level);
   });
 });

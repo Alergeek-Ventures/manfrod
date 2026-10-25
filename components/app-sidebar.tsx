@@ -80,7 +80,7 @@ export function AppSidebar({
   ...props
 }: React.ComponentProps<typeof Sidebar> & {
   isAdmin: boolean;
-  user: { name: string; email: string };
+  user: { name: string; email: string; image: string | null };
 }) {
   return (
     <Sidebar collapsible="offcanvas" {...props}>
