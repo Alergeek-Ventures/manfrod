@@ -7,7 +7,6 @@ import {
   deleteLink,
   deleteNode,
   getNodeAccessible,
-  getNodeLinks,
   getNodeLinksAccessible,
   isSoul,
   listNodesByDate,
@@ -56,7 +55,7 @@ export const tools = {
       if (found.length === 0) return `No relevant notes found for: ${query}`;
       const lines = await Promise.all(
         found.map(async (node) => {
-          const linked = (await getNodeLinks(ctx.userId, node.id)).map((other) => other.id).join(", ");
+          const linked = (await getNodeLinksAccessible(ctx.readableLevels, node.id)).map((other) => other.id).join(", ");
           const line = `- ${noteDate(node)} [${node.id}] ${node.content}`;
           return linked === "" ? line : `${line}\n  Linked to: ${linked}`;
         }),

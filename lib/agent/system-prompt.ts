@@ -1,6 +1,6 @@
 import { getUser } from "../accounts.ts";
 import { healthy } from "../db/index.ts";
-import { getNodeLinks, getSoul } from "../memory/nodes.ts";
+import { getNodeLinksAccessible, getSoul } from "../memory/nodes.ts";
 import { placeholder, secretNames } from "../secrets.ts";
 import { catalogText } from "../skills.ts";
 import { capabilitiesText } from "../tools/index.ts";
@@ -11,11 +11,11 @@ function fullSystemPrompt(): string {
   return `${SYSTEM_PROMPT_INTRO}\n## Your Capabilities\n${capabilitiesText()}\n\n${SYSTEM_PROMPT_REST}`;
 }
 
-async function soulContext(userId: string): Promise<string> {
+async function soulContext(userId: string, readableLevels: string[]): Promise<string> {
   const soul = await getSoul(userId);
   if (!soul) return "";
   const sections = [`[Soul - Entrypoint to your notes graph]\n${soul.content}\n`];
-  const linked = await getNodeLinks(userId, soul.id);
+  const linked = (await getNodeLinksAccessible(readableLevels, soul.id)).filter((node) => node.userId === userId);
   if (linked.length > 0) {
     sections.push(
       `[Linked Notes - expanding the entrypoint]\n${linked.map((node) => `- [${node.id}] ${node.content.slice(0, 200)}`).join("\n")}\n`,
@@ -62,9 +62,9 @@ async function currentContext(userId: string, sessionKey: string | null): Promis
   return `[Current Context]\n${nowLine()}${userLine}`.trim();
 }
 
-export async function buildSystemPrompt(userId: string, sessionKey: string | null): Promise<string> {
+export async function buildSystemPrompt(userId: string, sessionKey: string | null, readableLevels: string[]): Promise<string> {
   if (!(await healthy())) return fullSystemPrompt() + SOUL_BASE_PROMPT;
-  const context = await soulContext(userId);
+  const context = await soulContext(userId, readableLevels);
   const soul = await getSoul(userId);
   const base = soul ? `${context}\n\n${fullSystemPrompt()}` : `${context}\n\n${fullSystemPrompt()}${SOUL_BASE_PROMPT}`;
   const catalog = catalogText();

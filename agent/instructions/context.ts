@@ -9,7 +9,7 @@ export default defineDynamic({
       if (tool.kind === "skill_channel" || tool.kind === "skill_user") {
         return defineInstructions({ content: await skillRunnerPrompt() });
       }
-      return defineInstructions({ content: await buildSystemPrompt(tool.userId, tool.sessionKey) });
+      return defineInstructions({ content: await buildSystemPrompt(tool.userId, tool.sessionKey, tool.readableLevels) });
     },
   },
 });

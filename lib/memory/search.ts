@@ -4,7 +4,7 @@ import type { Node } from "../db/schema.ts";
 import { emit } from "../events/index.ts";
 import { embedQuery, rerank } from "../voyage.ts";
 import { accessOverlaps } from "./access.ts";
-import { getNodeLinks, getSoul } from "./nodes.ts";
+import { getNodeLinksAccessible, getSoul } from "./nodes.ts";
 import { expand } from "./query-expander.ts";
 
 const { nodes, links } = tables;
@@ -247,7 +247,9 @@ export async function getNoteContext(
   projectId: string | null = null,
 ): Promise<string> {
   const soul = await getSoul(userId);
-  const linkedToSoul = soul ? await getNodeLinks(userId, soul.id) : [];
+  const linkedToSoul = soul
+    ? (await getNodeLinksAccessible(readableLevels, soul.id)).filter((node) => node.userId === userId)
+    : [];
   const relevant = await search(userId, readableLevels, query, { limit: 10, projectId });
 
   const seen = new Set<string>();
