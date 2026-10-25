@@ -14,9 +14,9 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates fontconfig fonts-dejavu-core \
   && rm -rf /var/lib/apt/lists/* \
   && fc-cache -f
-ENV NODE_ENV=production PORT=3000 XDG_CACHE_HOME=/tmp
+ENV NODE_ENV=production PORT=35233 XDG_CACHE_HOME=/tmp
 COPY --from=build /app /app
 RUN mkdir -p /app/.eve/.workflow-data && chown -R node:node /app/.eve
 USER node
-EXPOSE 3000
+EXPOSE 35233
 CMD ["sh", "-c", "node scripts/migrate.mjs && exec node_modules/.bin/next start --port ${PORT}"]

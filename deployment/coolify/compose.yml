@@ -13,7 +13,7 @@ services:
     environment:
       DATABASE_URL: postgres://manfrod:${POSTGRES_PASSWORD}@postgres:5432/manfrod
       APP_URL: https://${PHX_HOST}
-      PORT: "3000"
+      PORT: "35233"
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       TYPESAFE_AI_API_KEY: ${TYPESAFE_AI_API_KEY:-}
       VOYAGE_API_KEY: ${VOYAGE_API_KEY:-}
@@ -30,11 +30,11 @@ services:
       INNGEST_BASE_URL: http://inngest:8288
       INNGEST_EVENT_KEY: ${INNGEST_EVENT_KEY}
       INNGEST_SIGNING_KEY: ${INNGEST_SIGNING_KEY}
-      INNGEST_SERVE_HOST: http://app:3000
+      INNGEST_SERVE_HOST: http://app:35233
     volumes:
       - eve_workflow:/app/.eve/.workflow-data
     expose:
-      - "3000"
+      - "35233"
 
   inngest:
     image: docker.io/inngest/inngest@sha256:7a24ef43322e222c00ebf58d57edb2cf1563e59d92a9d556c3ed380969565b28
@@ -45,7 +45,7 @@ services:
       - --sqlite-dir
       - /data
       - --sdk-url
-      - http://app:3000/api/inngest
+      - http://app:35233/api/inngest
       - --poll-interval
       - "60"
       - --event-key

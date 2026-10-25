@@ -13,7 +13,7 @@ services:
   inngest:
     image: docker.io/inngest/inngest@sha256:7a24ef43322e222c00ebf58d57edb2cf1563e59d92a9d556c3ed380969565b28
     container_name: manfrod-inngest
-    command: ["inngest", "dev", "-u", "http://host.docker.internal:3000/api/inngest", "--no-discovery"]
+    command: ["inngest", "dev", "-u", "http://host.docker.internal:35233/api/inngest", "--no-discovery"]
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:

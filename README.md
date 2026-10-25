@@ -11,7 +11,7 @@ Postgres (ParadeDB). Architecture and the Phoenix → TypeScript mapping are in
 docker compose -f deployment/local/compose.yml up -d   # ParadeDB + Inngest dev server
 pnpm install
 pnpm db:migrate
-pnpm dev                                                # http://localhost:3000
+pnpm dev                                                # http://localhost:35233
 ```
 
 The Inngest dev UI is at http://localhost:8288. Run the dev server with
@@ -25,7 +25,7 @@ runs. Use `DISABLE_CRONS=0 pnpm dev` to turn crons on.
 
 ### Testing on Slack locally
 
-`pnpm dev:slack` runs eve dev on :4274, Next on :3000 and a Socket Mode
+`pnpm dev:slack` runs eve dev on :4274, Next on :35233 and a Socket Mode
 bridge that uses `SLACK_APP_TOKEN` to forward events, interactivity and slash
 commands to the local agent, so no tunnel or Request URL change is needed.
 Use a separate dev Slack app: Socket Mode spreads events across every open
