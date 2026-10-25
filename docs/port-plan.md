@@ -194,10 +194,24 @@ decryption and the Oban import. Run it before and after the cutover.
 - Coolify: separate resources for ParadeDB, Inngest and the app. eve
   workflow state lives in `.eve/.workflow-data` on a volume.
 
-## Future: self-modification
+## Self-modification
 
-Skills, prompts and tools are files. eve's remote self-modification extension
-requires Vercel, so when self-hosting the next step is a worker (Claude Agent
-SDK in a container sandbox) that reads negative `message_feedback`, edits
-`agent/skills/**` and `agent/routines/**`, and opens a draft PR with a GitHub App token held outside the
-sandbox.
+eve's remote self-modification extension requires Vercel, so Manfrod has its own
+version of the same design. An admin asks Manfrod in Slack to change its
+behavior; Manfrod delegates to the `self-modify` subagent
+(`agent/subagents/self-modify/`), which is only offered to admins.
+
+- The subagent runs in an E2B microVM (`agent/lib/e2b-sandbox.ts`) with no
+  network. Its template has the toolchain and `node_modules` baked in, so
+  `pnpm install --offline`, `typecheck`, `test` and `eve build` run inside it.
+- `checkout-repo` downloads `main` through the GitHub App on the host and
+  writes it into the sandbox. `publish-proposal` diffs the checkout, enforces
+  the path allowlist (`agent/lib/self-modify.ts`), file and size limits and the
+  gitleaks rules, then creates the commit and a draft pull request through the
+  GitHub API. `check-ci` reports the checks and failed job logs. The GitHub
+  token never enters the sandbox.
+- A hook adds each step to the thread's Slack task card.
+- Changes reach production only after review, merge and the normal deploy.
+
+Env: `E2B_API_KEY`, `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, optionally
+`GITHUB_REPOSITORY`.
