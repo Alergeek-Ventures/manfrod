@@ -1,6 +1,7 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { nextCookies } from "better-auth/next-js";
+import { admin } from "better-auth/plugins";
 import { config } from "./config.ts";
 import { db } from "./db/index.ts";
 import { account, session, users, verification } from "./db/schema.ts";
@@ -34,5 +35,5 @@ export const auth = betterAuth({
     },
   },
   advanced: { cookiePrefix: AUTH_COOKIE_PREFIX, database: { generateId: "uuid" } },
-  plugins: [nextCookies()],
+  plugins: [admin({ defaultRole: "user", adminRoles: ["admin"] }), nextCookies()],
 });

@@ -463,7 +463,10 @@ export const users = pgTable("users", {
 	soulNodeId: uuid("soul_node_id"),
 	emailVerified: boolean("email_verified").default(false).notNull(),
 	image: text(),
-	isAdmin: boolean("is_admin").default(false).notNull(),
+	role: text().default('user'),
+	banned: boolean().default(false),
+	banReason: text("ban_reason"),
+	banExpires: timestamp("ban_expires", { precision: 3, mode: 'date' }),
 }, (table) => [
 	uniqueIndex().using("btree", table.email.asc().nullsLast().op("text_ops")),
 	uniqueIndex().using("btree", table.slackId.asc().nullsLast().op("text_ops")),
@@ -479,6 +482,7 @@ export const session = pgTable("session", {
 	userAgent: text("user_agent"),
 	createdAt: timestamp("created_at", { precision: 3, mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
 	updatedAt: timestamp("updated_at", { precision: 3, mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
+	impersonatedBy: uuid("impersonated_by"),
 }, (table) => [
 	uniqueIndex().using("btree", table.token.asc().nullsLast().op("text_ops")),
 	index().using("btree", table.userId.asc().nullsLast().op("uuid_ops")),

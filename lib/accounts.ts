@@ -32,12 +32,9 @@ export async function listUsers(): Promise<User[]> {
   return db.select().from(users).orderBy(asc(users.insertedAt));
 }
 
-export const isAdmin = (user: Pick<User, "isAdmin"> | null | undefined) => user?.isAdmin === true;
+export const ADMIN_ROLE = "admin";
 
-export async function setAdmin(userId: string, admin: boolean): Promise<boolean> {
-  const updated = await db.update(users).set({ isAdmin: admin }).where(eq(users.id, userId)).returning({ id: users.id });
-  return updated.length > 0;
-}
+export const isAdmin = (user: Pick<User, "role"> | null | undefined) => (user?.role ?? "").split(",").includes(ADMIN_ROLE);
 
 export function isSystemUser(user: Pick<User, "slackId">): boolean {
   return user.slackId.startsWith("system:");

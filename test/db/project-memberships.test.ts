@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 
 const enabled = Boolean(process.env.TEST_DATABASE_URL);
@@ -6,7 +7,7 @@ if (enabled) process.env.DATABASE_URL = process.env.TEST_DATABASE_URL;
 
 const { db, tables } = await import("../../lib/db/index.ts");
 const { addMembership, ensureMembership, isMember, removeMembership, resolveForRead } = await import("../../lib/memory/access.ts");
-const { findOrCreateBySlackId, setAdmin } = await import("../../lib/accounts.ts");
+const { findOrCreateBySlackId } = await import("../../lib/accounts.ts");
 
 async function clientProject() {
   const slug = `acme-${randomUUID().slice(0, 6)}`;
@@ -40,7 +41,7 @@ describe.skipIf(!enabled)("project memberships", () => {
       [1, 2].map(() => findOrCreateBySlackId(`U${randomUUID().slice(0, 10)}`, `D${randomUUID().slice(0, 10)}`)),
     );
     const { level } = await clientProject();
-    await setAdmin(admin.id, true);
+    await db.update(tables.users).set({ role: "admin" }).where(eq(tables.users.id, admin.id));
     expect(await resolveForRead(admin.id, "D0001")).toContain(level);
     expect(await resolveForRead(teammate.id, "D0001")).not.toContain(level);
   });
