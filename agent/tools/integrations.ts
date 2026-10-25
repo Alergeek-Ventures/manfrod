@@ -17,25 +17,49 @@ import {
 } from "../../lib/tools/linear.ts";
 import { toolCtx } from "../../lib/tools/context.ts";
 
+const issueFields = {
+  description: z.string().optional().describe("Markdown description"),
+  priority: z.number().int().min(0).max(4).optional().describe("0 none, 1 urgent, 2 high, 3 medium, 4 low"),
+  assignee: z.string().optional().describe('Linear member name or email, or "me" for the person asking'),
+  state: z.string().optional().describe('Workflow state name, e.g. "Todo", "In Progress", "Done"'),
+  labels: z.array(z.string()).optional().describe("Label names"),
+  project: z.string().optional().describe("Linear project name"),
+  parent: z.string().optional().describe("Parent issue identifier, e.g. ENG-120, to make this a sub-issue"),
+  dueDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional()
+    .describe("Due date, YYYY-MM-DD"),
+  estimate: z.number().int().min(0).optional().describe("Estimate in the team's points scale"),
+  cycle: z.string().optional().describe('Cycle number, or "current" / "next"'),
+};
+
+const createIssueInput = z.object({ title: z.string().describe("Issue title"), ...issueFields });
+
+const updateIssueInput = z.object({
+  identifier: z.string().describe("Issue identifier, e.g. ENG-123"),
+  title: z.string().optional().describe("New title"),
+  ...issueFields,
+});
+
 export default defineDynamic({
   events: {
     "turn.started": async (_event, ctx) => {
       const { userId, msgCtx, sessionKey } = toolCtx(ctx);
       const entries: Record<string, any> = {};
-      const secured =
-        <I>(toolName: string, execute: (input: I) => Promise<string>, keepPlaceholders = false) =>
-        (input: I) =>
-          runWithSecrets({ toolName, userId, sessionKey, keepPlaceholders }, input, execute);
 
       if (userId) {
         for (const remote of await listUserMcpTools(userId)) {
+          const toolName = remote.name;
           const providerId = remote.providerId;
           const remoteName = remote.remoteName;
-          const ownerId = userId;
-          entries[remote.name] = defineTool({
+          entries[toolName] = defineTool({
             description: remote.description,
             inputSchema: remote.inputSchema as any,
-            execute: secured(remote.name, (input) => callUserMcpTool(ownerId, providerId, remoteName, input)),
+            execute: (input: unknown) =>
+              runWithSecrets({ toolName, userId, sessionKey }, input, (resolved) =>
+                callUserMcpTool(userId, providerId, remoteName, resolved),
+              ),
           });
         }
       }
@@ -46,12 +70,16 @@ export default defineDynamic({
         entries.linear_list_issues = defineTool({
           description: "Lists recent issues for this project's connected Linear team.",
           inputSchema: z.object({ limit: z.number().int().optional().describe("Max issues to return (default 25)") }),
-          execute: secured("linear_list_issues", ({ limit }: { limit?: number }) => listIssues(projectId, limit)),
+          execute: (input: { limit?: number }) =>
+            runWithSecrets({ toolName: "linear_list_issues", userId, sessionKey }, input, ({ limit }) => listIssues(projectId, limit)),
         });
         entries.linear_get_issue = defineTool({
           description: 'Gets a single Linear issue by its identifier (e.g. "ENG-123").',
           inputSchema: z.object({ identifier: z.string().describe("Issue identifier, e.g. ENG-123") }),
-          execute: secured("linear_get_issue", ({ identifier }: { identifier: string }) => fetchIssue(projectId, identifier)),
+          execute: (input: { identifier: string }) =>
+            runWithSecrets({ toolName: "linear_get_issue", userId, sessionKey }, input, ({ identifier }) =>
+              fetchIssue(projectId, identifier),
+            ),
         });
         entries.linear_search_issues = defineTool({
           description: "Full-text searches this project's connected Linear team's issues.",
@@ -59,63 +87,45 @@ export default defineDynamic({
             term: z.string().describe("Search term"),
             limit: z.number().int().optional().describe("Max results to return (default 25)"),
           }),
-          execute: secured("linear_search_issues", ({ term, limit }: { term: string; limit?: number }) =>
-            searchIssues(projectId, term, limit),
-          ),
+          execute: (input: { term: string; limit?: number }) =>
+            runWithSecrets({ toolName: "linear_search_issues", userId, sessionKey }, input, ({ term, limit }) =>
+              searchIssues(projectId, term, limit),
+            ),
         });
         entries.linear_list_projects = defineTool({
           description: "Lists Linear projects owned by this project's connected team.",
           inputSchema: z.object({}),
-          execute: secured("linear_list_projects", () => listProjects(projectId)),
+          execute: (input: Record<string, never>) =>
+            runWithSecrets({ toolName: "linear_list_projects", userId, sessionKey }, input, () => listProjects(projectId)),
         });
         entries.linear_list_cycles = defineTool({
           description: "Lists recent cycles for this project's connected Linear team.",
           inputSchema: z.object({ limit: z.number().int().optional().describe("Max cycles to return (default 10)") }),
-          execute: secured("linear_list_cycles", ({ limit }: { limit?: number }) => getCycles(projectId, limit)),
+          execute: (input: { limit?: number }) =>
+            runWithSecrets({ toolName: "linear_list_cycles", userId, sessionKey }, input, ({ limit }) => getCycles(projectId, limit)),
         });
       }
 
       if (projectId && linear?.mode === "app") {
-        const fields = {
-          description: z.string().optional().describe("Markdown description"),
-          priority: z.number().int().min(0).max(4).optional().describe("0 none, 1 urgent, 2 high, 3 medium, 4 low"),
-          assignee: z.string().optional().describe('Linear member name or email, or "me" for the person asking'),
-          state: z.string().optional().describe('Workflow state name, e.g. "Todo", "In Progress", "Done"'),
-          labels: z.array(z.string()).optional().describe("Label names"),
-          project: z.string().optional().describe("Linear project name"),
-          parent: z.string().optional().describe("Parent issue identifier, e.g. ENG-120, to make this a sub-issue"),
-          dueDate: z
-            .string()
-            .regex(/^\d{4}-\d{2}-\d{2}$/)
-            .optional()
-            .describe("Due date, YYYY-MM-DD"),
-          estimate: z.number().int().min(0).optional().describe("Estimate in the team's points scale"),
-          cycle: z.string().optional().describe('Cycle number, or "current" / "next"'),
-        };
         entries.linear_create_issue = defineTool({
           description:
             "Creates an issue in this project's connected Linear team. Confirm the title and details with the user first unless they were explicit. Returns the new issue's identifier and URL.",
-          inputSchema: z.object({ title: z.string().describe("Issue title"), ...fields }),
-          execute: secured(
-            "linear_create_issue",
-            async (input: Parameters<typeof createIssue>[1]) => createIssue(projectId, input, await linearRequester(userId)),
-            true,
-          ),
+          inputSchema: createIssueInput,
+          execute: (input: z.infer<typeof createIssueInput>) =>
+            runWithSecrets({ toolName: "linear_create_issue", userId, sessionKey, keepPlaceholders: true }, input, async (resolved) =>
+              createIssue(projectId, resolved, await linearRequester(userId)),
+            ),
         });
         entries.linear_update_issue = defineTool({
           description:
             "Updates an issue in this project's connected Linear team: title, description, priority, assignee, state, project, parent, due date, estimate or cycle. Labels are added, not replaced.",
-          inputSchema: z.object({
-            identifier: z.string().describe("Issue identifier, e.g. ENG-123"),
-            title: z.string().optional().describe("New title"),
-            ...fields,
-          }),
-          execute: secured(
-            "linear_update_issue",
-            async ({ identifier, ...input }: { identifier: string } & Parameters<typeof updateIssue>[2]) =>
-              updateIssue(projectId, identifier, input, await linearRequester(userId)),
-            true,
-          ),
+          inputSchema: updateIssueInput,
+          execute: (input: z.infer<typeof updateIssueInput>) =>
+            runWithSecrets(
+              { toolName: "linear_update_issue", userId, sessionKey, keepPlaceholders: true },
+              input,
+              async ({ identifier, ...fields }) => updateIssue(projectId, identifier, fields, await linearRequester(userId)),
+            ),
         });
         entries.linear_comment_issue = defineTool({
           description: "Adds a comment to an issue in this project's connected Linear team.",
@@ -123,12 +133,12 @@ export default defineDynamic({
             identifier: z.string().describe("Issue identifier, e.g. ENG-123"),
             body: z.string().describe("Markdown comment body"),
           }),
-          execute: secured(
-            "linear_comment_issue",
-            async ({ identifier, body }: { identifier: string; body: string }) =>
-              commentIssue(projectId, identifier, body, await linearRequester(userId)),
-            true,
-          ),
+          execute: (input: { identifier: string; body: string }) =>
+            runWithSecrets(
+              { toolName: "linear_comment_issue", userId, sessionKey, keepPlaceholders: true },
+              input,
+              async ({ identifier, body }) => commentIssue(projectId, identifier, body, await linearRequester(userId)),
+            ),
         });
       }
 
