@@ -51,7 +51,7 @@ export async function providersForUser(userId: string): Promise<Provider[]> {
       mock: false,
       logoUrl: provider.logoUrl,
       custom: true,
-      scope: null,
+      scope: provider.scope,
     })),
   ];
 }
@@ -60,10 +60,13 @@ export async function getProviderForUser(userId: string, id: string): Promise<Pr
   return (await providersForUser(userId)).find((provider) => provider.id === id) ?? null;
 }
 
-export async function createCustomProvider(userId: string, url: string, name: string | null = null) {
+export async function createCustomProvider(userId: string, url: string, name: string | null = null, scope: string | null = null) {
   if (!/^https?:\/\//.test(url)) throw new Error("url: must be a valid http(s) URL");
   const presentName = name && name !== "" ? name : null;
-  const [provider] = await db.insert(mcpCustomProviders).values({ userId, url, name: presentName }).returning();
+  const [provider] = await db
+    .insert(mcpCustomProviders)
+    .values({ userId, url, name: presentName, scope: scope && scope !== "" ? scope : null })
+    .returning();
   const [discoveredName, logoUrl] = await Promise.all([discoverName(url), discoverLogo(url)]);
   const updates: Record<string, string> = {};
   const resolvedName = presentName ?? discoveredName;

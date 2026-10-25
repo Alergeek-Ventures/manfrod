@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth.ts";
+import { config } from "@/lib/config.ts";
 
 async function handle(request: Request) {
   const result = await auth.api.signOut({ headers: request.headers, asResponse: true });
-  const response = NextResponse.redirect(new URL("/login", request.url), 303);
+  const response = NextResponse.redirect(new URL("/login", config.appUrl), 303);
   for (const cookie of result.headers.getSetCookie()) response.headers.append("set-cookie", cookie);
   return response;
 }
