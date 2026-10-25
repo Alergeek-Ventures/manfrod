@@ -7,11 +7,11 @@ import { requireUser } from "@/lib/web/session.ts";
 
 export type ActionResult = { ok: boolean; message: string };
 
-export async function addCustomProvider(url: string, name: string): Promise<ActionResult> {
+export async function addCustomProvider(url: string, name: string, scope: string): Promise<ActionResult> {
   const user = await requireUser();
   if (url.trim() === "") return { ok: false, message: "MCP server URL is required" };
   try {
-    await createCustomProvider(user.id, url.trim(), name.trim() || null);
+    await createCustomProvider(user.id, url.trim(), name.trim() || null, scope.trim() || null);
   } catch (error) {
     return { ok: false, message: `Could not add server: ${(error as Error).message}` };
   }

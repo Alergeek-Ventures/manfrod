@@ -97,6 +97,7 @@ function AddProviderDialog({ run, pending }: { run: Run; pending: boolean }) {
   const [open, setOpen] = useState(false);
   const [url, setUrl] = useState("");
   const [name, setName] = useState("");
+  const [scope, setScope] = useState("");
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger render={<Button variant="outline" className="h-full min-h-24 border-dashed" />}>
@@ -109,11 +110,12 @@ function AddProviderDialog({ run, pending }: { run: Run; pending: boolean }) {
           onSubmit={(event) => {
             event.preventDefault();
             run(
-              () => addCustomProvider(url, name),
+              () => addCustomProvider(url, name, scope),
               () => {
                 setOpen(false);
                 setUrl("");
                 setName("");
+                setScope("");
               },
             );
           }}
@@ -131,6 +133,11 @@ function AddProviderDialog({ run, pending }: { run: Run; pending: boolean }) {
               <FieldLabel htmlFor="mcp-name">Name</FieldLabel>
               <Input id="mcp-name" placeholder="e.g. Acme MCP" value={name} onChange={(event) => setName(event.target.value)} />
               <FieldDescription>Optional — auto-detected if left blank.</FieldDescription>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="mcp-scope">OAuth scope</FieldLabel>
+              <Input id="mcp-scope" placeholder="e.g. mcp read write" value={scope} onChange={(event) => setScope(event.target.value)} />
+              <FieldDescription>Optional — only if the server requires specific scopes.</FieldDescription>
             </Field>
           </FieldGroup>
           <DialogFooter>
