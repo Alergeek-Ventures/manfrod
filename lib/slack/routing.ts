@@ -114,7 +114,7 @@ function privateConversation(inbound: Inbound, info: { isIm: boolean; isMpim: bo
 }
 
 async function agentChannel(inbound: Inbound, info: { name: string; isIm: boolean; isMpim: boolean }): Promise<string | null> {
-  if (privateConversation(inbound, info)) return null;
+  if (privateConversation(inbound, info)) return isDm(inbound.channel) ? inbound.channel : null;
   await ensureMapping(inbound.channel, info.name);
   return inbound.channel;
 }
