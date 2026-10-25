@@ -13,7 +13,7 @@ async function findPeople(person: string) {
 
 export default defineManfrodTool({
   description:
-    "Read a teammate's soul: what they told you about themselves (role, interests, how they like to work and be talked to). Use it in team channels and DMs, together with search-notes, when you need background on a specific person. Treat it as background for your answer and don't paste it into the conversation.",
+    "Read a teammate's soul for work background: their role and position in the company, what they work on and are responsible for, and how they prefer to work. Use it in team channels and DMs, together with search-notes, when you need that context on a specific person. Use only the work-relevant parts: leave out hobbies, personal interests, private matters and how they like you to talk to them, and never paste the soul into the conversation.",
   inputSchema: z.object({ person: z.string().describe("Slack user ID (e.g. U0123ABCD), Manfrod user ID, or the person's name") }),
   async execute({ person }, ctx) {
     if (!ctx.readableLevels.includes("internal")) return "Teammates' souls are only available in team channels and DMs.";
@@ -23,6 +23,8 @@ export default defineManfrodTool({
       return `"${person}" matches several people: ${people.map((user) => `${user.name} (${user.slackId})`).join(", ")}. Pass a Slack ID.`;
     const [user] = people;
     const soul = await getSoul(user.id);
-    return soul ? `Soul of ${user.name ?? user.slackId}:\n${soul.content}` : `${user.name ?? user.slackId} has no soul yet.`;
+    return soul
+      ? `Soul of ${user.name ?? user.slackId} (use only the work-relevant parts):\n${soul.content}`
+      : `${user.name ?? user.slackId} has no soul yet.`;
   },
 });
