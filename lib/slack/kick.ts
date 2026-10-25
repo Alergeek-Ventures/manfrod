@@ -1,4 +1,4 @@
-import { FAST_MODEL, generateSimple, system, user } from "../llm/index.ts";
+import { PRIMARY_MODEL, generateSimple, system, user } from "../llm/index.ts";
 import { logger } from "../log.ts";
 import { listFullThread, post } from "./api.ts";
 import { isKicked, kick } from "./thread-permission.ts";
@@ -40,7 +40,7 @@ async function threadContext(channel: string, threadTs: string): Promise<string>
 
 export async function farewell(channel: string, threadTs: string): Promise<string> {
   try {
-    const text = await generateSimple(FAST_MODEL, [system(SYSTEM_MESSAGE), user(await threadContext(channel, threadTs))], {
+    const text = await generateSimple(PRIMARY_MODEL, [system(SYSTEM_MESSAGE), user(await threadContext(channel, threadTs))], {
       purpose: "farewell",
       timeoutMs: 8_000,
     });

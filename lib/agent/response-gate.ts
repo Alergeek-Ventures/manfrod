@@ -1,7 +1,7 @@
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { experimental_decide as jevDecide } from "ai";
 import { config } from "../config.ts";
-import { FAST_MODEL, generateSimple, system, user } from "../llm/index.ts";
+import { PRIMARY_MODEL, generateSimple, system, user } from "../llm/index.ts";
 import { logger } from "../log.ts";
 
 const log = logger("ResponseGate");
@@ -139,7 +139,7 @@ async function decideWithJev(history: string, incoming: string): Promise<GateDec
 
 async function decideWithLlm(history: string, incoming: string): Promise<GateDecision> {
   const prompt = `Recent conversation:\n${history}\n\nNew message(s):\n${incoming}\n\nWhat should the assistant do?\n`;
-  const response = await generateSimple(FAST_MODEL, [system(SYSTEM_MESSAGE), user(prompt)], {
+  const response = await generateSimple(PRIMARY_MODEL, [system(SYSTEM_MESSAGE), user(prompt)], {
     purpose: "response_gate",
     timeoutMs: 8_000,
   });
