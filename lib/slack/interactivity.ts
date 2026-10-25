@@ -20,6 +20,11 @@ const OWNED_ACTIONS = new Set([
 const LEVELS_BLOCK_ID = "memory_escalation_levels_block";
 const LEVELS_ACTION_ID = "memory_escalation_levels";
 
+const clicker = (payload: Record<string, any>) => ({
+  slackUserId: payload.user?.id as string | undefined,
+  threadTs: (payload.message?.thread_ts ?? payload.container?.thread_ts) as string | undefined,
+});
+
 async function selectedLevels(payload: Record<string, any>, botTs: string): Promise<string[]> {
   const options = payload.state?.values?.[LEVELS_BLOCK_ID]?.[LEVELS_ACTION_ID]?.selected_options;
   if (Array.isArray(options)) return options.flatMap((option) => (typeof option?.value === "string" ? [option.value] : []));
@@ -51,10 +56,10 @@ async function handleBlockActions(payload: Record<string, any>) {
       await removeMessage(channelId, botTs);
       return;
     case "memory_escalation_save":
-      await resolveEscalation("save", await selectedLevels(payload, botTs), channelId, botTs);
+      await resolveEscalation("save", await selectedLevels(payload, botTs), channelId, botTs, clicker(payload));
       return;
     case "memory_escalation_cancel":
-      await resolveEscalation("cancel", [], channelId, botTs);
+      await resolveEscalation("cancel", [], channelId, botTs, clicker(payload));
       return;
     default:
       return;

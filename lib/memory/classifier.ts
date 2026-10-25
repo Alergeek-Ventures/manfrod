@@ -237,7 +237,7 @@ async function createAbsence(
   if (!node) return;
 
   const proposal = await escalationProposal(channelId, kind, writeAccess, "absence");
-  if (proposal) await postEscalationQuestion(channelId, message.ts, node, proposal, writeAccess, lang(result), key);
+  if (proposal) await postEscalationQuestion(channelId, message, node, proposal, writeAccess, lang(result), key);
   if (result.working !== true) await maybeOfferFirmowidLeaveRequest(userId, startDate, endDate);
 }
 
@@ -260,7 +260,7 @@ async function askHuman(result: Result, message: BufferedMessage, channelId: str
       embedding,
       projectId: await projectIdForChannel(channelId),
     });
-    await postEscalationQuestion(channelId, message.ts, node, proposal, writeAccess, lang(result), null);
+    await postEscalationQuestion(channelId, message, node, proposal, writeAccess, lang(result), null);
   } catch (error) {
     log.info(`Classifier ask_human skipped for ${channelId}: ${(error as Error).message}`);
   }
@@ -394,7 +394,7 @@ function checkboxOption(level: string, language: Lang) {
 
 async function postEscalationQuestion(
   channelId: string,
-  originalTs: string,
+  original: Pick<BufferedMessage, "ts" | "user">,
   node: Node,
   proposal: Proposal,
   writeAccess: string[],
@@ -430,7 +430,7 @@ async function postEscalationQuestion(
     },
   ];
 
-  const response = await post("chat.postMessage", { channel: channelId, thread_ts: originalTs, text: prompt, blocks });
+  const response = await post("chat.postMessage", { channel: channelId, thread_ts: original.ts, text: prompt, blocks });
   if (!response.ok) {
     log.error(`Classifier ask_human: failed to post: ${response.error}`);
     return;
@@ -442,10 +442,15 @@ async function postEscalationQuestion(
     write_access: writeAccess,
     fact_key: factKey,
     lang: language,
+    ...(original.user ? { author_slack_id: original.user } : {}),
   });
   log.info(
-    `Classifier ask_human: posted escalation prompt on ${channelId}/${originalTs} (options: ${proposal.options.join(", ")})`,
+    `Classifier ask_human: posted escalation prompt on ${channelId}/${original.ts} (options: ${proposal.options.join(", ")})`,
   );
+}
+
+export function canResolveEscalation(payload: Pick<ConfirmationPayload, "author_slack_id">, slackUserId: string | undefined): boolean {
+  return !payload.author_slack_id || payload.author_slack_id === slackUserId;
 }
 
 export async function resolveEscalation(
@@ -453,10 +458,26 @@ export async function resolveEscalation(
   selectedLevels: string[],
   channelId: string,
   botTs: string,
+  clicker: { slackUserId: string | undefined; threadTs: string | undefined },
 ): Promise<void> {
   const pending = await getConfirmation(botTs);
   if (!pending || pending.channelId !== channelId) {
     log.debug(`Classifier resolve_escalation: no pending entry for ${botTs}`);
+    return;
+  }
+  if (!canResolveEscalation(pending.payload, clicker.slackUserId)) {
+    log.info(`Classifier resolve_escalation: ${clicker.slackUserId} is not the author of ${botTs}, ignoring`);
+    if (clicker.slackUserId) {
+      await post("chat.postEphemeral", {
+        channel: channelId,
+        thread_ts: clicker.threadTs,
+        user: clicker.slackUserId,
+        text:
+          pending.payload.lang === "pl"
+            ? "Tylko autor wiadomości może zdecydować, komu udostępnić tę notatkę."
+            : "Only the author of the message can decide who this note is shared with.",
+      });
+    }
     return;
   }
   await deleteConfirmation(botTs);

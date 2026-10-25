@@ -66,6 +66,7 @@ export interface ConfirmationPayload {
   write_access: string[];
   fact_key: string | null;
   lang: "pl" | "en";
+  author_slack_id?: string;
 }
 
 export async function putConfirmation(botTs: string, channelId: string, payload: ConfirmationPayload) {
