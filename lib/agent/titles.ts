@@ -10,6 +10,18 @@ specific to that message, not generic. E.g. for a message about an
 upcoming holiday on a date, something like "Święto ... w dniu ...". No
 quotes, no emoji, no trailing punctuation. Reply with only the title.`;
 
+const TITLE_MAX_LENGTH = 60;
+
+export function cleanTitle(raw: string): string | null {
+  const line =
+    raw
+      .split("\n")
+      .map((candidate) => candidate.trim().replace(/^"+|"+$/g, "").replace(/^\.+|\.+$/g, "").trim())
+      .filter((candidate) => candidate !== "")
+      .at(-1) ?? "";
+  return line === "" || line.length > TITLE_MAX_LENGTH ? null : line;
+}
+
 function fallbackTitle(content: string): string {
   return (content.trim().split("\n", 1)[0] ?? "").slice(0, 99);
 }
@@ -20,8 +32,7 @@ export async function threadTitle(content: string): Promise<string> {
       purpose: "thread_title",
       timeoutMs: 8_000,
     });
-    const cleaned = title.trim().replace(/^"+|"+$/g, "");
-    return cleaned === "" ? fallbackTitle(content) : cleaned;
+    return cleanTitle(title) ?? fallbackTitle(content);
   } catch (error) {
     log.debug(`ThreadTitle: LLM error, falling back to truncation: ${(error as Error).message}`);
     return fallbackTitle(content);
@@ -42,7 +53,6 @@ Rules:
 `;
 
 const PLAN_REQUEST_LIMIT = 1_000;
-const PLAN_MAX_LENGTH = 60;
 
 export async function planTitle(request: string | null | undefined): Promise<string | null> {
   if (typeof request !== "string") return null;
@@ -52,15 +62,7 @@ export async function planTitle(request: string | null | undefined): Promise<str
       purpose: "plan_title",
       timeoutMs: 6_000,
     });
-    const cleaned = (
-      title
-        .trim()
-        .replace(/^"+|"+$/g, "")
-        .replace(/^\.+|\.+$/g, "")
-        .split("\n")[0] ?? ""
-    ).trim();
-    if (cleaned === "" || cleaned.length > PLAN_MAX_LENGTH) return null;
-    return cleaned;
+    return cleanTitle(title);
   } catch (error) {
     log.debug(`PlanTitle: LLM error, keeping provisional title: ${(error as Error).message}`);
     return null;
