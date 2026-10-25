@@ -13,7 +13,8 @@ const truncate = (value: unknown, max: number): string => {
   return text.length > max ? `${text.slice(0, max - 3)}...` : text;
 };
 
-export const formatTime = (iso: string) => iso.slice(11, 19);
+export const formatTime = (iso: string, timeZone?: string) =>
+  new Date(iso).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false, timeZone });
 
 export type BadgeVariant = "default" | "secondary" | "destructive" | "outline";
 

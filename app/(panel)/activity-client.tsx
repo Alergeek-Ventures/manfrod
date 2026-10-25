@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useState, useSyncExternalStore } from "react";
 import { FilterXIcon } from "lucide-react";
 import { Alert, AlertAction, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -22,14 +22,21 @@ interface Filter {
 
 const ALL = "__all__";
 
-const formatDateTime = (iso: string) =>
-  new Date(iso).toLocaleString("en-US", { month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false, timeZone: "UTC" });
+const formatDateTime = (iso: string, timeZone?: string) =>
+  new Date(iso).toLocaleString("en-US", { month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false, timeZone });
 
-function describe(filter: Filter): string {
+const subscribeNever = () => () => {};
+
+function useViewerTimeZone(): string | undefined {
+  const hydrated = useSyncExternalStore(subscribeNever, () => true, () => false);
+  return hydrated ? undefined : "UTC";
+}
+
+function describe(filter: Filter, timeZone: string | undefined): string {
   const parts: string[] = [];
   if (filter.source) parts.push(`${filter.source.charAt(0).toUpperCase()}${filter.source.slice(1)} run`);
-  if (filter.from) parts.push(`from ${formatDateTime(filter.from)}`);
-  if (filter.to) parts.push(`to ${formatDateTime(filter.to)}`);
+  if (filter.from) parts.push(`from ${formatDateTime(filter.from, timeZone)}`);
+  if (filter.to) parts.push(`to ${formatDateTime(filter.to, timeZone)}`);
   if (filter.userId) parts.push(`user: ${filter.userId}`);
   return parts.join(" ");
 }
@@ -62,6 +69,7 @@ export function ActivityClient({
   maxEvents: number;
 }) {
   const router = useRouter();
+  const timeZone = useViewerTimeZone();
   const [events, setEvents] = useState(initialEvents);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const userItems = [{ label: "All people", value: ALL }, ...users.map((user) => ({ label: user.label, value: user.id }))];
@@ -92,7 +100,7 @@ export function ActivityClient({
     <div className="flex flex-col gap-4 p-4 lg:p-6">
       {filter && (
         <Alert>
-          <AlertDescription>{describe(filter)}</AlertDescription>
+          <AlertDescription>{describe(filter, timeZone)}</AlertDescription>
           <AlertAction>
             <Button variant="outline" size="sm" onClick={() => router.push("/")}>
               <FilterXIcon data-icon="inline-start" />
@@ -150,7 +158,7 @@ export function ActivityClient({
               {events.map((event) => (
                 <Fragment key={event.id}>
                   <TableRow className="cursor-pointer" onClick={() => toggle(event.id)}>
-                    <TableCell className="tabular-nums text-muted-foreground">{formatTime(event.timestamp)}</TableCell>
+                    <TableCell className="tabular-nums text-muted-foreground">{formatTime(event.timestamp, timeZone)}</TableCell>
                     <TableCell>
                       <Badge variant={typeVariant(event)}>{formatType(event)}</Badge>
                     </TableCell>
