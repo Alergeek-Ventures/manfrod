@@ -186,7 +186,7 @@ decryption and the Oban import. Run it before and after the cutover.
   `OPENROUTER_API_KEY`, `TYPESAFE_AI_API_KEY`, `VOYAGE_API_KEY`,
   `BRAVE_SEARCH_API_KEY`, `GOOGLE_*`, `HOLIDAY_CALENDAR_ID`,
   `KALAFIORNIA_OFFICE_ACCESS_API_KEY`, `LINEAR_ENCRYPTION_KEY`,
-  `INNGEST_BASE_URL`, `INNGEST_EVENT_KEY`, `INNGEST_SIGNING_KEY`.
+  `INNGEST_BASE_URL`, `INNGEST_EVENT_KEY`, `INNGEST_SIGNING_KEY`, `E2B_API_KEY`.
   `SLACK_APP_TOKEN`, `ZEN_API_KEY`, `GROQ_API_KEY`, `SECRET_KEY_BASE` are no
   longer used.
 - Build: `pnpm build` (eve build + next build). Start: `pnpm start`

@@ -16,6 +16,7 @@ Manfrod is a Slack AI agent with a memory graph, written in TypeScript on eve (a
 ## Layout
 
 - `agent/` is the eve agent root. One tool per file in `agent/tools/<kebab-name>.ts` (the file name is the tool name the model sees), defined with `defineManfrodTool` from `agent/lib/define-tool.ts`; tool-only helpers live in `agent/lib/`
+- `agent/lib/e2b-sandbox.ts` is a custom eve sandbox provider backed by E2B microVMs; its template (`scripts/build-sandbox-template.ts`, `pnpm sandbox:template`) bakes in the toolchain and `node_modules`, and the `Sandbox template` workflow rebuilds it when dependencies change on `main`
 - `lib/` holds all domain code, shared by the agent and the web app. Keep it free of `next/*` imports
 - `agent/skills/<name>/SKILL.md` are native eve skills the model loads with `eve__skill`. Prompts run in the background by Inngest (cron skills, Firmowid check-ins) live in `agent/routines/<name>.md`, loaded by `lib/routines.ts`; cron routines declare `cron:` in the frontmatter
 - `app/` is the Next.js App Router. Prefer server components and server actions; client components only where interactivity needs them, and never import values from a `"use client"` module into a server component
