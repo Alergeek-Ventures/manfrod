@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { PencilIcon, PlusIcon } from "lucide-react";
 import { toast } from "sonner";
 import { ConfirmAction } from "@/components/confirm-action";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -28,6 +29,7 @@ import {
   saveVacation,
   setMappingStatus,
   toggleCron,
+  uninstallLinear,
   updateVacation,
   type Result,
 } from "./actions.ts";
@@ -616,54 +618,104 @@ function RemindersTab({ data, run }: { data: AccessData; run: Run }) {
 
 function LinearTab({ data, run }: { data: AccessData; run: Run }) {
   return (
-    <Section
-      title="Linear"
-      description="Per-project Linear connections. Connect one with /linear-status in a project channel."
-      empty="No Linear connections yet."
-      isEmpty={data.linearConnections.length === 0}
-    >
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Project</TableHead>
-            <TableHead>Team</TableHead>
-            <TableHead>API key</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead>Connected</TableHead>
-            <TableHead />
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {data.linearConnections.map((connection) => (
-            <TableRow key={connection.id}>
-              <TableCell className="font-medium">{connection.project_slug ?? "–"}</TableCell>
-              <TableCell>{connection.linear_team_name ?? "–"}</TableCell>
-              <TableCell className="font-mono text-xs text-muted-foreground">••••••••</TableCell>
-              <TableCell>
-                <Badge variant={connection.status === "connected" ? "default" : "secondary"}>{connection.status}</Badge>
-              </TableCell>
-              <TableCell className="text-muted-foreground">{formatStamp(connection.inserted_at)}</TableCell>
-              <TableCell>
-                <div className="flex justify-end">
-                  {connection.status === "connected" && (
-                    <ConfirmAction
-                      label="Revoke"
-                      title="Revoke this Linear connection?"
-                      confirmLabel="Revoke"
-                      onConfirm={() => run(() => revokeLinear(connection.id))}
-                    />
-                  )}
-                </div>
-              </TableCell>
+    <>
+      <Section
+        title="Linear workspaces"
+        description="Workspaces where the Manfrod app is installed. Projects install it themselves with /linear-status in their channel."
+        empty="The Manfrod app isn't installed in any Linear workspace yet."
+        isEmpty={data.linearInstallations.length === 0}
+      >
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Workspace</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead>Projects</TableHead>
+              <TableHead>Installed by</TableHead>
+              <TableHead>Updated</TableHead>
+              <TableHead />
             </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </Section>
+          </TableHeader>
+          <TableBody>
+            {data.linearInstallations.map((installation) => (
+              <TableRow key={installation.id}>
+                <TableCell className="font-medium">{installation.organization_name ?? "–"}</TableCell>
+                <TableCell>
+                  <Badge variant={installation.status === "connected" ? "default" : "destructive"}>{installation.status}</Badge>
+                </TableCell>
+                <TableCell className="tabular-nums">{installation.projects}</TableCell>
+                <TableCell>{installation.installed_by ?? "–"}</TableCell>
+                <TableCell className="text-muted-foreground">{formatStamp(installation.updated_at)}</TableCell>
+                <TableCell>
+                  <div className="flex justify-end">
+                    <ConfirmAction
+                      label="Uninstall"
+                      title={`Uninstall the Linear app from ${installation.organization_name ?? "this workspace"}? Every project using it loses its Linear connection.`}
+                      confirmLabel="Uninstall"
+                      onConfirm={() => run(() => uninstallLinear(installation.id))}
+                    />
+                  </div>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </Section>
+      <Section
+        title="Linear connections"
+        description="Per-project Linear teams. Connect one with /linear-status in a project channel."
+        empty="No Linear connections yet."
+        isEmpty={data.linearConnections.length === 0}
+      >
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Project</TableHead>
+              <TableHead>Workspace</TableHead>
+              <TableHead>Team</TableHead>
+              <TableHead>Auth</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead>Connected</TableHead>
+              <TableHead />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {data.linearConnections.map((connection) => (
+              <TableRow key={connection.id}>
+                <TableCell className="font-medium">{connection.project_slug ?? "–"}</TableCell>
+                <TableCell>{connection.workspace ?? "–"}</TableCell>
+                <TableCell>{connection.linear_team_name ?? "–"}</TableCell>
+                <TableCell>
+                  <Badge variant={connection.auth === "app" ? "default" : "secondary"}>
+                    {connection.auth === "app" ? "App" : connection.auth === "key" ? "API key (read-only)" : "None"}
+                  </Badge>
+                </TableCell>
+                <TableCell>
+                  <Badge variant={connection.status === "connected" ? "default" : "secondary"}>{connection.status}</Badge>
+                </TableCell>
+                <TableCell className="text-muted-foreground">{formatStamp(connection.inserted_at)}</TableCell>
+                <TableCell>
+                  <div className="flex justify-end">
+                    {connection.status === "connected" && (
+                      <ConfirmAction
+                        label="Revoke"
+                        title="Revoke this Linear connection?"
+                        confirmLabel="Revoke"
+                        onConfirm={() => run(() => revokeLinear(connection.id))}
+                      />
+                    )}
+                  </div>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </Section>
+    </>
   );
 }
 
-export function AccessClient({ tab, data }: { tab: Tab; data: AccessData }) {
+export function AccessClient({ tab, data, flash }: { tab: Tab; data: AccessData; flash: { error?: string; info?: string } }) {
   const [pending, startTransition] = useTransition();
 
   const run: Run = (action, onSuccess) =>
@@ -679,6 +731,16 @@ export function AccessClient({ tab, data }: { tab: Tab; data: AccessData }) {
 
   return (
     <div className="flex flex-col gap-4 p-4 lg:p-6">
+      {flash.error && (
+        <Alert variant="destructive">
+          <AlertDescription>{flash.error}</AlertDescription>
+        </Alert>
+      )}
+      {flash.info && (
+        <Alert>
+          <AlertDescription>{flash.info}</AlertDescription>
+        </Alert>
+      )}
       {tab === "channels" && <ChannelsTab data={data} run={run} />}
       {tab === "projects" && <ProjectsTab data={data} run={run} pending={pending} />}
       {tab === "members" && <MembersTab data={data} />}

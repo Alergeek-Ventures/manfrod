@@ -32,6 +32,9 @@ const INTENT_TOOLS = new Set([
   "read_slack_canvas",
   "linear_list_issues",
   "linear_get_issue",
+  "linear_create_issue",
+  "linear_update_issue",
+  "linear_comment_issue",
 ]);
 
 const { usageDailyRollups: usage, activityDailyRollups: activity, toolDailyRollups: toolRollups, users } = tables;

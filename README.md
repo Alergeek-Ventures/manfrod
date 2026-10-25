@@ -69,6 +69,20 @@ it the secret is derived from `LINEAR_ENCRYPTION_KEY`. Google tokens (also used
 for Calendar) live in the `account` table; migration `0005` copied them over
 from `google_identities`.
 
+## Linear
+
+Manfrod talks to Linear as an OAuth app installed with `actor=app`, so issues and
+comments it creates show up as Manfrod (on behalf of the Slack user who asked).
+Create the app in Linear under *Settings → API → OAuth applications* with the
+redirect URI `https://<host>/linear/callback`, make it public so other
+workspaces can install it, and set `LINEAR_CLIENT_ID` and `LINEAR_CLIENT_SECRET`.
+
+Each project connects its own workspace: `/linear-status` in a project channel
+gives a signed install link, and after consent the project is linked to the
+chosen team. Installing also switches existing API-key connections whose team
+the app can see over to the app. *Admin → Access → Linear* lists every
+installed workspace.
+
 ## Agent secrets
 
 Admins manage secrets in the web app (Admin → Secrets). Values are encrypted

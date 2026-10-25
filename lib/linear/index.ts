@@ -1,49 +1,78 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNotNull, or } from "drizzle-orm";
 import { db, tables } from "../db/index.ts";
 import type { ProjectLinearConnection } from "../db/schema.ts";
-import { decrypt, encrypt } from "../vault.ts";
-import { verifyKey } from "./client.ts";
+import { decrypt } from "../vault.ts";
+import { type LResult, listTeams, type Team } from "./client.ts";
+import { installationToken } from "./installation.ts";
 
-const { projectLinearConnections, projects } = tables;
+const { linearInstallations, projectLinearConnections, projects } = tables;
 
-export type LinearConnection = Omit<ProjectLinearConnection, "apiKey"> & { apiKey: string | null };
+export type LinearMode = "app" | "key";
+export type LinearConnection = Omit<ProjectLinearConnection, "apiKey"> & { mode: LinearMode; encryptedApiKey: Buffer | null };
 
 function decode(row: ProjectLinearConnection): LinearConnection {
-  return { ...row, apiKey: row.apiKey ? decrypt(row.apiKey) : null };
+  const { apiKey, ...rest } = row;
+  return { ...rest, mode: row.installationId ? "app" : "key", encryptedApiKey: apiKey };
 }
+
+const hasCredentials = or(isNotNull(projectLinearConnections.installationId), isNotNull(projectLinearConnections.apiKey));
 
 export async function getConnection(projectId: string | null | undefined): Promise<LinearConnection | null> {
   if (!projectId) return null;
   const [row] = await db
     .select()
     .from(projectLinearConnections)
-    .where(and(eq(projectLinearConnections.projectId, projectId), eq(projectLinearConnections.status, "connected")))
+    .where(and(eq(projectLinearConnections.projectId, projectId), eq(projectLinearConnections.status, "connected"), hasCredentials))
     .limit(1);
   return row ? decode(row) : null;
 }
 
+export async function authorization(connection: LinearConnection): Promise<LResult<string>> {
+  if (connection.installationId) {
+    const token = await installationToken(connection.installationId);
+    return token.ok ? { ok: true, value: `Bearer ${token.value}` } : token;
+  }
+  if (connection.encryptedApiKey) return { ok: true, value: decrypt(connection.encryptedApiKey) };
+  return { ok: false, error: "not_connected" };
+}
+
 export async function listConnections() {
   const rows = await db
-    .select({ connection: projectLinearConnections, project: projects })
+    .select({ connection: projectLinearConnections, project: projects, installation: linearInstallations })
     .from(projectLinearConnections)
     .leftJoin(projects, eq(projects.id, projectLinearConnections.projectId))
+    .leftJoin(linearInstallations, eq(linearInstallations.id, projectLinearConnections.installationId))
     .orderBy(asc(projectLinearConnections.insertedAt));
-  return rows.map((row) => ({ ...decode(row.connection), project: row.project }));
+  return rows.map((row) => ({
+    ...decode(row.connection),
+    project: row.project,
+    organizationName: row.installation?.organizationName ?? null,
+  }));
+}
+
+export async function installedTeams(installationId: string): Promise<LResult<Team[]>> {
+  const token = await installationToken(installationId);
+  if (!token.ok) return token;
+  return listTeams(`Bearer ${token.value}`);
 }
 
 export async function connect(
   projectId: string,
   userId: string | null,
-  apiKey: string,
-): Promise<{ ok: true; connection: LinearConnection } | { ok: false; error: "invalid_key" | "no_team_scoped" | string }> {
-  const team = await verifyKey(apiKey);
-  if (!team.ok) return { ok: false, error: team.error === "no_team_scoped" ? "no_team_scoped" : "invalid_key" };
+  installationId: string,
+  teamId: string,
+): Promise<LResult<LinearConnection>> {
+  const teams = await installedTeams(installationId);
+  if (!teams.ok) return teams;
+  const team = teams.value.find((candidate) => candidate.id === teamId);
+  if (!team) return { ok: false, error: "unknown_team" };
   const values = {
     projectId,
-    apiKey: encrypt(apiKey),
+    installationId,
+    apiKey: null,
     status: "connected",
-    linearTeamId: team.value.id,
-    linearTeamName: team.value.name,
+    linearTeamId: team.id,
+    linearTeamName: team.name,
     connectedByUserId: userId,
     disconnectedAt: null,
   };
@@ -53,7 +82,7 @@ export async function connect(
       .values(values)
       .onConflictDoUpdate({ target: projectLinearConnections.projectId, set: values })
       .returning();
-    return { ok: true, connection: decode(row) };
+    return { ok: true, value: decode(row) };
   } catch (error) {
     return { ok: false, error: (error as Error).message };
   }

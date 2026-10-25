@@ -3,6 +3,7 @@ import { listUsers } from "../accounts.ts";
 import { db, tables } from "../db/index.ts";
 import { listPendingJobs } from "../jobs/index.ts";
 import { listConnections } from "../linear/index.ts";
+import { listInstallations } from "../linear/installation.ts";
 import { listAllRecurringReminders } from "../memory/reminders.ts";
 import { listCronSkills } from "../skills.ts";
 
@@ -132,8 +133,23 @@ export async function loadAccessData() {
     project_name: connection.project?.name ?? null,
     status: connection.status,
     linear_team_name: connection.linearTeamName,
+    auth: connection.installationId ? "app" : connection.encryptedApiKey ? "key" : "none",
+    installation_id: connection.installationId,
+    workspace: connection.organizationName,
     inserted_at: connection.insertedAt.toISOString(),
   }));
+
+  const linearInstallations = (await listInstallations()).map((installation) => {
+    const installer = installation.installedByUserId ? usersById.get(installation.installedByUserId) : null;
+    return {
+      id: installation.id,
+      organization_name: installation.organizationName,
+      status: installation.status,
+      installed_by: installer?.name ?? installer?.email ?? null,
+      projects: linearConnections.filter((connection) => connection.installation_id === installation.id).length,
+      updated_at: installation.updatedAt.toISOString(),
+    };
+  });
 
   const secrets = (
     await db
@@ -157,6 +173,7 @@ export async function loadAccessData() {
     cronRows,
     reminderRows,
     linearConnections,
+    linearInstallations,
     secrets,
   };
 }

@@ -374,8 +374,26 @@ export const projectLinearConnections = pgTable("project_linear_connections", {
 	disconnectedAt: timestamp("disconnected_at", { mode: 'date' }),
 	insertedAt: timestamp("inserted_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
 	updatedAt: timestamp("updated_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
+	installationId: uuid("installation_id"),
 }, (table) => [
 	uniqueIndex().using("btree", table.projectId.asc().nullsLast().op("uuid_ops")),
+]);
+
+export const linearInstallations = pgTable("linear_installations", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	organizationId: text("organization_id").notNull(),
+	organizationName: text("organization_name"),
+	appUserId: text("app_user_id"),
+	accessToken: bytea("access_token").notNull(),
+	refreshToken: bytea("refresh_token"),
+	expiresAt: timestamp("expires_at", { mode: 'date' }),
+	scope: text(),
+	status: text().default('connected').notNull(),
+	installedByUserId: uuid("installed_by_user_id"),
+	insertedAt: timestamp("inserted_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
+	updatedAt: timestamp("updated_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
+}, (table) => [
+	uniqueIndex().using("btree", table.organizationId.asc().nullsLast().op("text_ops")),
 ]);
 
 export const jobs = pgTable("jobs", {

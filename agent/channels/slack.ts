@@ -1,6 +1,7 @@
 import type { RouteHandlerArgs } from "eve/channels";
 import { slackChannel, type SlackChannelState, type SlackInboundMessageContext, type SlackMessage } from "eve/channels/slack";
 import { getUserBySlackId } from "../../lib/accounts.ts";
+import { unfurlLinearLinks } from "../../lib/linear/unfurl.ts";
 import { logger } from "../../lib/log.ts";
 import { setStatus, setSuggestedPrompts } from "../../lib/slack/api.ts";
 import { handleSlashCommand } from "../../lib/slack/commands.ts";
@@ -81,6 +82,9 @@ const base = slackChannel({
         return;
       case "app_context_changed":
         userContext.put(data.user, data.app_context);
+        return;
+      case "link_shared":
+        void unfurlLinearLinks(data).catch((error) => log.error(`Slack EventHandler unfurl failed: ${(error as Error).message}`));
         return;
       default:
         log.debug(`Slack EventHandler ignoring event type: ${event.type}`);

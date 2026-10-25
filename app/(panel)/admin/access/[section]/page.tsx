@@ -6,9 +6,16 @@ import { TABS, type Tab } from "../tabs.ts";
 
 export const dynamic = "force-dynamic";
 
-export default async function AccessSectionPage({ params }: { params: Promise<{ section: string }> }) {
+export default async function AccessSectionPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ section: string }>;
+  searchParams: Promise<{ error?: string; info?: string }>;
+}) {
   await requireAdmin();
   const { section } = await params;
   if (!TABS.includes(section as Tab)) notFound();
-  return <AccessClient tab={section as Tab} data={await loadAccessData()} />;
+  const { error, info } = await searchParams;
+  return <AccessClient tab={section as Tab} data={await loadAccessData()} flash={{ error, info }} />;
 }

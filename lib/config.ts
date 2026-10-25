@@ -46,6 +46,12 @@ export const config = {
   get kalafiorniaOfficeAccessApiKey() {
     return env("KALAFIORNIA_OFFICE_ACCESS_API_KEY");
   },
+  get linearClientId() {
+    return env("LINEAR_CLIENT_ID");
+  },
+  get linearClientSecret() {
+    return env("LINEAR_CLIENT_SECRET");
+  },
   get linearEncryptionKey() {
     return env("LINEAR_ENCRYPTION_KEY") ?? "N0G8yzhz8v1uS0kDf1PBjaVAd7RITiXHhJI3q6Pn0lU=";
   },
