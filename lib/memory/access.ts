@@ -1,4 +1,4 @@
-import { and, arrayOverlaps, eq, isNotNull, sql, type Column, type SQL } from "drizzle-orm";
+import { and, arrayOverlaps, eq, isNotNull, isNull, sql, type Column, type SQL } from "drizzle-orm";
 import { db, tables } from "../db/index.ts";
 import type { ChannelMapping, Project } from "../db/schema.ts";
 
@@ -59,7 +59,7 @@ async function clientIdsForUser(userId: string): Promise<string[]> {
         eq(channelMappings.status, "active"),
       ),
     )
-    .where(eq(projectMemberships.userId, userId));
+    .where(and(eq(projectMemberships.userId, userId), isNull(projectMemberships.removedAt)));
   return rows.map((row) => row.clientId!).filter(Boolean);
 }
 
@@ -101,11 +101,27 @@ export async function ensureMembership(userId: string, projectId: string): Promi
     .onConflictDoNothing({ target: [projectMemberships.userId, projectMemberships.projectId] });
 }
 
+export async function addMembership(userId: string, projectId: string): Promise<void> {
+  await db
+    .insert(projectMemberships)
+    .values({ userId, projectId, source: "admin" })
+    .onConflictDoUpdate({ target: [projectMemberships.userId, projectMemberships.projectId], set: { source: "admin", removedAt: null } });
+}
+
+export async function removeMembership(userId: string, projectId: string): Promise<boolean> {
+  const removed = await db
+    .update(projectMemberships)
+    .set({ removedAt: new Date(Math.floor(Date.now() / 1000) * 1000) })
+    .where(and(eq(projectMemberships.userId, userId), eq(projectMemberships.projectId, projectId), isNull(projectMemberships.removedAt)))
+    .returning({ id: projectMemberships.id });
+  return removed.length > 0;
+}
+
 export async function isMember(userId: string, projectId: string): Promise<boolean> {
   const rows = await db
     .select({ id: projectMemberships.id })
     .from(projectMemberships)
-    .where(and(eq(projectMemberships.userId, userId), eq(projectMemberships.projectId, projectId)))
+    .where(and(eq(projectMemberships.userId, userId), eq(projectMemberships.projectId, projectId), isNull(projectMemberships.removedAt)))
     .limit(1);
   return rows.length > 0;
 }

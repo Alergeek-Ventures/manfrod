@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { PencilIcon, PlusIcon } from "lucide-react";
+import { PencilIcon, PlusIcon, XIcon } from "lucide-react";
 import { toast } from "sonner";
 import { ConfirmAction } from "@/components/confirm-action";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -20,10 +20,12 @@ import { Textarea } from "@/components/ui/textarea";
 import type { AccessData } from "@/lib/web/access-data.ts";
 import {
   addProject,
+  addProjectMember,
   cancelReminder,
   deleteCron,
   deleteMapping,
   deleteVacation,
+  removeProjectMember,
   revokeLinear,
   saveCron,
   saveVacation,
@@ -253,33 +255,81 @@ function ProjectsTab({ data, run, pending }: { data: AccessData; run: Run; pendi
   );
 }
 
-function MembersTab({ data }: { data: AccessData }) {
+function MemberProjectPicker({ projects, onPick }: { projects: AccessData["projects"]; onPick: (projectId: string) => void }) {
+  const items = projects.map((project) => ({ label: project.name, value: project.id }));
+  if (items.length === 0) return null;
   return (
-    <Section title="Members" description="Project memberships by person." empty="No memberships yet." isEmpty={data.members.length === 0}>
+    <Select items={items} value={null} onValueChange={(value) => value && onPick(value as string)}>
+      <SelectTrigger size="sm" className="w-40">
+        <SelectValue placeholder="Add to project" />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectGroup>
+          {items.map((item) => (
+            <SelectItem key={item.value} value={item.value}>
+              {item.label}
+            </SelectItem>
+          ))}
+        </SelectGroup>
+      </SelectContent>
+    </Select>
+  );
+}
+
+function MembersTab({ data, run }: { data: AccessData; run: Run }) {
+  return (
+    <Section
+      title="Members"
+      description="Who belongs to which project. Members of a client project can read that client's notes outside its channels, e.g. in DMs. People are added automatically when they post in a project channel; someone you remove stays removed until you add them back."
+      empty="No people yet."
+      isEmpty={data.members.length === 0}
+    >
       <Table>
         <TableHeader>
           <TableRow>
             <TableHead>Person</TableHead>
             <TableHead>Slack ID</TableHead>
             <TableHead>Projects</TableHead>
+            <TableHead />
           </TableRow>
         </TableHeader>
         <TableBody>
-          {data.members.map((member) => (
-            <TableRow key={member.user_slack_id}>
-              <TableCell className="font-medium">{member.user_name ?? "–"}</TableCell>
-              <TableCell className="font-mono text-xs text-muted-foreground">{member.user_slack_id}</TableCell>
-              <TableCell>
-                <div className="flex flex-wrap gap-1">
-                  {member.memberships.map((membership) => (
-                    <Badge key={membership.project_slug} variant="secondary">
-                      {membership.project_name}
-                    </Badge>
-                  ))}
-                </div>
-              </TableCell>
-            </TableRow>
-          ))}
+          {data.members.map((member) => {
+            const joined = new Set(member.memberships.map((membership) => membership.project_id));
+            const name = member.user_name ?? member.user_slack_id;
+            return (
+              <TableRow key={member.user_id}>
+                <TableCell className="font-medium">{member.user_name ?? "–"}</TableCell>
+                <TableCell className="font-mono text-xs text-muted-foreground">{member.user_slack_id}</TableCell>
+                <TableCell className="whitespace-normal">
+                  <div className="flex flex-wrap gap-1">
+                    {member.memberships.length === 0 && <span className="text-muted-foreground">–</span>}
+                    {member.memberships.map((membership) => (
+                      <Badge key={membership.project_id} variant="secondary" className="h-6 pr-0.5" title={membership.source}>
+                        {membership.project_name}
+                        <ConfirmAction
+                          label={<XIcon />}
+                          size="icon-xs"
+                          title={`Remove ${name} from ${membership.project_name}?`}
+                          description="They will no longer read this project's client notes outside its channels, and won't be re-added automatically."
+                          confirmLabel="Remove"
+                          onConfirm={() => run(() => removeProjectMember(member.user_id, membership.project_id))}
+                        />
+                      </Badge>
+                    ))}
+                  </div>
+                </TableCell>
+                <TableCell>
+                  <div className="flex justify-end">
+                    <MemberProjectPicker
+                      projects={data.projects.filter((project) => !joined.has(project.id))}
+                      onPick={(projectId) => run(() => addProjectMember(member.user_id, projectId))}
+                    />
+                  </div>
+                </TableCell>
+              </TableRow>
+            );
+          })}
         </TableBody>
       </Table>
     </Section>
@@ -743,7 +793,7 @@ export function AccessClient({ tab, data, flash }: { tab: Tab; data: AccessData;
       )}
       {tab === "channels" && <ChannelsTab data={data} run={run} />}
       {tab === "projects" && <ProjectsTab data={data} run={run} pending={pending} />}
-      {tab === "members" && <MembersTab data={data} />}
+      {tab === "members" && <MembersTab data={data} run={run} />}
       {tab === "vacations" && <VacationsTab data={data} run={run} pending={pending} />}
       {tab === "cron" && <CronTab data={data} run={run} />}
       {tab === "reminders" && <RemindersTab data={data} run={run} />}

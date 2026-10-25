@@ -1,5 +1,5 @@
-import { asc, countDistinct, desc, eq, like, sql } from "drizzle-orm";
-import { listUsers } from "../accounts.ts";
+import { and, asc, countDistinct, desc, eq, isNull, like, sql } from "drizzle-orm";
+import { isSystemUser, listUsers } from "../accounts.ts";
 import { db, tables } from "../db/index.ts";
 import { listPendingJobs } from "../jobs/index.ts";
 import { listConnections } from "../linear/index.ts";
@@ -21,7 +21,7 @@ export async function loadAccessData() {
     })
     .from(projectsTable)
     .leftJoin(channelMappings, eq(channelMappings.projectId, projectsTable.id))
-    .leftJoin(projectMemberships, eq(projectMemberships.projectId, projectsTable.id))
+    .leftJoin(projectMemberships, and(eq(projectMemberships.projectId, projectsTable.id), isNull(projectMemberships.removedAt)))
     .groupBy(projectsTable.id)
     .orderBy(asc(projectsTable.slug));
 
@@ -39,34 +39,31 @@ export async function loadAccessData() {
     .leftJoin(projectsTable, eq(projectsTable.id, channelMappings.projectId))
     .orderBy(desc(channelMappings.insertedAt));
 
+  const users = await listUsers();
+
   const memberRows = await db
     .select({
-      user_name: usersTable.name,
-      user_slack_id: usersTable.slackId,
+      user_id: projectMemberships.userId,
+      project_id: projectsTable.id,
       project_name: projectsTable.name,
       project_slug: projectsTable.slug,
       source: projectMemberships.source,
     })
     .from(projectMemberships)
-    .innerJoin(usersTable, eq(usersTable.id, projectMemberships.userId))
     .innerJoin(projectsTable, eq(projectsTable.id, projectMemberships.projectId))
-    .orderBy(asc(usersTable.name), asc(projectsTable.slug));
-  const membersBySlack = new Map<
-    string,
-    { user_slack_id: string; user_name: string | null; memberships: { project_name: string; project_slug: string }[] }
-  >();
-  for (const row of memberRows) {
-    const entry = membersBySlack.get(row.user_slack_id) ?? {
-      user_slack_id: row.user_slack_id,
-      user_name: row.user_name,
-      memberships: [] as { project_name: string; project_slug: string }[],
-    };
-    entry.memberships.push({ project_name: row.project_name, project_slug: row.project_slug });
-    membersBySlack.set(row.user_slack_id, entry);
-  }
-  const members = [...membersBySlack.values()].sort((a, b) => (a.user_name ?? "").localeCompare(b.user_name ?? ""));
-
-  const users = await listUsers();
+    .where(isNull(projectMemberships.removedAt))
+    .orderBy(asc(projectsTable.slug));
+  const members = users
+    .filter((user) => !isSystemUser(user))
+    .map((user) => ({
+      user_id: user.id,
+      user_name: user.name,
+      user_slack_id: user.slackId,
+      memberships: memberRows
+        .filter((row) => row.user_id === user.id)
+        .map(({ project_id, project_name, project_slug, source }) => ({ project_id, project_name, project_slug, source })),
+    }))
+    .sort((a, b) => (a.user_name ?? "").localeCompare(b.user_name ?? ""));
 
   const vacations = (
     await db

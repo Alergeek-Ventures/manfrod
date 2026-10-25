@@ -6,6 +6,7 @@ import { db, tables } from "@/lib/db/index.ts";
 import { setFact } from "@/lib/facts.ts";
 import { cancelJob } from "@/lib/jobs/index.ts";
 import { disconnect as disconnectLinear } from "@/lib/linear/index.ts";
+import { addMembership, removeMembership } from "@/lib/memory/access.ts";
 import { uninstall as uninstallLinearApp } from "@/lib/linear/installation.ts";
 import { ValidationError } from "@/lib/memory/nodes.ts";
 import { deleteRecurringReminder, getRecurringReminderById, updateRecurringReminder } from "@/lib/memory/reminders.ts";
@@ -35,6 +36,22 @@ export async function addProject(slug: string, name: string): Promise<Result> {
     return { ok: false, message: `Error: ${errorText(error)}` };
   }
   return done("Project added");
+}
+
+export async function addProjectMember(userId: string, projectId: string): Promise<Result> {
+  await requireAdmin();
+  if (userId === "" || projectId === "") return { ok: false, message: "Select a person and a project" };
+  try {
+    await addMembership(userId, projectId);
+  } catch (error) {
+    return { ok: false, message: `Error: ${errorText(error)}` };
+  }
+  return done("Added to the project");
+}
+
+export async function removeProjectMember(userId: string, projectId: string): Promise<Result> {
+  await requireAdmin();
+  return (await removeMembership(userId, projectId)) ? done("Removed from the project") : { ok: false, message: "Membership not found" };
 }
 
 export async function saveVacation(userId: string, startDate: string, endDate: string, note: string): Promise<Result> {
