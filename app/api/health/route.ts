@@ -7,7 +7,7 @@ async function agentUp(): Promise<boolean> {
     const response = await fetch(`http://127.0.0.1:${process.env.EVE_NEXT_PRODUCTION_PORT ?? "4274"}/api/inngest`, {
       signal: AbortSignal.timeout(2_000),
     });
-    return response.ok;
+    return response.status < 500;
   } catch {
     return false;
   }
