@@ -190,7 +190,6 @@ export type DeleteResult = { ok: true; node: Node } | { ok: false; error: "not_f
 
 async function removeNode(node: Node, eventUserId: string | null): Promise<DeleteResult> {
   if (await isSoul(node.id)) return { ok: false, error: "soul" };
-  await db.delete(links).where(or(eq(links.nodeAId, node.id), eq(links.nodeBId, node.id)));
   await db.delete(nodes).where(eq(nodes.id, node.id));
   emit("memory_node_deleted", { userId: eventUserId, source: "memory", meta: { node_id: node.id } });
   return { ok: true, node };
@@ -321,7 +320,7 @@ export async function getRandomNodesByAccess(access: string[], limit = 10): Prom
     .limit(limit);
 }
 
-const TIME_BOUND_PATTERN = String.raw`\d{4}-\d{2}-\d{2}|\m\d{1,2}[./]\d{1,2}\M|\m(jutr\w*|pojutrze|dzisiaj|dziś|wczoraj|tomorrow|today|yesterday|urlop\w*|wolne\w*|spotkani\w*|deadline\w*|termin\w*|poniedział\w*|wtor\w*|środ\w*|czwart\w*|piąt\w*|sobot\w*|niedziel\w*|stycz\w*|lut\w*|marc\w*|kwie\w*|maj[au]?|czerw\w*|lip\w*|sierp\w*|wrze[sś]\w*|październik\w*|listopad\w*|grud\w*|january|february|april|june|july|august|september|october|november|december|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\M`;
+const TIME_BOUND_PATTERN = String.raw`\d{4}-\d{2}-\d{2}|\m\d{1,2}[./]\d{1,2}\M|\m(jutr\w*|pojutrze|dzisiaj|dziś|wczoraj|tomorrow|today|yesterday|urlop\w*|wolne\w*|spotkani\w*|deadline\w*|termin(ie|u|y|ów|em)?|poniedział\w*|wtor\w*|środ(a|y|ę|ą|zie)|czwart\w*|piąt\w*|sobot\w*|niedziel\w*|stycz\w*|lut(y|ego|ym)|marz(ec|cu)|marc[au]|kwie\w*|maj[au]?|czerw(iec|ca|cu)|lip(iec|ca|cu)|sierp\w*|wrze[sś]\w*|październik\w*|listopad\w*|grud\w*|january|february|april|june|july|august|september|october|november|december|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\M`;
 
 export async function getTimeBoundNodesByAccess(access: string[], opts: { limit?: number; minAgeDays?: number } = {}): Promise<Node[]> {
   const cutoff = new Date(Date.now() - (opts.minAgeDays ?? 1) * 86_400_000);
