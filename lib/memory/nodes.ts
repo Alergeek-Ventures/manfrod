@@ -18,7 +18,11 @@ export type NodeAttrs = {
 
 export class ValidationError extends Error {
   constructor(readonly errors: Record<string, string>) {
-    super(Object.entries(errors).map(([field, message]) => `${field}: ${message}`).join(", "));
+    super(
+      Object.entries(errors)
+        .map(([field, message]) => `${field}: ${message}`)
+        .join(", "),
+    );
   }
 }
 
@@ -177,11 +181,7 @@ export async function updateNode(userId: string, nodeId: string, attrs: NodeUpda
   return node ? applyUpdate(node, attrs, userId) : null;
 }
 
-export async function updateNodeAccessible(
-  readableLevels: string[],
-  nodeId: string,
-  attrs: NodeUpdate,
-): Promise<Node | null> {
+export async function updateNodeAccessible(readableLevels: string[], nodeId: string, attrs: NodeUpdate): Promise<Node | null> {
   const node = await getNodeAccessible(readableLevels, nodeId);
   return node ? applyUpdate(node, attrs, node.userId) : null;
 }
@@ -243,11 +243,7 @@ export async function deleteLink(userId: string, nodeAId: string, nodeBId: strin
   return removeLink(userId, a, b);
 }
 
-export async function deleteLinkAccessible(
-  readableLevels: string[],
-  nodeAId: string,
-  nodeBId: string,
-): Promise<Link | null> {
+export async function deleteLinkAccessible(readableLevels: string[], nodeAId: string, nodeBId: string): Promise<Link | null> {
   if (!isUuid(nodeAId) || !isUuid(nodeBId)) return null;
   const [a, b] = orderPair(nodeAId, nodeBId);
   const accessible = await db
@@ -269,10 +265,7 @@ async function removeLink(userId: string | null, a: string, b: string): Promise<
 }
 
 function linkedTo(nodeId: string): SQL {
-  return or(
-    and(eq(links.nodeAId, nodeId), eq(links.nodeBId, nodes.id)),
-    and(eq(links.nodeBId, nodeId), eq(links.nodeAId, nodes.id)),
-  )!;
+  return or(and(eq(links.nodeAId, nodeId), eq(links.nodeBId, nodes.id)), and(eq(links.nodeBId, nodeId), eq(links.nodeAId, nodes.id)))!;
 }
 
 function dedupeById<T extends { id: string }>(items: T[]): T[] {
@@ -282,11 +275,7 @@ function dedupeById<T extends { id: string }>(items: T[]): T[] {
 
 export async function getNodeLinks(userId: string, nodeId: string): Promise<Node[]> {
   if (!isUuid(nodeId)) return [];
-  const rows = await db
-    .select({ node: nodes })
-    .from(nodes)
-    .innerJoin(links, linkedTo(nodeId))
-    .where(eq(nodes.userId, userId));
+  const rows = await db.select({ node: nodes }).from(nodes).innerJoin(links, linkedTo(nodeId)).where(eq(nodes.userId, userId));
   return dedupeById(rows.map((row) => row.node));
 }
 
@@ -334,10 +323,7 @@ export async function getRandomNodesByAccess(access: string[], limit = 10): Prom
 
 const TIME_BOUND_PATTERN = String.raw`\d{4}-\d{2}-\d{2}|\m\d{1,2}[./]\d{1,2}\M|\m(jutr\w*|pojutrze|dzisiaj|dziś|wczoraj|tomorrow|today|yesterday|urlop\w*|wolne\w*|spotkani\w*|deadline\w*|termin\w*|poniedział\w*|wtor\w*|środ\w*|czwart\w*|piąt\w*|sobot\w*|niedziel\w*|stycz\w*|lut\w*|marc\w*|kwie\w*|maj[au]?|czerw\w*|lip\w*|sierp\w*|wrze[sś]\w*|październik\w*|listopad\w*|grud\w*|january|february|april|june|july|august|september|october|november|december|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\M`;
 
-export async function getTimeBoundNodesByAccess(
-  access: string[],
-  opts: { limit?: number; minAgeDays?: number } = {},
-): Promise<Node[]> {
+export async function getTimeBoundNodesByAccess(access: string[], opts: { limit?: number; minAgeDays?: number } = {}): Promise<Node[]> {
   const cutoff = new Date(Date.now() - (opts.minAgeDays ?? 1) * 86_400_000);
   const souls = db.select({ id: users.soulNodeId }).from(users).where(isNotNull(users.soulNodeId));
   return db
@@ -511,9 +497,7 @@ export async function getGraphData(
       link_count: counts.get(node.id) ?? 0,
       inserted_at: node.insertedAt.toISOString(),
     })),
-    edges: allLinks
-      .filter((link) => ids.has(link.a) && ids.has(link.b))
-      .map((link) => ({ source: link.a, target: link.b })),
+    edges: allLinks.filter((link) => ids.has(link.a) && ids.has(link.b)).map((link) => ({ source: link.a, target: link.b })),
   };
 }
 
@@ -537,12 +521,7 @@ export async function getSoul(userId: string | null = null): Promise<Node | null
 
 async function adoptFirstNode(user: User): Promise<Node | null> {
   if (user.slackId.startsWith("system:")) return null;
-  const [first] = await db
-    .select()
-    .from(nodes)
-    .where(eq(nodes.userId, user.id))
-    .orderBy(asc(nodes.insertedAt), asc(nodes.id))
-    .limit(1);
+  const [first] = await db.select().from(nodes).where(eq(nodes.userId, user.id)).orderBy(asc(nodes.insertedAt), asc(nodes.id)).limit(1);
   if (first) await db.update(users).set({ soulNodeId: first.id }).where(eq(users.id, user.id));
   return first ?? null;
 }
@@ -570,12 +549,7 @@ export async function setSoul(userId: string, nodeId: string): Promise<Node | nu
   return node;
 }
 
-export async function updateSoul(
-  userId: string,
-  content: string,
-  embedding: number[],
-  access: string[],
-): Promise<Node> {
+export async function updateSoul(userId: string, content: string, embedding: number[], access: string[]): Promise<Node> {
   const soul = await getSoul(userId);
   if (!soul) {
     const node = await createNode(userId, access, { content, embedding, processedAt: nowSeconds() });
@@ -660,4 +634,3 @@ export async function projectNames(): Promise<Map<string, string>> {
   const rows = await db.select({ id: projects.id, name: projects.name }).from(projects);
   return new Map(rows.map((row) => [row.id, row.name]));
 }
-

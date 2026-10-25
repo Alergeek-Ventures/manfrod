@@ -19,13 +19,13 @@ export default async function GraphPage() {
   ]);
   return (
     <GraphClient
-        initialGraph={graph}
-        initialStats={stats}
-        soulId={soul?.id ?? null}
-        currentUserId={user.id}
-        users={users.map((candidate) => ({ id: candidate.id, label: candidate.name || candidate.email || candidate.id }))}
-        projects={projects.map((project) => ({ id: project.id, name: project.name }))}
-        clients={clients}
-      />
+      initialGraph={graph}
+      initialStats={stats}
+      soulId={soul?.id ?? null}
+      currentUserId={user.id}
+      users={users.map((candidate) => ({ id: candidate.id, label: candidate.name || candidate.email || candidate.id }))}
+      projects={projects.map((project) => ({ id: project.id, name: project.name }))}
+      clients={clients}
+    />
   );
 }

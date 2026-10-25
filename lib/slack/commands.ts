@@ -26,7 +26,11 @@ async function upsertMapping(
   values: { slackChannelName: string; projectId: string | null; clientId: string | null; setByUserId: string | null },
 ) {
   const row = { ...values, slackChannelId: channelId, source: "slack_command", status: "active" };
-  const [existing] = await db.select({ id: channelMappings.id }).from(channelMappings).where(eq(channelMappings.slackChannelId, channelId)).limit(1);
+  const [existing] = await db
+    .select({ id: channelMappings.id })
+    .from(channelMappings)
+    .where(eq(channelMappings.slackChannelId, channelId))
+    .limit(1);
   const [mapping] = existing
     ? await db.update(channelMappings).set(row).where(eq(channelMappings.id, existing.id)).returning()
     : await db.insert(channelMappings).values(row).returning();

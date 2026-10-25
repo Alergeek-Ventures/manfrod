@@ -68,7 +68,12 @@ function compileGoRegex(pattern: string): RegExp | null {
     flags = [...new Set(inline[1].split(""))].join("");
     source = source.slice(inline[0].length);
   }
-  source = scopeInlineFlags(source.replace(/\(\?P</g, "(?<").replace(/\\z/g, "$").replace(/\\A/g, "^"));
+  source = scopeInlineFlags(
+    source
+      .replace(/\(\?P</g, "(?<")
+      .replace(/\\z/g, "$")
+      .replace(/\\A/g, "^"),
+  );
   try {
     return new RegExp(source, flags);
   } catch {

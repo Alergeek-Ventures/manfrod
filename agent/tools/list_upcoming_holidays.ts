@@ -11,7 +11,12 @@ export default defineTool({
   inputSchema: tool.inputSchema,
   execute: (input, ctx) => {
     const context = toolCtx(ctx);
-    const use = { toolName: "list_upcoming_holidays", userId: context.userId, sessionKey: context.sessionKey, keepPlaceholders: tool.keepSecretPlaceholders };
+    const use = {
+      toolName: "list_upcoming_holidays",
+      userId: context.userId,
+      sessionKey: context.sessionKey,
+      keepPlaceholders: tool.keepSecretPlaceholders,
+    };
     return runWithSecrets(use, input, (resolved) => tool.execute(resolved, context));
   },
 });

@@ -19,7 +19,9 @@ export async function GET(request: Request) {
   }
   const user = await getUserByEmail(IMPERSONATION_EMAIL);
   if (!user) {
-    return NextResponse.redirect(new URL(`/login?error=${encodeURIComponent(`No local user found for ${IMPERSONATION_EMAIL}.`)}`, request.url));
+    return NextResponse.redirect(
+      new URL(`/login?error=${encodeURIComponent(`No local user found for ${IMPERSONATION_EMAIL}.`)}`, request.url),
+    );
   }
   const context = await auth.$context;
   const session = await context.internalAdapter.createSession(user.id);

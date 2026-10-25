@@ -205,13 +205,7 @@ async function createMemory(result: Result, message: BufferedMessage, channelId:
   await createNode(userId, writeAccess, { content: note, embedding, projectId: await projectIdForChannel(channelId) });
 }
 
-async function createAbsence(
-  result: Result,
-  message: BufferedMessage,
-  channelId: string,
-  kind: string,
-  writeAccess: string[],
-) {
+async function createAbsence(result: Result, message: BufferedMessage, channelId: string, kind: string, writeAccess: string[]) {
   const text = message.text ?? "";
   const userName = message.user_name ?? message.user ?? "unknown";
   const userId = await findUserId(message.user);
@@ -444,9 +438,7 @@ async function postEscalationQuestion(
     lang: language,
     ...(original.user ? { author_slack_id: original.user } : {}),
   });
-  log.info(
-    `Classifier ask_human: posted escalation prompt on ${channelId}/${original.ts} (options: ${proposal.options.join(", ")})`,
-  );
+  log.info(`Classifier ask_human: posted escalation prompt on ${channelId}/${original.ts} (options: ${proposal.options.join(", ")})`);
 }
 
 export function canResolveEscalation(payload: Pick<ConfirmationPayload, "author_slack_id">, slackUserId: string | undefined): boolean {
@@ -565,7 +557,10 @@ Message: "${message.text ?? ""}"
 }
 
 export function parseBulkResponse(raw: string): { ok: true; results: Result[] } | { ok: false; error: string } {
-  const cleaned = raw.replace(/```json\s*/gi, "").replaceAll("```", "").trim();
+  const cleaned = raw
+    .replace(/```json\s*/gi, "")
+    .replaceAll("```", "")
+    .trim();
   try {
     const parsed = JSON.parse(cleaned);
     return Array.isArray(parsed) ? { ok: true, results: parsed } : { ok: false, error: "expected JSON array, got object or scalar" };

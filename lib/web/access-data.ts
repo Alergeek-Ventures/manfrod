@@ -50,7 +50,10 @@ export async function loadAccessData() {
     .innerJoin(usersTable, eq(usersTable.id, projectMemberships.userId))
     .innerJoin(projectsTable, eq(projectsTable.id, projectMemberships.projectId))
     .orderBy(asc(usersTable.name), asc(projectsTable.slug));
-  const membersBySlack = new Map<string, { user_slack_id: string; user_name: string | null; memberships: { project_name: string; project_slug: string }[] }>();
+  const membersBySlack = new Map<
+    string,
+    { user_slack_id: string; user_name: string | null; memberships: { project_name: string; project_slug: string }[] }
+  >();
   for (const row of memberRows) {
     const entry = membersBySlack.get(row.user_slack_id) ?? {
       user_slack_id: row.user_slack_id,
@@ -134,7 +137,12 @@ export async function loadAccessData() {
 
   const secrets = (
     await db
-      .select({ name: agentSecrets.name, description: agentSecrets.description, updated_by: usersTable.name, updated_at: agentSecrets.updatedAt })
+      .select({
+        name: agentSecrets.name,
+        description: agentSecrets.description,
+        updated_by: usersTable.name,
+        updated_at: agentSecrets.updatedAt,
+      })
       .from(agentSecrets)
       .leftJoin(usersTable, eq(usersTable.id, agentSecrets.updatedByUserId))
       .orderBy(asc(agentSecrets.name))

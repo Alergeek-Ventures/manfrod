@@ -36,7 +36,10 @@ export function typeVariant(event: ActivityView): BadgeVariant {
   if (type === "action_completed") return meta.success === false ? "destructive" : "default";
   if (["extraction_failed", "retrospection_failed", "llm_call_failed"].includes(type)) return "destructive";
   if (["responding", "llm_call_succeeded", "message_received"].includes(type)) return "default";
-  if (MEMORY_TYPES.has(type) || ["thinking", "narrating", "action_started", "llm_call_started", "llm_retry", "llm_fallback"].includes(type)) {
+  if (
+    MEMORY_TYPES.has(type) ||
+    ["thinking", "narrating", "action_started", "llm_call_started", "llm_retry", "llm_fallback"].includes(type)
+  ) {
     return "secondary";
   }
   return "outline";

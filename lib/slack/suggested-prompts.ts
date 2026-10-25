@@ -43,7 +43,11 @@ async function deskPrompt(user: User | null): Promise<Prompt | null> {
 }
 
 export async function buildPrompts(user: User | null, slackUserId: string | null): Promise<Prompt[]> {
-  const contextual = [await currentChannelPrompt(slackUserId), await deskPrompt(user)].filter((prompt): prompt is Prompt => prompt !== null);
+  const contextual = [await currentChannelPrompt(slackUserId), await deskPrompt(user)].filter(
+    (prompt): prompt is Prompt => prompt !== null,
+  );
   const seen = new Set<string>();
-  return [...contextual, ...DEFAULTS].filter((prompt) => (seen.has(prompt.title) ? false : (seen.add(prompt.title), true))).slice(0, MAX_PROMPTS);
+  return [...contextual, ...DEFAULTS]
+    .filter((prompt) => (seen.has(prompt.title) ? false : (seen.add(prompt.title), true)))
+    .slice(0, MAX_PROMPTS);
 }

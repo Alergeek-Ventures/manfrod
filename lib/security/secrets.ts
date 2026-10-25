@@ -15,14 +15,15 @@ export function containsSecret(text: string | null | undefined): boolean {
 }
 
 const POLISH_CHARS = /[ąćęłńóśźżĄĆĘŁŃÓŚŹŻ]/;
-const POLISH_WORDS = new Set(
-  "nie jest tutaj proszę cześć siema dzięki masz jak co gdzie kiedy jestem może właśnie".split(" "),
-);
+const POLISH_WORDS = new Set("nie jest tutaj proszę cześć siema dzięki masz jak co gdzie kiedy jestem może właśnie".split(" "));
 
 export function languageHint(text: unknown): "pl" | "en" {
   if (typeof text !== "string") return "pl";
   if (POLISH_CHARS.test(text)) return "pl";
-  const words = text.toLowerCase().split(/[^\p{L}]+/u).filter(Boolean);
+  const words = text
+    .toLowerCase()
+    .split(/[^\p{L}]+/u)
+    .filter(Boolean);
   return words.some((word) => POLISH_WORDS.has(word)) ? "pl" : "en";
 }
 
@@ -59,9 +60,7 @@ function fallback(lang: "pl" | "en"): string {
 
 export async function secretWarning(context: string | null, fallbackLang: "pl" | "en"): Promise<string> {
   const content =
-    context && context !== ""
-      ? `Recent messages from this person, oldest first (language/tone reference only):\n${context}`
-      : fallbackLang;
+    context && context !== "" ? `Recent messages from this person, oldest first (language/tone reference only):\n${context}` : fallbackLang;
   try {
     const text = await generateSimple(FAST_MODEL, [system(SYSTEM_MESSAGE), user(content)], {
       purpose: "secret_warning",

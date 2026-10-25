@@ -23,7 +23,10 @@ describe.skipIf(!enabled)("agent secrets", () => {
   });
 
   it("stores the value encrypted and lists only metadata", async () => {
-    const [row] = await db.select().from(tables.agentSecrets).where((await import("drizzle-orm")).eq(tables.agentSecrets.name, NAME));
+    const [row] = await db
+      .select()
+      .from(tables.agentSecrets)
+      .where((await import("drizzle-orm")).eq(tables.agentSecrets.name, NAME));
     expect(row.value.toString("utf8")).not.toContain("s3cr3t-value");
     const listed = (await listSecrets()).find((secret) => secret.name === NAME);
     expect(listed).toMatchObject({ name: NAME, description: "test secret" });

@@ -25,11 +25,7 @@ export async function dispatch(job: Job): Promise<void> {
   }
 }
 
-export async function enqueue(
-  kind: JobKind,
-  args: Record<string, unknown>,
-  opts: EnqueueOptions = {},
-): Promise<EnqueueResult> {
+export async function enqueue(kind: JobKind, args: Record<string, unknown>, opts: EnqueueOptions = {}): Promise<EnqueueResult> {
   const [job] = await db
     .insert(jobs)
     .values({
@@ -104,9 +100,7 @@ async function cancelWhere(where: ReturnType<typeof sql> | ReturnType<typeof and
 }
 
 export function cancelPendingTriggerJobs(recurringReminderId: string): Promise<number> {
-  return cancelWhere(
-    and(eq(jobs.kind, "trigger"), sql`${jobs.args}->>'recurring_reminder_id' = ${recurringReminderId}`),
-  );
+  return cancelWhere(and(eq(jobs.kind, "trigger"), sql`${jobs.args}->>'recurring_reminder_id' = ${recurringReminderId}`));
 }
 
 export async function dispatchUndispatched(): Promise<number> {

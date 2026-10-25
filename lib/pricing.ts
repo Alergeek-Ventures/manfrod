@@ -130,11 +130,7 @@ const perMtok = (tokens: number, rate: number) => (tokens / 1_000_000) * rate;
 
 function cacheWriteCost(tokens: number, price: ModelPrice): number {
   if (tokens === 0) return 0;
-  if (
-    price.cache_write_above_per_mtok !== null &&
-    price.cache_write_threshold !== null &&
-    tokens > price.cache_write_threshold
-  ) {
+  if (price.cache_write_above_per_mtok !== null && price.cache_write_threshold !== null && tokens > price.cache_write_threshold) {
     return perMtok(tokens, price.cache_write_above_per_mtok);
   }
   return perMtok(tokens, price.cache_write_per_mtok);
@@ -158,8 +154,5 @@ export function cost(model: string | null | undefined, usage: TokenUsage): numbe
 
 export function uncachedCost(model: string | null | undefined, usage: TokenUsage): number {
   const price = forModel(model);
-  return (
-    perMtok(count(usage.input_tokens), price.input_per_mtok) +
-    perMtok(count(usage.output_tokens), price.output_per_mtok)
-  );
+  return perMtok(count(usage.input_tokens), price.input_per_mtok) + perMtok(count(usage.output_tokens), price.output_per_mtok);
 }

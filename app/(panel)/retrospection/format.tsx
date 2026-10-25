@@ -16,7 +16,14 @@ export interface RunView {
 }
 
 export const formatRunDateTime = (iso: string) =>
-  new Date(iso).toLocaleString("en-US", { month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "UTC" });
+  new Date(iso).toLocaleString("en-US", {
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "UTC",
+  });
 
 export function formatDuration(ms: number | null | undefined): string {
   if (ms === null || ms === undefined) return "...";

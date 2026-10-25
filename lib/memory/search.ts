@@ -141,17 +141,12 @@ async function expandWithLinks(found: Node[], readableLevels: string[], max: num
     .from(nodes)
     .innerJoin(
       links,
-      or(
-        and(inArray(links.nodeAId, ids), eq(links.nodeBId, nodes.id)),
-        and(inArray(links.nodeBId, ids), eq(links.nodeAId, nodes.id)),
-      ),
+      or(and(inArray(links.nodeAId, ids), eq(links.nodeBId, nodes.id)), and(inArray(links.nodeBId, ids), eq(links.nodeAId, nodes.id))),
     )
     .where(accessOverlaps(nodes.access, readableLevels));
 
   const seen = new Set<string>();
-  const all = [...found, ...linked.map((row) => row.node)].filter((node) =>
-    seen.has(node.id) ? false : (seen.add(node.id), true),
-  );
+  const all = [...found, ...linked.map((row) => row.node)].filter((node) => (seen.has(node.id) ? false : (seen.add(node.id), true)));
   return all.slice(0, max);
 }
 
@@ -247,9 +242,7 @@ export async function getNoteContext(
   projectId: string | null = null,
 ): Promise<string> {
   const soul = await getSoul(userId);
-  const linkedToSoul = soul
-    ? (await getNodeLinksAccessible(readableLevels, soul.id)).filter((node) => node.userId === userId)
-    : [];
+  const linkedToSoul = soul ? (await getNodeLinksAccessible(readableLevels, soul.id)).filter((node) => node.userId === userId) : [];
   const relevant = await search(userId, readableLevels, query, { limit: 10, projectId });
 
   const seen = new Set<string>();

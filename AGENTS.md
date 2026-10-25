@@ -2,7 +2,7 @@ Manfrod is a Slack AI agent with a memory graph, written in TypeScript on eve (a
 
 ## Project guidelines
 
-- Run `pnpm typecheck && pnpm test` when done with changes; run `pnpm build` when touching `agent/`, `next.config.ts` or anything imported by both the agent and the web app
+- Run `pnpm format && pnpm typecheck && pnpm test` when done with changes; run `pnpm build` when touching `agent/`, `next.config.ts` or anything imported by both the agent and the web app
 - Use the built-in `fetch` for HTTP requests; do not add HTTP client libraries
 - **Do not write comments.** Code should be self-explanatory through naming. If something is genuinely non-obvious, one short line is acceptable — never a paragraph or a comment restating what the code does
 - Match the surrounding code: ES modules with explicit `.ts` import extensions, named exports, no default exports outside Next.js route/page files

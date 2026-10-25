@@ -12,10 +12,7 @@ const log = logger("ChannelDetector");
 
 export type ChannelKind = "priv_channel" | "project_external" | "project_internal" | "company_channel";
 
-export function detect(
-  channelId: string,
-  channelName: string | null | undefined,
-): { kind: ChannelKind; clientId: string | null } | null {
+export function detect(channelId: string, channelName: string | null | undefined): { kind: ChannelKind; clientId: string | null } | null {
   if (channelId.startsWith("D")) return { kind: "priv_channel", clientId: null };
   if (!channelName) return null;
   const external = /^av-x-(.+)$/.exec(channelName);
@@ -30,10 +27,7 @@ async function findProject(slug: string) {
   return project ?? null;
 }
 
-async function upsertMapping(
-  channelId: string,
-  attrs: { slackChannelName: string | null; projectId: string; clientId: string | null },
-) {
+async function upsertMapping(channelId: string, attrs: { slackChannelName: string | null; projectId: string; clientId: string | null }) {
   const values = { ...attrs, source: "auto_detected", status: "active" };
   const [existing] = await db
     .select({ id: channelMappings.id })

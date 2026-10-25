@@ -13,10 +13,7 @@ export class VoyageError extends Error {
   }
 }
 
-export async function embed(
-  texts: string[],
-  opts: { inputType?: "document" | "query"; apiKey?: string } = {},
-): Promise<number[][]> {
+export async function embed(texts: string[], opts: { inputType?: "document" | "query"; apiKey?: string } = {}): Promise<number[][]> {
   const response = await fetch(`${BASE_URL}/embeddings`, {
     method: "POST",
     headers: {
@@ -42,11 +39,7 @@ export interface RerankResult {
   relevance_score: number;
 }
 
-export async function rerank(
-  query: string,
-  documents: string[],
-  opts: { topK?: number; apiKey?: string } = {},
-): Promise<RerankResult[]> {
+export async function rerank(query: string, documents: string[], opts: { topK?: number; apiKey?: string } = {}): Promise<RerankResult[]> {
   const payload: Record<string, unknown> = { query, documents, model: RERANK_MODEL };
   if (Number.isInteger(opts.topK)) payload.top_k = opts.topK;
 

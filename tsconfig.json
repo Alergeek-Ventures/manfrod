@@ -1,17 +1,10 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "lib": [
-      "ES2023",
-      "DOM",
-      "DOM.Iterable"
-    ],
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "module": "esnext",
     "moduleResolution": "bundler",
-    "types": [
-      "node",
-      "eve/workflow-modules"
-    ],
+    "types": ["node", "eve/workflow-modules"],
     "jsx": "react-jsx",
     "strict": true,
     "esModuleInterop": true,
@@ -28,9 +21,7 @@
     ],
     "allowJs": true,
     "paths": {
-      "@/*": [
-        "./*"
-      ]
+      "@/*": ["./*"]
     }
   },
   "include": [
@@ -48,10 +39,5 @@
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts"
   ],
-  "exclude": [
-    "node_modules",
-    ".eve",
-    ".output",
-    ".next"
-  ]
+  "exclude": ["node_modules", ".eve", ".output", ".next"]
 }

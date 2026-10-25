@@ -86,7 +86,8 @@ export function interceptInteractivity(headers: Headers, body: string): Intercep
   const ownedAction = payload.type === "block_actions" && OWNED_ACTIONS.has(payload.actions?.[0]?.action_id);
   if (!ownedSubmission && !ownedAction) return null;
 
-  if (!verifySlackSignature(headers, body)) return { response: new Response("invalid signature", { status: 401 }), work: Promise.resolve() };
+  if (!verifySlackSignature(headers, body))
+    return { response: new Response("invalid signature", { status: 401 }), work: Promise.resolve() };
 
   const work = (async () => {
     try {

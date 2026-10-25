@@ -16,8 +16,5 @@ async function agentUp(): Promise<boolean> {
 export async function GET() {
   const [database, agent] = await Promise.all([healthy(), process.env.NODE_ENV === "production" ? agentUp() : Promise.resolve(true)]);
   const services = { agent: agent ? "ok" : "down", database: database ? "ok" : "down" };
-  return Response.json(
-    { status: "ok", timestamp: new Date().toISOString(), services },
-    { status: agent && database ? 200 : 503 },
-  );
+  return Response.json({ status: "ok", timestamp: new Date().toISOString(), services }, { status: agent && database ? 200 : 503 });
 }

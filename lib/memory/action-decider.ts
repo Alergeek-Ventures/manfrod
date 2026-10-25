@@ -43,7 +43,13 @@ export function classifierRules() {
   if (cached) return cached;
   const prompt = readFileSync(path.join(process.cwd(), "lib", "prompts", "classifier.md"), "utf8");
   const lines = prompt.split("\n");
-  const intro = lines.slice(0, lines.findIndex((line) => line.startsWith("Possible actions"))).join("\n").trim();
+  const intro = lines
+    .slice(
+      0,
+      lines.findIndex((line) => line.startsWith("Possible actions")),
+    )
+    .join("\n")
+    .trim();
   const criteria = Object.fromEntries(MEMORY_ACTIONS.map((action) => [action, ""])) as Record<MemoryAction, string>;
   let current: MemoryAction | null = null;
   for (const line of lines) {
@@ -131,7 +137,8 @@ export async function suggestProject(
       questions: {
         project: {
           type: "choice",
-          instructions: "Which project, if any, is this Slack channel dedicated to? Only pick a project when the channel clearly belongs to it.",
+          instructions:
+            "Which project, if any, is this Slack channel dedicated to? Only pick a project when the channel clearly belongs to it.",
           criteria,
         },
       },

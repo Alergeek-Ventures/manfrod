@@ -56,13 +56,7 @@ export async function listFactsByUser(prefix: string, userId: string, readableLe
   return db
     .select()
     .from(facts)
-    .where(
-      and(
-        like(facts.key, `${escapeLike(prefix)}%`),
-        eq(facts.setByUserId, userId),
-        accessOverlaps(facts.access, readableLevels),
-      ),
-    )
+    .where(and(like(facts.key, `${escapeLike(prefix)}%`), eq(facts.setByUserId, userId), accessOverlaps(facts.access, readableLevels)))
     .orderBy(asc(facts.key));
 }
 
@@ -114,7 +108,13 @@ export async function putAbsence(
     }
 
     const [kept, ...others] = overlapping;
-    if (others.length > 0) await tx.delete(facts).where(inArray(facts.id, others.map((fact) => fact.id)));
+    if (others.length > 0)
+      await tx.delete(facts).where(
+        inArray(
+          facts.id,
+          others.map((fact) => fact.id),
+        ),
+      );
     await tx.delete(facts).where(and(eq(facts.key, key), ne(facts.id, kept.id)));
     const [updated] = await tx.update(facts).set({ key, value }).where(eq(facts.id, kept.id)).returning();
     return { fact: updated, outcome: "replaced" as const };
@@ -123,7 +123,13 @@ export async function putAbsence(
 
 export async function deleteAbsences(userId: string, startDate: string, endDate: string): Promise<Fact[]> {
   const absences = await overlappingAbsences(userId, startDate, endDate);
-  if (absences.length > 0) await db.delete(facts).where(inArray(facts.id, absences.map((fact) => fact.id)));
+  if (absences.length > 0)
+    await db.delete(facts).where(
+      inArray(
+        facts.id,
+        absences.map((fact) => fact.id),
+      ),
+    );
   return absences;
 }
 

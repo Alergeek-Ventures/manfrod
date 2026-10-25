@@ -36,11 +36,20 @@ export default async function ActivityPage({
 
   return (
     <ActivityClient
-        initialEvents={events.map(serializeActivity)}
-        users={users}
-        filter={filtered ? { from: from?.toISOString() ?? null, to: to?.toISOString() ?? null, source: params.source ?? null, userId: params.user_id ?? null } : null}
-        showAllLogs={showAllLogs}
-        maxEvents={MAX_EVENTS}
-      />
+      initialEvents={events.map(serializeActivity)}
+      users={users}
+      filter={
+        filtered
+          ? {
+              from: from?.toISOString() ?? null,
+              to: to?.toISOString() ?? null,
+              source: params.source ?? null,
+              userId: params.user_id ?? null,
+            }
+          : null
+      }
+      showAllLogs={showAllLogs}
+      maxEvents={MAX_EVENTS}
+    />
   );
 }

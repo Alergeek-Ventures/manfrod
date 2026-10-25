@@ -7,7 +7,8 @@ describe("cleanTitle", () => {
   });
 
   it("drops reasoning the model put before the title", () => {
-    const raw = 'Polish message. Title under 60 chars, matching language. Something like "Wygasłe połączenie z Firmowid i rezerwacja T1" — about 45 chars.\n\nWygasłe połączenie z Firmowid i rezerwacja T1';
+    const raw =
+      'Polish message. Title under 60 chars, matching language. Something like "Wygasłe połączenie z Firmowid i rezerwacja T1" — about 45 chars.\n\nWygasłe połączenie z Firmowid i rezerwacja T1';
     expect(cleanTitle(raw)).toBe("Wygasłe połączenie z Firmowid i rezerwacja T1");
   });
 

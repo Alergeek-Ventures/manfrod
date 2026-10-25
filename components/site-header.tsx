@@ -1,12 +1,12 @@
-"use client"
+"use client";
 
-import { usePathname } from "next/navigation"
-import { MoonIcon, SunIcon } from "lucide-react"
-import { useTheme } from "next-themes"
+import { usePathname } from "next/navigation";
+import { MoonIcon, SunIcon } from "lucide-react";
+import { useTheme } from "next-themes";
 
-import { Button } from "@/components/ui/button"
-import { Separator } from "@/components/ui/separator"
-import { SidebarTrigger } from "@/components/ui/sidebar"
+import { Button } from "@/components/ui/button";
+import { Separator } from "@/components/ui/separator";
+import { SidebarTrigger } from "@/components/ui/sidebar";
 
 const TITLES: Record<string, string> = {
   "/": "Activity",
@@ -16,7 +16,7 @@ const TITLES: Record<string, string> = {
   "/retrospection": "Retrospection",
   "/integrations": "Integrations",
   "/chat": "Chat",
-}
+};
 
 const ACCESS_TABS: Record<string, string> = {
   channels: "Channels",
@@ -27,29 +27,24 @@ const ACCESS_TABS: Record<string, string> = {
   reminders: "Reminders",
   linear: "Linear",
   secrets: "Secrets",
-}
+};
 
 function Title() {
-  const pathname = usePathname()
-  const section = pathname.startsWith("/admin/access/") ? pathname.slice("/admin/access/".length) : null
-  const title = section ? (ACCESS_TABS[section] ?? "Access") : (TITLES[pathname] ?? "Manfrod")
-  return <h1 className="text-base font-medium">{title}</h1>
+  const pathname = usePathname();
+  const section = pathname.startsWith("/admin/access/") ? pathname.slice("/admin/access/".length) : null;
+  const title = section ? (ACCESS_TABS[section] ?? "Access") : (TITLES[pathname] ?? "Manfrod");
+  return <h1 className="text-base font-medium">{title}</h1>;
 }
 
 function ThemeToggle() {
-  const { resolvedTheme, setTheme } = useTheme()
+  const { resolvedTheme, setTheme } = useTheme();
   return (
-    <Button
-      variant="ghost"
-      size="icon"
-      className="ml-auto"
-      onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
-    >
+    <Button variant="ghost" size="icon" className="ml-auto" onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}>
       <SunIcon className="hidden dark:block" />
       <MoonIcon className="dark:hidden" />
       <span className="sr-only">Toggle theme</span>
     </Button>
-  )
+  );
 }
 
 export function SiteHeader() {
@@ -62,5 +57,5 @@ export function SiteHeader() {
         <ThemeToggle />
       </div>
     </header>
-  )
+  );
 }

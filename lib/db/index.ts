@@ -10,8 +10,7 @@ export type Db = NodePgDatabase<typeof schema>;
 const globalCache = globalThis as unknown as { manfrodPool?: pg.Pool; manfrodDb?: Db };
 
 export function databaseUrl(): string {
-  const url =
-    process.env.DATABASE_URL ?? "postgres://manfrod:qLmVMeXiYyy65ADb@localhost:35232/manfrod";
+  const url = process.env.DATABASE_URL ?? "postgres://manfrod:qLmVMeXiYyy65ADb@localhost:35232/manfrod";
   return url.replace(/^ecto:\/\//, "postgres://");
 }
 

@@ -18,8 +18,8 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
   return (
     <div className="flex flex-col gap-6 p-4 lg:p-6">
       <p className="max-w-3xl text-sm text-muted-foreground">
-        Connect your own accounts so Manfrod can use them when it talks to you — in DMs or in a thread started with you in a channel. Connections are
-        per-person: connecting one here only gives the agent access to yours, not anyone else&apos;s.
+        Connect your own accounts so Manfrod can use them when it talks to you — in DMs or in a thread started with you in a channel.
+        Connections are per-person: connecting one here only gives the agent access to yours, not anyone else&apos;s.
       </p>
       {error && (
         <Alert variant="destructive">

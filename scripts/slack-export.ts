@@ -19,7 +19,12 @@ async function listAllChannels(): Promise<SlackBody[]> {
   const acc: SlackBody[] = [];
   let cursor: string | undefined;
   for (;;) {
-    const result = await get("conversations.list", { types: "public_channel,private_channel,im", limit: 200, exclude_archived: true, cursor });
+    const result = await get("conversations.list", {
+      types: "public_channel,private_channel,im",
+      limit: 200,
+      exclude_archived: true,
+      cursor,
+    });
     if (!result.ok) {
       console.warn(`conversations.list failed: ${result.error}`);
       return acc;
@@ -107,7 +112,14 @@ mkdirSync("eval", { recursive: true });
 writeFileSync(
   "eval/slack_raw.json",
   JSON.stringify(
-    { exported_at: new Date().toISOString(), workspace_id: teamId, workspace_name: teamName, channel_count: exported.length, total_messages: total, channels: exported },
+    {
+      exported_at: new Date().toISOString(),
+      workspace_id: teamId,
+      workspace_name: teamName,
+      channel_count: exported.length,
+      total_messages: total,
+      channels: exported,
+    },
     null,
     2,
   ),

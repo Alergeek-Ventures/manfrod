@@ -110,7 +110,12 @@ export async function closeConversation(
     await tx
       .update(messages)
       .set({ conversationId: conversation.id })
-      .where(inArray(messages.id, pending.map((message) => message.id)));
+      .where(
+        inArray(
+          messages.id,
+          pending.map((message) => message.id),
+        ),
+      );
 
     return conversation;
   });

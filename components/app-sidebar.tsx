@@ -1,7 +1,7 @@
-"use client"
+"use client";
 
-import * as React from "react"
-import Link from "next/link"
+import * as React from "react";
+import Link from "next/link";
 import {
   ActivityIcon,
   BarChart3Icon,
@@ -18,10 +18,10 @@ import {
   PlugIcon,
   SquareKanbanIcon,
   UsersIcon,
-} from "lucide-react"
+} from "lucide-react";
 
-import { NavMain, type NavGroup } from "@/components/nav-main"
-import { NavUser } from "@/components/nav-user"
+import { NavMain, type NavGroup } from "@/components/nav-main";
+import { NavUser } from "@/components/nav-user";
 import {
   Sidebar,
   SidebarContent,
@@ -30,7 +30,7 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-} from "@/components/ui/sidebar"
+} from "@/components/ui/sidebar";
 
 const ADMIN_GROUPS: NavGroup[] = [
   {
@@ -65,32 +65,29 @@ const ADMIN_GROUPS: NavGroup[] = [
     label: "Account",
     items: [{ title: "Integrations", url: "/integrations", icon: <PlugIcon /> }],
   },
-]
+];
 
 const USER_GROUPS: NavGroup[] = [
   {
     label: "Account",
     items: [{ title: "Integrations", url: "/integrations", icon: <PlugIcon /> }],
   },
-]
+];
 
 export function AppSidebar({
   isAdmin,
   user,
   ...props
 }: React.ComponentProps<typeof Sidebar> & {
-  isAdmin: boolean
-  user: { name: string; email: string }
+  isAdmin: boolean;
+  user: { name: string; email: string };
 }) {
   return (
     <Sidebar collapsible="offcanvas" {...props}>
       <SidebarHeader>
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton
-              className="data-[slot=sidebar-menu-button]:p-1.5!"
-              render={<Link href={isAdmin ? "/" : "/integrations"} />}
-            >
+            <SidebarMenuButton className="data-[slot=sidebar-menu-button]:p-1.5!" render={<Link href={isAdmin ? "/" : "/integrations"} />}>
               <BotIcon className="size-5!" />
               <span className="text-base font-semibold">Manfrod</span>
             </SidebarMenuButton>
@@ -104,5 +101,5 @@ export function AppSidebar({
         <NavUser user={user} />
       </SidebarFooter>
     </Sidebar>
-  )
+  );
 }

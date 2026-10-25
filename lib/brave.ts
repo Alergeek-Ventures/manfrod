@@ -45,10 +45,7 @@ function formatResults(query: string, results: BraveResult[]): string {
   return `Web results for "${query}":\n\n${formatted}`;
 }
 
-export async function search(
-  query: string,
-  opts: { count?: number; freshness?: string; apiKey?: string } = {},
-): Promise<string> {
+export async function search(query: string, opts: { count?: number; freshness?: string; apiKey?: string } = {}): Promise<string> {
   const apiKey = opts.apiKey ?? config.braveSearchApiKey;
   if (!apiKey) throw new BraveSearchError("api_key_not_configured");
 

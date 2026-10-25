@@ -97,10 +97,7 @@ export function catalogText(): string | null {
     .join("\n")}`;
 }
 
-export type ParsedCron =
-  | { kind: "standard"; cron: Cron }
-  | { kind: "random"; start: string; end: string; dates: Cron }
-  | null;
+export type ParsedCron = { kind: "standard"; cron: Cron } | { kind: "random"; start: string; end: string; dates: Cron } | null;
 
 export function parseCron(cron: string | null, timezone: string): ParsedCron {
   const random = /^RAND\((\d{2}:\d{2})-(\d{2}:\d{2})\)\s+(.+)$/.exec(cron ?? "");

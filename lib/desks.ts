@@ -62,9 +62,7 @@ export async function reserveDesk(
 
   try {
     const reservation = await db.transaction(async (tx) => {
-      await tx
-        .delete(deskReservations)
-        .where(and(eq(deskReservations.userId, userId), eq(deskReservations.date, date)));
+      await tx.delete(deskReservations).where(and(eq(deskReservations.userId, userId), eq(deskReservations.date, date)));
       const [created] = await tx.insert(deskReservations).values({ deskId: desk.id, userId, date, note }).returning();
       return created;
     });
@@ -80,9 +78,7 @@ export async function cancelReservation(userId: string, label: string, date: str
   if (!desk) return false;
   const result = await db
     .delete(deskReservations)
-    .where(
-      and(eq(deskReservations.deskId, desk.id), eq(deskReservations.date, date), eq(deskReservations.userId, userId)),
-    );
+    .where(and(eq(deskReservations.deskId, desk.id), eq(deskReservations.date, date), eq(deskReservations.userId, userId)));
   return (result.rowCount ?? 0) > 0;
 }
 

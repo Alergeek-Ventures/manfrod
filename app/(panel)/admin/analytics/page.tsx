@@ -88,7 +88,13 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
         </p>
         <div className="flex gap-1">
           {RANGES.map((range) => (
-            <Button key={range} size="sm" variant={range === days ? "secondary" : "ghost"} nativeButton={false} render={<Link href={`/admin/analytics?days=${range}`} />}>
+            <Button
+              key={range}
+              size="sm"
+              variant={range === days ? "secondary" : "ghost"}
+              nativeButton={false}
+              render={<Link href={`/admin/analytics?days=${range}`} />}
+            >
               {range}d
             </Button>
           ))}
@@ -97,9 +103,17 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
 
       <SectionCards
         metrics={[
-          { label: "Spend", value: `$${money(summary.cost_usd)}`, sublabel: deltaLabel(summary.cost_usd, summary.previous_cost_usd, "vs previous period") },
+          {
+            label: "Spend",
+            value: `$${money(summary.cost_usd)}`,
+            sublabel: deltaLabel(summary.cost_usd, summary.previous_cost_usd, "vs previous period"),
+          },
           { label: "Projected / month", value: `$${money(summary.projected_monthly_cost)}`, sublabel: `at the last ${days}d rate` },
-          { label: "Active people", value: summary.active_users, sublabel: `of ${summary.total_people} provisioned · reach ${data.adoption.reach}%` },
+          {
+            label: "Active people",
+            value: summary.active_users,
+            sublabel: `of ${summary.total_people} provisioned · reach ${data.adoption.reach}%`,
+          },
           { label: "Cache savings", value: `$${money(summary.cache_savings_usd)}`, sublabel: `${summary.cache_hit_rate}% of input cached` },
           {
             label: "Satisfaction",
@@ -214,7 +228,9 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
           <CardContent>
             {data.negative_feedback.length === 0 ? (
               <NoData>
-                {data.feedback.total === 0 ? "Nobody has rated an answer in this window." : `${data.feedback.good} positive ratings, none negative.`}
+                {data.feedback.total === 0
+                  ? "Nobody has rated an answer in this window."
+                  : `${data.feedback.good} positive ratings, none negative.`}
               </NoData>
             ) : (
               <Table>
@@ -234,7 +250,13 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
                       <TableCell className="text-muted-foreground">{feedback.where}</TableCell>
                       <TableCell>
                         {feedback.permalink ? (
-                          <Button variant="link" size="sm" className="px-0" nativeButton={false} render={<a href={feedback.permalink} target="_blank" rel="noopener" />}>
+                          <Button
+                            variant="link"
+                            size="sm"
+                            className="px-0"
+                            nativeButton={false}
+                            render={<a href={feedback.permalink} target="_blank" rel="noopener" />}
+                          >
                             Open in Slack
                           </Button>
                         ) : (
@@ -361,8 +383,9 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
           <CardHeader>
             <CardTitle>Active people and volume per week</CardTitle>
             <CardDescription>
-              avg {data.adoption.avg_daily_active} people/day · stickiness {data.adoption.stickiness} · ${money(summary.cost_per_active_user)} per
-              active person · {formatNumber(summary.calls)} LLM calls, {summary.failed_calls} failed, {summary.retries} retries
+              avg {data.adoption.avg_daily_active} people/day · stickiness {data.adoption.stickiness} · $
+              {money(summary.cost_per_active_user)} per active person · {formatNumber(summary.calls)} LLM calls, {summary.failed_calls}{" "}
+              failed, {summary.retries} retries
             </CardDescription>
           </CardHeader>
           <CardContent>

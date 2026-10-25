@@ -25,8 +25,7 @@ Napisz jedną krótką wiadomość pożegnalną:
 Odpowiedz samą treścią wiadomości, niczym więcej.
 `;
 
-const FALLBACK_FAREWELL =
-  "Ok, znikam z tego wątku. 😔 Gdybyście mnie potrzebowali, wystarczy mnie oznaczyć.";
+const FALLBACK_FAREWELL = "Ok, znikam z tego wątku. 😔 Gdybyście mnie potrzebowali, wystarczy mnie oznaczyć.";
 
 async function threadContext(channel: string, threadTs: string): Promise<string> {
   const messages = await listFullThread(channel, threadTs);
@@ -41,11 +40,10 @@ async function threadContext(channel: string, threadTs: string): Promise<string>
 
 export async function farewell(channel: string, threadTs: string): Promise<string> {
   try {
-    const text = await generateSimple(
-      FAST_MODEL,
-      [system(SYSTEM_MESSAGE), user(await threadContext(channel, threadTs))],
-      { purpose: "farewell", timeoutMs: 8_000 },
-    );
+    const text = await generateSimple(FAST_MODEL, [system(SYSTEM_MESSAGE), user(await threadContext(channel, threadTs))], {
+      purpose: "farewell",
+      timeoutMs: 8_000,
+    });
     return text.trim() === "" ? FALLBACK_FAREWELL : text.trim();
   } catch (error) {
     log.debug(`Slack Kick: farewell generation failed, using fallback: ${(error as Error).message}`);

@@ -9,8 +9,7 @@ const BASELINE = "0000_baseline";
 const LAST_ECTO_MIGRATION = "20261015221309";
 
 function connectionString() {
-  const url =
-    process.env.DATABASE_URL ?? "postgres://manfrod:qLmVMeXiYyy65ADb@localhost:35232/manfrod";
+  const url = process.env.DATABASE_URL ?? "postgres://manfrod:qLmVMeXiYyy65ADb@localhost:35232/manfrod";
   return url.replace(/^ecto:\/\//, "postgres://");
 }
 
@@ -37,9 +36,7 @@ export async function migrate({ log = console.log } = {}) {
       }
     }
 
-    const applied = new Set(
-      (await client.query("SELECT version FROM ts_schema_migrations")).rows.map((row) => row.version),
-    );
+    const applied = new Set((await client.query("SELECT version FROM ts_schema_migrations")).rows.map((row) => row.version));
 
     const files = (await readdir(migrationsDir)).filter((file) => file.endsWith(".sql")).sort();
 

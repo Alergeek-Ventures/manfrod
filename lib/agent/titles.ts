@@ -16,7 +16,13 @@ export function cleanTitle(raw: string): string | null {
   const line =
     raw
       .split("\n")
-      .map((candidate) => candidate.trim().replace(/^"+|"+$/g, "").replace(/^\.+|\.+$/g, "").trim())
+      .map((candidate) =>
+        candidate
+          .trim()
+          .replace(/^"+|"+$/g, "")
+          .replace(/^\.+|\.+$/g, "")
+          .trim(),
+      )
       .filter((candidate) => candidate !== "")
       .at(-1) ?? "";
   return line === "" || line.length > TITLE_MAX_LENGTH ? null : line;
