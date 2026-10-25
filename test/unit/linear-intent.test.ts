@@ -11,8 +11,10 @@ describe("Linear install intents", () => {
   });
 
   it("round-trips a signed project and Slack user", () => {
-    const token = intentFrom(installLink({ projectId: "project-1", slackUserId: "U1" }));
-    expect(readIntent(token)).toEqual({ projectId: "project-1", slackUserId: "U1" });
+    const token = intentFrom(
+      installLink({ projectId: "project-1", slackUserId: "U1", responseUrl: "https://hooks.slack.com/actions/T1/2/x" }),
+    );
+    expect(readIntent(token)).toEqual({ projectId: "project-1", slackUserId: "U1", responseUrl: "https://hooks.slack.com/actions/T1/2/x" });
   });
 
   it("rejects a token whose payload was swapped", () => {
@@ -29,6 +31,6 @@ describe("Linear install intents", () => {
     const token = intentFrom(installLink({ projectId: "project-1", slackUserId: "U1" }));
     vi.advanceTimersByTime(11 * 60 * 1000);
     expect(readIntent(token)).toBeNull();
-    expect(readIntent(token, { allowExpired: true })).toEqual({ projectId: "project-1", slackUserId: "U1" });
+    expect(readIntent(token, { allowExpired: true })).toEqual({ projectId: "project-1", slackUserId: "U1", responseUrl: null });
   });
 });

@@ -5,10 +5,12 @@ import {
   handleConnectSubmission,
   handleTeamPick,
   INSTALL_ACTION_ID,
+  OPEN_LINEAR_ACTION_ID,
   openConnectModal,
   PICK_TEAM_ACTION_ID,
   refresh,
   selectedTeam,
+  startInstall,
 } from "../linear/status.ts";
 import { logger } from "../log.ts";
 import { preselectedLevels, resolveEscalation } from "../memory/classifier.ts";
@@ -21,6 +23,7 @@ const OWNED_ACTIONS = new Set([
   "linear_connect",
   "linear_disconnect",
   INSTALL_ACTION_ID,
+  OPEN_LINEAR_ACTION_ID,
   PICK_TEAM_ACTION_ID,
   FEEDBACK_ACTION_ID,
   REMOVE_ACTION_ID,
@@ -55,13 +58,16 @@ async function handleBlockActions(payload: Record<string, any>) {
     case "linear_disconnect": {
       await disconnect(action.value);
       const project = await getProject(action.value);
-      if (project) await refresh(payload.response_url, project, payload.user?.id ?? null);
+      if (project) await refresh(payload.response_url, project);
       return;
     }
     case PICK_TEAM_ACTION_ID:
       await handleTeamPick(payload.user?.id, action.block_id ?? "", action.selected_option?.value ?? "", payload.response_url ?? null);
       return;
     case INSTALL_ACTION_ID:
+      await startInstall(payload.user?.id, action.value, payload.response_url ?? null);
+      return;
+    case OPEN_LINEAR_ACTION_ID:
       return;
   }
   if (!channelId || !botTs) return;

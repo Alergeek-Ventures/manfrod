@@ -21,6 +21,7 @@ export interface LinearTokens {
 export interface InstallIntent {
   projectId: string;
   slackUserId: string;
+  responseUrl?: string | null;
 }
 
 const INTENT_TTL_MS = 10 * 60 * 1000;
@@ -43,7 +44,7 @@ export function readIntent(token: string | null | undefined, { allowExpired = fa
   if (expected.length !== given.length || !timingSafeEqual(expected, given)) return null;
   const data = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as InstallIntent & { exp: number };
   if (!allowExpired && data.exp < Date.now()) return null;
-  return { projectId: data.projectId, slackUserId: data.slackUserId };
+  return { projectId: data.projectId, slackUserId: data.slackUserId, responseUrl: data.responseUrl ?? null };
 }
 
 export function authorizeUrl(state: string): string | null {

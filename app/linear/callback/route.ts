@@ -33,7 +33,7 @@ export async function GET(request: Request) {
     teams.value.map((team) => team.id),
     user?.id ?? null,
   );
-  await finishInstall(intent.slackUserId, intent.projectId, installation.id, identity.value.organizationName, teams.value);
+  await finishInstall(intent, installation.id, identity.value.organizationName, teams.value);
   return linearPage(
     `Aplikacja Manfrod jest zainstalowana w ${identity.value.organizationName}. Szczegóły dostaniesz na Slacku — możesz zamknąć tę kartę.`,
   );
