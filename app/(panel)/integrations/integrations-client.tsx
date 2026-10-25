@@ -69,13 +69,14 @@ function ProviderCard({
         <ProviderLogo provider={provider} />
         <div className="flex min-w-0 flex-col gap-1">
           <CardTitle className="truncate">{provider.name}</CardTitle>
-          <div>
-            <StatusBadge status={status} mock={provider.mock} />
-          </div>
+          <CardDescription className="truncate">{provider.custom ? "Custom MCP server" : "MCP server"}</CardDescription>
         </div>
+        <CardAction className="ml-auto shrink-0">
+          <StatusBadge status={status} mock={provider.mock} />
+        </CardAction>
       </CardHeader>
       {!provider.mock && (
-        <CardFooter className="gap-2">
+        <CardFooter className="mt-auto gap-2">
           <Button
             size="sm"
             variant={active ? "outline" : "default"}
@@ -200,11 +201,15 @@ function KalafiorniaCard({
         </Avatar>
         <div className="flex min-w-0 flex-col gap-1">
           <CardTitle>Kalafiornia App</CardTitle>
-          <CardDescription className="truncate">{connection ? `Connected as ${connection.email}` : "Office door access"}</CardDescription>
+          <CardDescription className="truncate" title={connection?.email}>
+            {connection ? `Connected as ${connection.email}` : "Office door access"}
+          </CardDescription>
         </div>
-        <CardAction>{connection ? <Badge>Connected</Badge> : <Badge variant="outline">Not connected</Badge>}</CardAction>
+        <CardAction className="ml-auto shrink-0">
+          {connection ? <Badge>Connected</Badge> : <Badge variant="outline">Not connected</Badge>}
+        </CardAction>
       </CardHeader>
-      <CardFooter className="flex-col items-stretch gap-4">
+      <CardFooter className="mt-auto flex-col items-stretch gap-4">
         {step === "status" && (
           <div className="flex gap-2">
             <Button size="sm" variant={connection ? "outline" : "default"} onClick={() => setStep("email")}>
@@ -285,13 +290,13 @@ const CALENDAR_STATES: Record<CalendarStatus, { badge: React.ReactNode; descript
   connected: { badge: <Badge>Connected</Badge>, description: (email) => `Connected as ${email ?? "your Google account"}` },
   expired: {
     badge: <Badge variant="destructive">Expired</Badge>,
-    description: () => "Google no longer accepts the saved access. Reconnect to let Manfrod read your calendar again.",
+    description: () => "Access expired, reconnect to keep it working",
   },
   missing_scope: {
     badge: <Badge variant="destructive">No calendar access</Badge>,
-    description: () => "You signed in without calendar access. Reconnect and allow it.",
+    description: () => "Calendar access wasn't granted",
   },
-  not_connected: { badge: <Badge variant="outline">Not connected</Badge>, description: () => "Lets Manfrod read your calendar events" },
+  not_connected: { badge: <Badge variant="outline">Not connected</Badge>, description: () => "Lets Manfrod read your calendar" },
 };
 
 function GoogleCalendarCard({ status, email }: { status: CalendarStatus; email: string | null }) {
@@ -301,17 +306,20 @@ function GoogleCalendarCard({ status, email }: { status: CalendarStatus; email: 
     <Card>
       <CardHeader className="flex items-center gap-3">
         <Avatar className="size-10 rounded-lg">
+          <AvatarImage src="/images/integrations/google-calendar.png" alt="" className="object-contain p-1.5" />
           <AvatarFallback className="rounded-lg">
             <CalendarIcon />
           </AvatarFallback>
         </Avatar>
         <div className="flex min-w-0 flex-col gap-1">
           <CardTitle>Google Calendar</CardTitle>
-          <CardDescription>{state.description(email)}</CardDescription>
+          <CardDescription className="truncate" title={state.description(email)}>
+            {state.description(email)}
+          </CardDescription>
         </div>
-        <CardAction>{state.badge}</CardAction>
+        <CardAction className="ml-auto shrink-0">{state.badge}</CardAction>
       </CardHeader>
-      <CardFooter>
+      <CardFooter className="mt-auto">
         <Button
           size="sm"
           variant={status === "connected" ? "outline" : "default"}
