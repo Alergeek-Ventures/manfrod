@@ -132,6 +132,7 @@ export const projectMemberships = pgTable("project_memberships", {
 	projectId: uuid("project_id").notNull(),
 	source: varchar({ length: 255 }).default('auto_detected').notNull(),
 	insertedAt: timestamp("inserted_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
+	removedAt: timestamp("removed_at", { mode: 'date' }),
 }, (table) => [
 	index().using("btree", table.projectId.asc().nullsLast().op("uuid_ops")),
 	uniqueIndex().using("btree", table.userId.asc().nullsLast().op("uuid_ops"), table.projectId.asc().nullsLast().op("uuid_ops")),
