@@ -22,45 +22,46 @@ const say = (userId: string, sessionKey: string, role: "user" | "assistant", con
 describe.skipIf(!enabled)("welcome souls", () => {
   beforeEach(() => generateText.mockReset());
 
-  it("reads only the first day of DMs", async () => {
+  it("reads only the first DM thread", async () => {
     const user = await insertUser();
     const start = new Date(Date.UTC(2026, 6, 16, 6));
-    await say(user.id, "D1", "user", "jestem fullstack programista", start);
-    await say(user.id, "D1", "assistant", "super, jak mam do ciebie mowic?", new Date(start.getTime() + HOUR));
+    await say(user.id, "D1:1", "user", "jestem fullstack programista", start);
+    await say(user.id, "D1:1", "assistant", "super, jak mam do ciebie mowic?", new Date(start.getTime() + HOUR));
     await say(user.id, "C1:1", "user", "deploy na piatek", new Date(start.getTime() + 2 * HOUR));
-    await say(user.id, "D2", "user", "przypomnij mi o spotkaniu", new Date(start.getTime() + 30 * HOUR));
+    await say(user.id, "D1:2", "user", "przypomnij mi o spotkaniu", new Date(start.getTime() + 3 * HOUR));
+    await say(user.id, "D1:1", "user", "mow do mnie luzno", new Date(start.getTime() + 30 * HOUR));
 
     const transcript = await welcomeTranscript(user.id);
     expect(transcript).toContain("Person: jestem fullstack programista");
     expect(transcript).toContain("Manfrod: super");
+    expect(transcript).toContain("Person: mow do mnie luzno");
     expect(transcript).not.toContain("deploy");
     expect(transcript).not.toContain("spotkaniu");
   });
 
-  it("saves a private soul after the first DM conversation of a user without one", async () => {
+  it("saves a private soul after the first DM thread of a user without one", async () => {
     const user = await insertUser();
-    const start = new Date();
-    await say(user.id, "D1", "user", "mow do mnie luzno", start);
+    await say(user.id, "D1:1", "user", "mow do mnie luzno", new Date());
     generateText.mockResolvedValue({ text: "Jestem luźnym kumplem Oli." });
 
-    const soul = await welcomeSoulAfterConversation(user.id, "Ola", start);
+    const soul = await welcomeSoulAfterConversation(user.id, "Ola", "D1:1");
     expect(soul?.access).toEqual([privateLevel(user.id)]);
     expect((await getSoul(user.id))?.content).toBe("Jestem luźnym kumplem Oli.");
     expect(await needsWelcomeSoul(user.id)).toBe(false);
 
-    expect(await welcomeSoulAfterConversation(user.id, "Ola", start)).toBeNull();
+    expect(await welcomeSoulAfterConversation(user.id, "Ola", "D1:1")).toBeNull();
     expect(generateText).toHaveBeenCalledOnce();
   });
 
-  it("leaves users alone after their first DM day or when they shared nothing", async () => {
+  it("leaves users alone in later threads or when they shared nothing", async () => {
     const user = await insertUser();
-    const start = new Date(Date.now() - 48 * HOUR);
-    await say(user.id, "D1", "user", "siema", start);
-    expect(await welcomeSoulAfterConversation(user.id, null, new Date())).toBeNull();
+    await say(user.id, "D1:1", "user", "siema", new Date(Date.now() - HOUR));
+    await say(user.id, "D1:2", "user", "jestem Ola", new Date());
+    expect(await welcomeSoulAfterConversation(user.id, null, "D1:2")).toBeNull();
     expect(generateText).not.toHaveBeenCalled();
 
     generateText.mockResolvedValue({ text: "NONE" });
-    expect(await welcomeSoulAfterConversation(user.id, null, start)).toBeNull();
+    expect(await welcomeSoulAfterConversation(user.id, null, "D1:1")).toBeNull();
     expect(await getSoul(user.id)).toBeNull();
   });
 });

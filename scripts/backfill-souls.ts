@@ -2,7 +2,7 @@ import { parseArgs } from "node:util";
 import { isSystemUser, listUsers } from "../lib/accounts.ts";
 import { pool } from "../lib/db/index.ts";
 import { getSoul } from "../lib/memory/nodes.ts";
-import { draftWelcomeSoul, needsWelcomeSoul, saveWelcomeSoul } from "../lib/memory/souls.ts";
+import { draftSoul, needsWelcomeSoul, saveWelcomeSoul } from "../lib/memory/souls.ts";
 
 const { values } = parseArgs({ options: { apply: { type: "boolean", default: false }, user: { type: "string" } } });
 const filter = values.user?.toLowerCase();
@@ -17,7 +17,7 @@ for (const user of users) {
     summary.skipped += 1;
     continue;
   }
-  const draft = await draftWelcomeSoul(user.id, user.name);
+  const draft = await draftSoul(user.id, user.name);
   if (!draft) {
     summary.skipped += 1;
     continue;
