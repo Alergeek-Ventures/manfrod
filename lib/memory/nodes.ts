@@ -1,10 +1,10 @@
 import { and, asc, count, desc, eq, gte, inArray, isNotNull, isNull, lt, lte, notInArray, or, sql, type SQL } from "drizzle-orm";
 import { unionAll } from "drizzle-orm/pg-core";
 import { db, tables } from "../db/index.ts";
-import type { Link, Node, User } from "../db/schema.ts";
+import type { Link, Node } from "../db/schema.ts";
 import { emit } from "../events/index.ts";
 import { isUuid } from "../accounts.ts";
-import { accessEquals, accessOverlaps, isPrivate } from "./access.ts";
+import { accessEquals, accessOverlaps, isPrivate, privateLevel } from "./access.ts";
 
 const { nodes, links, users, projects } = tables;
 
@@ -186,7 +186,15 @@ export async function updateNodeAccessible(readableLevels: string[], nodeId: str
   return node ? applyUpdate(node, attrs, node.userId) : null;
 }
 
-export type DeleteResult = { ok: true; node: Node } | { ok: false; error: "not_found" | "soul" };
+export type DeleteResult = { ok: true; node: Node } | { ok: false; error: "not_found" | "soul" | "forbidden" };
+
+export interface Actor {
+  userId: string;
+  readableLevels: string[];
+}
+
+export const canModify = (node: Pick<Node, "userId">, actor: Actor) =>
+  node.userId === actor.userId || actor.readableLevels.includes("internal");
 
 async function removeNode(node: Node, eventUserId: string | null): Promise<DeleteResult> {
   if (await isSoul(node.id)) return { ok: false, error: "soul" };
@@ -195,9 +203,11 @@ async function removeNode(node: Node, eventUserId: string | null): Promise<Delet
   return { ok: true, node };
 }
 
-export async function deleteNode(userId: string, nodeId: string): Promise<DeleteResult> {
-  const node = await getNode(userId, nodeId);
-  return node ? removeNode(node, userId) : { ok: false, error: "not_found" };
+export async function deleteNodeAs(actor: Actor, nodeId: string): Promise<DeleteResult> {
+  const node = await getNodeAccessible(actor.readableLevels, nodeId);
+  if (!node) return { ok: false, error: "not_found" };
+  if (!canModify(node, actor)) return { ok: false, error: "forbidden" };
+  return removeNode(node, actor.userId);
 }
 
 export async function deleteNodeAccessible(readableLevels: string[], nodeId: string): Promise<DeleteResult> {
@@ -231,15 +241,19 @@ export async function createLink(
   return { ok: true };
 }
 
-export async function deleteLink(userId: string, nodeAId: string, nodeBId: string): Promise<Link | null> {
-  if (!isUuid(nodeAId) || !isUuid(nodeBId)) return null;
+export type UnlinkResult = { ok: true; link: Link } | { ok: false; error: "not_found" | "forbidden" };
+
+export async function deleteLinkAs(actor: Actor, nodeAId: string, nodeBId: string): Promise<UnlinkResult> {
+  if (!isUuid(nodeAId) || !isUuid(nodeBId)) return { ok: false, error: "not_found" };
   const [a, b] = orderPair(nodeAId, nodeBId);
-  const owned = await db
-    .select({ id: nodes.id })
+  const ends = await db
+    .select({ id: nodes.id, userId: nodes.userId })
     .from(nodes)
-    .where(and(eq(nodes.userId, userId), inArray(nodes.id, [a, b])));
-  if (new Set(owned.map((row) => row.id)).size !== 2) return null;
-  return removeLink(userId, a, b);
+    .where(and(inArray(nodes.id, [a, b]), accessOverlaps(nodes.access, actor.readableLevels)));
+  if (new Set(ends.map((row) => row.id)).size !== 2) return { ok: false, error: "not_found" };
+  if (!ends.every((end) => canModify(end, actor))) return { ok: false, error: "forbidden" };
+  const link = await removeLink(actor.userId, a, b);
+  return link ? { ok: true, link } : { ok: false, error: "not_found" };
 }
 
 export async function deleteLinkAccessible(readableLevels: string[], nodeAId: string, nodeBId: string): Promise<Link | null> {
@@ -500,62 +514,51 @@ export async function getGraphData(
   };
 }
 
-export async function getSoul(userId: string | null = null): Promise<Node | null> {
-  if (userId === null) {
-    const [row] = await db
-      .select({ node: nodes })
-      .from(nodes)
-      .innerJoin(users, eq(users.soulNodeId, nodes.id))
-      .orderBy(asc(nodes.insertedAt))
-      .limit(1);
-    return row?.node ?? null;
-  }
+const ownSoul = () =>
+  and(eq(nodes.id, users.soulNodeId), eq(nodes.userId, users.id), sql`${nodes.access} = ARRAY['private/' || ${users.id}::text]::varchar[]`);
 
-  const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
-  if (!user) return null;
-  if (user.soulNodeId === null) return adoptFirstNode(user);
-  const node = await getNodeById(user.soulNodeId);
-  return node ?? adoptFirstNode(user);
-}
-
-async function adoptFirstNode(user: User): Promise<Node | null> {
-  if (user.slackId.startsWith("system:")) return null;
-  const [first] = await db.select().from(nodes).where(eq(nodes.userId, user.id)).orderBy(asc(nodes.insertedAt), asc(nodes.id)).limit(1);
-  if (first) await db.update(users).set({ soulNodeId: first.id }).where(eq(users.id, user.id));
-  return first ?? null;
-}
-
-export async function hasSoul(userId: string): Promise<boolean> {
-  return (await getSoul(userId)) !== null;
+export async function getSoul(userId: string): Promise<Node | null> {
+  if (!isUuid(userId)) return null;
+  const [row] = await db.select({ node: nodes }).from(users).innerJoin(nodes, ownSoul()).where(eq(users.id, userId)).limit(1);
+  return row?.node ?? null;
 }
 
 export async function isSoul(nodeId: string): Promise<boolean> {
   if (!isUuid(nodeId)) return false;
-  const rows = await db.select({ id: users.id }).from(users).where(eq(users.soulNodeId, nodeId)).limit(1);
+  const rows = await db.select({ id: nodes.id }).from(users).innerJoin(nodes, ownSoul()).where(eq(nodes.id, nodeId)).limit(1);
   return rows.length > 0;
 }
 
 export async function soulNodeIds(): Promise<Set<string>> {
-  const rows = await db.select({ id: users.soulNodeId }).from(users).where(isNotNull(users.soulNodeId));
-  return new Set(rows.map((row) => row.id!));
+  const rows = await db.select({ id: nodes.id }).from(users).innerJoin(nodes, ownSoul());
+  return new Set(rows.map((row) => row.id));
 }
 
-export async function setSoul(userId: string, nodeId: string): Promise<Node | null> {
-  const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
-  const node = await getNodeById(nodeId);
-  if (!user || !node) return null;
-  await db.update(users).set({ soulNodeId: node.id }).where(eq(users.id, user.id));
-  return node;
+export const SOUL_LINK_LIMIT = 12;
+
+export interface SoulAnchor {
+  soul: Node;
+  linked: Node[];
+  more: number;
 }
 
-export async function updateSoul(userId: string, content: string, embedding: number[], access: string[]): Promise<Node> {
+export async function getSoulAnchor(userId: string, readableLevels: string[]): Promise<SoulAnchor | null> {
+  const soul = await getSoul(userId);
+  if (!soul) return null;
+  const linked = (await getNodeLinksAccessible(readableLevels, soul.id))
+    .filter((node) => node.userId === userId)
+    .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
+  return { soul, linked: linked.slice(0, SOUL_LINK_LIMIT), more: Math.max(0, linked.length - SOUL_LINK_LIMIT) };
+}
+
+export async function updateSoul(userId: string, content: string, embedding: number[]): Promise<Node> {
+  validateNode(content, undefined);
   const soul = await getSoul(userId);
   if (!soul) {
-    const node = await createNode(userId, access, { content, embedding, processedAt: nowSeconds() });
-    await setSoul(userId, node.id);
+    const node = await createNode(userId, [privateLevel(userId)], { content, embedding, processedAt: nowSeconds() });
+    await db.update(users).set({ soulNodeId: node.id }).where(eq(users.id, userId));
     return node;
   }
-  validateNode(content, undefined);
   const [updated] = await db.update(nodes).set({ content, embedding }).where(eq(nodes.id, soul.id)).returning();
   emit("memory_node_updated", {
     userId,

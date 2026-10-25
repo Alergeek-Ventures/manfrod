@@ -1,19 +1,16 @@
 import { getUser } from "../accounts.ts";
 import { healthy } from "../db/index.ts";
-import { getNodeLinksAccessible, getSoul } from "../memory/nodes.ts";
+import { getSoulAnchor, type SoulAnchor } from "../memory/nodes.ts";
 import { placeholder, secretNames } from "../secrets.ts";
 import { localIsoWithOffset, isoWeek, localToday, offsetMinutes, weekdayName, zoneAbbreviation, TIMEZONE } from "../time.ts";
-import { SOUL_BASE_PROMPT, SYSTEM_PROMPT } from "./prompts.ts";
+import { SOUL_BASE_PROMPT, SOUL_ONBOARDING_PROMPT, SYSTEM_PROMPT } from "./prompts.ts";
 
-async function soulContext(userId: string, readableLevels: string[]): Promise<string> {
-  const soul = await getSoul(userId);
-  if (!soul) return "";
+function soulContext({ soul, linked, more }: SoulAnchor): string {
   const sections = [`[Soul - Entrypoint to your notes graph]\n${soul.content}\n`];
-  const linked = (await getNodeLinksAccessible(readableLevels, soul.id)).filter((node) => node.userId === userId);
   if (linked.length > 0) {
-    sections.push(
-      `[Linked Notes - expanding the entrypoint]\n${linked.map((node) => `- [${node.id}] ${node.content.slice(0, 200)}`).join("\n")}\n`,
-    );
+    const lines = linked.map((node) => `- [${node.id}] ${node.content.slice(0, 200)}`);
+    if (more > 0) lines.push(`- ...and ${more} older linked note(s): get-note ${soul.id} lists them all`);
+    sections.push(`[Linked Notes - expanding the entrypoint]\n${lines.join("\n")}\n`);
   }
   return sections.join("\n\n");
 }
@@ -58,9 +55,9 @@ async function currentContext(userId: string, sessionKey: string | null): Promis
 
 export async function buildSystemPrompt(userId: string, sessionKey: string | null, readableLevels: string[]): Promise<string> {
   if (!(await healthy())) return SYSTEM_PROMPT + SOUL_BASE_PROMPT;
-  const context = await soulContext(userId, readableLevels);
-  const soul = await getSoul(userId);
-  const base = soul ? `${context}\n\n${SYSTEM_PROMPT}` : `${context}\n\n${SYSTEM_PROMPT}${SOUL_BASE_PROMPT}`;
+  const anchor = await getSoulAnchor(userId, readableLevels);
+  const onboarding = isDmSession(sessionKey) ? SOUL_ONBOARDING_PROMPT : "";
+  const base = anchor ? `${soulContext(anchor)}\n\n${SYSTEM_PROMPT}` : `${SYSTEM_PROMPT}${SOUL_BASE_PROMPT}${onboarding}`;
   const secrets = await secretsText();
   return `${base}\n\n${await currentContext(userId, sessionKey)}${secrets ? `\n\n${secrets}` : ""}`;
 }

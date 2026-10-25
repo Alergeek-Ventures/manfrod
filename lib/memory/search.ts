@@ -4,12 +4,15 @@ import type { Node } from "../db/schema.ts";
 import { emit } from "../events/index.ts";
 import { embed, rerank } from "../voyage.ts";
 import { accessOverlaps } from "./access.ts";
-import { getNodeLinksAccessible, getSoul } from "./nodes.ts";
+import { getSoulAnchor } from "./nodes.ts";
 import { expand } from "./query-expander.ts";
 
 const { nodes, links } = tables;
 
 export const RELEVANCE_THRESHOLD = 0.4;
+export const RERANK_THRESHOLD = 0.25;
+const NOTE_CONTEXT_CHARS = 6_000;
+const NOTE_CHARS = 600;
 const RRF_K = 60;
 
 type Scored = { node: Node; distance: number };
@@ -194,12 +197,13 @@ export async function search(
     minDistances.set(node.id, current === undefined ? distance : Math.min(current, distance));
   }
 
-  const filtered = reranked
-    .filter((node) => {
-      const distance = minDistances.get(node.id);
-      return distance === undefined || distance <= RELEVANCE_THRESHOLD;
-    })
-    .slice(0, limit);
+  const rerankScore = new Map(rerankScores.map((entry) => [entry.node_id, entry.score]));
+  const relevant = (node: Node) => {
+    if (rerankScores.length > 0) return (rerankScore.get(node.id) ?? 0) >= RERANK_THRESHOLD;
+    const distance = minDistances.get(node.id);
+    return distance === undefined || distance <= RELEVANCE_THRESHOLD;
+  };
+  const filtered = reranked.filter(relevant).slice(0, limit);
 
   const results = await expandWithLinks(filtered, readableLevels, limit * 2);
 
@@ -218,6 +222,7 @@ export async function search(
         filtered: filtered.length,
         final: results.length,
         relevance_threshold: RELEVANCE_THRESHOLD,
+        rerank_threshold: RERANK_THRESHOLD,
         rerank_enabled: rerankEnabled,
         rerank_ran: rerankRan,
         expand_query_enabled: expandQuery,
@@ -228,10 +233,18 @@ export async function search(
   return results;
 }
 
-export function buildContext(items: Node[]): string {
-  if (items.length === 0) return "";
-  const lines = items.map((node) => `- [${node.id}] ${node.content}`).join("\n");
-  return `Relevant memories (use recall_memory to search for more, get_memory to fetch by ID):\n${lines}`.trim();
+export function buildContext(items: Node[], budget = NOTE_CONTEXT_CHARS): string {
+  const lines: string[] = [];
+  let used = 0;
+  for (const node of items) {
+    const content = node.content.length > NOTE_CHARS ? `${node.content.slice(0, NOTE_CHARS)}…` : node.content;
+    const line = `- [${node.id}] ${content}`;
+    if (used + line.length > budget) break;
+    lines.push(line);
+    used += line.length;
+  }
+  if (lines.length === 0) return "";
+  return `Relevant memories, most relevant first (search-notes finds more, get-note shows a note in full):\n${lines.join("\n")}`;
 }
 
 export async function getNoteContext(
@@ -240,15 +253,10 @@ export async function getNoteContext(
   query: string,
   projectId: string | null = null,
 ): Promise<string> {
-  const anchored = async () => {
-    const soul = await getSoul(userId);
-    if (!soul) return [];
-    const linked = await getNodeLinksAccessible(readableLevels, soul.id);
-    return [soul, ...linked.filter((node) => node.userId === userId)];
-  };
-  const [soulNodes, relevant] = await Promise.all([anchored(), search(userId, readableLevels, query, { limit: 10, projectId })]);
-
-  const seen = new Set<string>();
-  const combined = [...soulNodes, ...relevant].filter((node) => (seen.has(node.id) ? false : (seen.add(node.id), true)));
-  return buildContext(combined);
+  const [anchor, relevant] = await Promise.all([
+    getSoulAnchor(userId, readableLevels),
+    search(userId, readableLevels, query, { limit: 10, projectId }),
+  ]);
+  const inSystemPrompt = new Set(anchor ? [anchor.soul.id, ...anchor.linked.map((node) => node.id)] : []);
+  return buildContext(relevant.filter((node) => !inSystemPrompt.has(node.id)));
 }

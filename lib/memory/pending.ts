@@ -16,9 +16,9 @@ export interface Flag {
 
 export type PendingOp =
   | { op: "escalate"; node_id: string; level: string; readable_levels: string[] }
-  | { op: "delete"; node_id: string; user_id: string }
+  | { op: "delete"; node_id: string; user_id: string; readable_levels?: string[] }
   | { op: "link"; a: string; b: string; user_id: string }
-  | { op: "unlink"; a: string; b: string; user_id: string };
+  | { op: "unlink"; a: string; b: string; user_id: string; readable_levels?: string[] };
 
 const expiry = (ttl: number) => new Date(Date.now() + ttl);
 
@@ -46,17 +46,30 @@ export async function addOp(channelId: string, ts: string, op: PendingOp) {
     });
 }
 
-export async function take(
-  channelId: string | null | undefined,
-  ts: string | null | undefined,
-): Promise<{ flag: Flag | null; ops: PendingOp[] }> {
-  if (!channelId || !ts) return { flag: null, ops: [] };
-  const [row] = await db
-    .delete(memoryPendingOps)
-    .where(and(eq(memoryPendingOps.channelId, channelId), eq(memoryPendingOps.ts, ts)))
-    .returning();
-  if (!row || row.expiresAt < new Date()) return { flag: null, ops: [] };
+export interface Pending {
+  flag: Flag | null;
+  ops: PendingOp[];
+}
+
+const NONE: Pending = { flag: null, ops: [] };
+
+function toPending(row: typeof memoryPendingOps.$inferSelect | undefined): Pending {
+  if (!row || row.expiresAt < new Date()) return NONE;
   return { flag: (row.flag as Flag | null) ?? null, ops: row.ops as PendingOp[] };
+}
+
+const pendingKey = (channelId: string, ts: string) => and(eq(memoryPendingOps.channelId, channelId), eq(memoryPendingOps.ts, ts));
+
+export async function peek(channelId: string | null | undefined, ts: string | null | undefined): Promise<Pending> {
+  if (!channelId || !ts) return NONE;
+  const [row] = await db.select().from(memoryPendingOps).where(pendingKey(channelId, ts)).limit(1);
+  return toPending(row);
+}
+
+export async function take(channelId: string | null | undefined, ts: string | null | undefined): Promise<Pending> {
+  if (!channelId || !ts) return NONE;
+  const [row] = await db.delete(memoryPendingOps).where(pendingKey(channelId, ts)).returning();
+  return toPending(row);
 }
 
 export interface ConfirmationPayload {
