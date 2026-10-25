@@ -2,14 +2,8 @@ import { getUser } from "../accounts.ts";
 import { healthy } from "../db/index.ts";
 import { getNodeLinksAccessible, getSoul } from "../memory/nodes.ts";
 import { placeholder, secretNames } from "../secrets.ts";
-import { catalogText } from "../skills.ts";
-import { capabilitiesText } from "../tools/index.ts";
 import { localIsoWithOffset, isoWeek, localToday, offsetMinutes, weekdayName, zoneAbbreviation, TIMEZONE } from "../time.ts";
-import { SOUL_BASE_PROMPT, SYSTEM_PROMPT_INTRO, SYSTEM_PROMPT_REST } from "./prompts.ts";
-
-function fullSystemPrompt(): string {
-  return `${SYSTEM_PROMPT_INTRO}\n## Your Capabilities\n${capabilitiesText()}\n\n${SYSTEM_PROMPT_REST}`;
-}
+import { SOUL_BASE_PROMPT, SYSTEM_PROMPT } from "./prompts.ts";
 
 async function soulContext(userId: string, readableLevels: string[]): Promise<string> {
   const soul = await getSoul(userId);
@@ -54,7 +48,7 @@ async function currentContext(userId: string, sessionKey: string | null): Promis
     const [channel, threadTs] = sessionKey.split(":");
     userLine =
       '\nThis is a shared channel thread — multiple people participate. Each user message is prefixed with its author ("[from: Full Name <slack_id>]" — the <slack_id> is a unique identifier, not part of the name; use it to tell apart people who share a name). Address the right person; don\'t assume there is a single "the user".' +
-      `\nYou are in Slack channel ${channel}, thread_ts ${threadTs}. read_slack_thread with no arguments reads this thread, read_slack_channel with no arguments reads this channel.`;
+      `\nYou are in Slack channel ${channel}, thread_ts ${threadTs}. read-slack-thread with no arguments reads this thread, read-slack-channel with no arguments reads this channel.`;
   } else {
     const user = await getUser(userId);
     if (user?.name) userLine = `\nUser: ${user.name}`;
@@ -63,13 +57,12 @@ async function currentContext(userId: string, sessionKey: string | null): Promis
 }
 
 export async function buildSystemPrompt(userId: string, sessionKey: string | null, readableLevels: string[]): Promise<string> {
-  if (!(await healthy())) return fullSystemPrompt() + SOUL_BASE_PROMPT;
+  if (!(await healthy())) return SYSTEM_PROMPT + SOUL_BASE_PROMPT;
   const context = await soulContext(userId, readableLevels);
   const soul = await getSoul(userId);
-  const base = soul ? `${context}\n\n${fullSystemPrompt()}` : `${context}\n\n${fullSystemPrompt()}${SOUL_BASE_PROMPT}`;
-  const catalog = catalogText();
+  const base = soul ? `${context}\n\n${SYSTEM_PROMPT}` : `${context}\n\n${SYSTEM_PROMPT}${SOUL_BASE_PROMPT}`;
   const secrets = await secretsText();
-  return `${base}\n\n${await currentContext(userId, sessionKey)}${catalog ? `\n\n${catalog}` : ""}${secrets ? `\n\n${secrets}` : ""}`;
+  return `${base}\n\n${await currentContext(userId, sessionKey)}${secrets ? `\n\n${secrets}` : ""}`;
 }
 
 export async function skillRunnerPrompt(): Promise<string> {

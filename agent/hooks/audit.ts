@@ -6,7 +6,7 @@ import { EVENTS, sendEvent } from "../../lib/inngest/client.ts";
 import { cost } from "../../lib/pricing.ts";
 import { createMessage } from "../../lib/memory/messages.ts";
 import { logger } from "../../lib/log.ts";
-import { toolCtx, type ToolCtx } from "../../lib/tools/context.ts";
+import { toolCtx, type ToolCtx } from "../../lib/agent/context.ts";
 
 const log = logger("Agent.Server");
 const actionIds = new Map<string, string>();

@@ -1,0 +1,81 @@
+---
+name: leave-digest
+description: Daily 18:00 (Sun-Thu) digest of who has tomorrow off, with a short note on their absence where known, posted automatically to a fixed channel. Not for on-demand use — SkillSchedulerWorker/SkillRunner triggers this autonomously and feeds you this file's body directly as instructions.
+cron: "0 18 * * 0-4"
+channel: "C087QF130R3"
+---
+
+# Leave digest (cron skill)
+
+You're running on a schedule (18:00 Europe/Warsaw, Sun-Thu — so the report
+covers Mon-Fri, the evening before), not replying to a message — there's no
+user to ask questions or wait for. Just do this:
+
+1. Work out tomorrow's date from the current time given in your system
+   prompt.
+2. Call `list-facts` with prefix `"absence:"` to get every recorded
+   absence/vacation.
+3. Keep only the ones whose date range (the `start..end` part before the
+   ` — `) covers tomorrow's date.
+4. If none cover tomorrow, reply with exactly `EMPTY` — don't post "no one is
+   off tomorrow" every evening.
+5. Otherwise, for each person covered, call `search-notes` with their full
+   name (e.g. "Jan Kowalski") to see if there's any extra context worth a
+   one-line mention (destination, "back on X", etc.) beyond the bare date
+   range. Only use it if it's clearly about the same absence — don't guess
+   or invent details that aren't there. If notes contradict each other, the
+   most recent one wins: it is usually someone correcting an earlier digest.
+6. Not every absence record means a day off. Read what the record and notes
+   actually say:
+   - a day off / vacation / sick leave → the person is off ("nie będzie",
+     "ma wolne", "jest na urlopie")
+   - a business trip, a client visit, a conference, working remotely from
+     somewhere → the person is WORKING, just not in the office. Say exactly
+     that ("Jan Kowalski jest jutro u klienta w Sztokholmie i pracuje
+     zdalnie"), never "urlop", "wolne" or "nie będzie"
+   - if the record doesn't say which it is, don't assume vacation: say they
+     won't be in the office ("Jana Kowalskiego nie będzie jutro w biurze")
+   - a record or newer note saying the absence was called off ("odwołany",
+     "anulowany", "będzie jednak") → the person is in the office; leave them
+     out entirely, and if that leaves nobody, reply with exactly `EMPTY`
+   Copy proper names (clients, companies, places) exactly as they are
+   spelled in the record or notes. Never "correct" a name that looks like a
+   typo or a more familiar word.
+7. CRITICAL — your reply is posted to Slack completely verbatim, character
+   for character, with no cleanup on the way out. There is no separate
+   "thinking" channel: whatever you write is what gets posted. This means:
+   - Do NOT write any reasoning/analysis before the message, even one
+     sentence of it. Banned patterns (real examples of what went wrong
+     before, do not repeat this shape): "The user ID ... is ...", "the fact
+     text says ... which seems like a placeholder", "No extra context found
+     via notes", "Let me write the reply", "So tomorrow ... has a day off".
+   - Do NOT narrate tool calls ("Posting the digest:", "I checked...").
+   - Work everything out silently. Then write ONLY the final Polish
+     sentence(s) described below — literally nothing before or after it.
+     If you notice yourself reasoning in plain sentences, stop, discard it,
+     and write only the actual message.
+8. Always write in Polish, one language only, never mix in English.
+9. Write like a person, not a data dump — the whole reply is ONE flowing
+   paragraph (one or two sentences), never a list, never one line per
+   person, no bullets/dashes and no raw `YYYY-MM-DD..YYYY-MM-DD` ranges:
+   - Name everyone who's off in that same sentence, then weave in whatever
+     extra context you found for each of them, right there in the sentence
+     — don't break people onto separate lines just because one of them has
+     more context than another.
+   - Always use full names — first name and surname, exactly as they appear
+     in the absence fact ("nie będzie Kamila Marczaka"), never the bare
+     first name. Two people share a first name often enough that "nie będzie
+     Kamila" leaves the reader guessing. Use the full name on every mention,
+     including a later one in the same sentence.
+   - Skip dates entirely for a plain single day off (it's already "jutro").
+     Only mention a return date/duration for someone if you actually know
+     it from the fact, phrased naturally ("wraca 5 sierpnia", "jeszcze
+     przez tydzień") — never the raw range.
+   - Examples of the tone to match:
+     - "Jutro nie będzie Kamila Marczaka i Natalii Wójcik — Kamil Marczak
+       dalej na wakacjach we Włoszech, a Natalia Wójcik ma zwykły dzień
+       wolny."
+     - "Jutro wszyscy w pracy jak zwykle." (only if you had something to
+       report at all — remember step 4 already covers the fully-silent
+       case)
+     - "Jutro Anna Kowalska ma wolne, wraca 5 sierpnia."

@@ -1,6 +1,6 @@
 import { defineDynamic, defineInstructions } from "eve/instructions";
 import { buildSystemPrompt, skillRunnerPrompt } from "../../lib/agent/system-prompt.ts";
-import { toolCtx } from "../../lib/tools/context.ts";
+import { toolCtx } from "../../lib/agent/context.ts";
 
 export default defineDynamic({
   events: {

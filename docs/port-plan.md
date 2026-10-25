@@ -44,13 +44,15 @@ Inngest calls `http://app:35233/api/inngest`, which Next forwards to the eve
 ```
 agent/                 eve agent root
   agent.ts             model, context window, build externals
-  instructions/        dynamic system prompt (soul, notes, capabilities, context, skills)
+  instructions/        dynamic system prompt (soul, notes, context, secrets)
   channels/slack.ts    Slack hooks, renderer, interactivity/slash-command/shortcut wrapper
   channels/jobs.ts     Inngest serve endpoint (/api/inngest)
   memory/notes.ts      memory slot: per-turn "[Note context]" recall
   hooks/audit.ts       audit events, LLM usage, assistant message persistence
-  tools/               one generated file per tool (scripts/generate-tools.mjs) + dynamic MCP/Linear tools
-skills/                SKILL.md files (moved from priv/skills)
+  tools/               one file per tool (kebab-case name) + dynamic MCP/Linear tools
+  lib/                 tool helpers and the defineManfrodTool wrapper
+  skills/              native eve skills (SKILL.md), loaded with eve__skill
+  routines/            background prompts run by Inngest (cron skills, Firmowid check-ins)
 app/                   Next.js admin UI, OAuth routes, health, Inngest proxy
 components/            shared UI
 lib/                   domain code shared by agent and web
@@ -59,7 +61,6 @@ lib/                   domain code shared by agent and web
   inngest/             client, event names, functions, runtime context
   jobs/                jobs registry (enqueue/cancel/list) and job execution
   slack/               Web API, mrkdwn, routing/gate, stream, feedback, kick, interactivity
-  tools/               tool implementations and registry
   prompts/             verbatim prompts (classifier, zettelkasten, ...)
 db/migrations/         SQL migrations (0000 is the exact Ecto schema)
 db/drizzle/            output of `pnpm db:pull`
@@ -83,8 +84,8 @@ test/                  vitest (unit + DB tests behind TEST_DATABASE_URL)
 | `Agent.Server` batching / gate / catch-up / restore | `lib/slack/routing.ts` + `lib/agent/turns.ts` |
 | `Agent.ResponseGate`, `PlanTitle`, `ThreadTitle` | `lib/agent/response-gate.ts`, `lib/agent/titles.ts` |
 | `Agent.Init`, system prompt, `Soul.base_prompt` | `lib/agent/prompts.ts`, `lib/agent/system-prompt.ts` |
-| `Tools.*` | `lib/tools/*.ts`, exposed as `agent/tools/<tool_name>.ts` |
-| `Skills`, `SkillRunner` | `lib/skills.ts`, `lib/jobs/execute.ts` (skill runs are eve sessions) |
+| `Tools.*` | `agent/tools/<tool-name>.ts` |
+| `Skills`, `SkillRunner` | `agent/skills/` (on-demand), `lib/routines.ts` + `lib/jobs/execute.ts` (scheduled runs are eve sessions) |
 | `Proactive`, `TriggerWorker` | `lib/proactive.ts`, `run-job` / `proactive-send` functions |
 | `Slack.*` | `lib/slack/*.ts` |
 | `Events`, `Persister`, `Store` | `lib/events/*.ts`, `agent/hooks/audit.ts` |
@@ -198,5 +199,5 @@ decryption and the Oban import. Run it before and after the cutover.
 Skills, prompts and tools are files. eve's remote self-modification extension
 requires Vercel, so when self-hosting the next step is a worker (Claude Agent
 SDK in a container sandbox) that reads negative `message_feedback`, edits
-`skills/**`, and opens a draft PR with a GitHub App token held outside the
+`agent/skills/**` and `agent/routines/**`, and opens a draft PR with a GitHub App token held outside the
 sandbox.
