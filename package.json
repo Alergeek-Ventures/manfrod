@@ -13,6 +13,7 @@
     "db:migrate": "node scripts/with-env.mjs node scripts/migrate.mjs",
     "db:verify": "node scripts/with-env.mjs tsx scripts/verify-data.ts",
     "eval:memory": "node scripts/with-env.mjs tsx scripts/eval-memory.ts",
+    "souls:backfill": "node scripts/with-env.mjs tsx scripts/backfill-souls.ts",
     "slack:export": "node scripts/with-env.mjs tsx scripts/slack-export.ts",
     "desk-map": "node scripts/with-env.mjs tsx scripts/generate-desk-map.ts",
     "typecheck": "tsc",
