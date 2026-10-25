@@ -15,6 +15,7 @@ Conversation:
 `;
 
 const SMALL_TALK_SUMMARY = "Small talk with no decisions, facts or tasks.";
+const UNANSWERED_SUMMARY = "A message from the assistant that got no reply.";
 
 export async function extractAndStore(
   userId: string,
@@ -40,8 +41,9 @@ export async function extractAndStore(
     .join("\n\n");
 
   try {
-    const summary =
-      (await worthSummarizing(conversationText)) === false
+    const summary = !pending.some((message) => message.role === "user")
+      ? UNANSWERED_SUMMARY
+      : (await worthSummarizing(conversationText)) === false
         ? SMALL_TALK_SUMMARY
         : (await generateText([user(SUMMARY_PROMPT + conversationText)], { purpose: "extractor", userId, sessionKey })).text.trim();
     const conversation = await closeConversation(userId, sessionKey, {
