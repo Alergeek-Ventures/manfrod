@@ -3,6 +3,7 @@ import { logger } from "../../lib/log.ts";
 import { projectIdForChannel } from "../../lib/memory/access.ts";
 import { getNoteContext } from "../../lib/memory/search.ts";
 import { toolCtx } from "../../lib/agent/context.ts";
+import { isDmSession } from "../../lib/agent/system-prompt.ts";
 
 const NOTE_QUERY_CHARS = 2_000;
 const log = logger("Agent.Notes");
@@ -33,7 +34,7 @@ export default defineMemory({
         const query = text.length > NOTE_QUERY_CHARS ? text.slice(-NOTE_QUERY_CHARS) : text;
         try {
           const projectId = tool.msgCtx.channel ? await projectIdForChannel(tool.msgCtx.channel) : null;
-          const notes = await getNoteContext(tool.userId, tool.readableLevels, query, projectId);
+          const notes = await getNoteContext(tool.userId, tool.readableLevels, query, projectId, isDmSession(tool.sessionKey));
           return notes === "" ? null : { messages: [{ id: "note-context", content: `[Note context]\n${notes}` }] };
         } catch (error) {
           log.error(`Agent.Server: note context failed: ${(error as Error).message}`);

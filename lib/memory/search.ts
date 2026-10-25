@@ -252,9 +252,10 @@ export async function getNoteContext(
   readableLevels: string[],
   query: string,
   projectId: string | null = null,
+  soulInPrompt = true,
 ): Promise<string> {
   const [anchor, relevant] = await Promise.all([
-    getSoulAnchor(userId, readableLevels),
+    soulInPrompt ? getSoulAnchor(userId, readableLevels) : null,
     search(userId, readableLevels, query, { limit: 10, projectId }),
   ]);
   const inSystemPrompt = new Set(anchor ? [anchor.soul.id, ...anchor.linked.map((node) => node.id)] : []);

@@ -1,8 +1,10 @@
+import { getUser } from "../accounts.ts";
 import { broadcast } from "../events/index.ts";
 import { generateText, user } from "../llm/index.ts";
 import { logger } from "../log.ts";
 import { worthSummarizing } from "./action-decider.ts";
 import { closeConversation, getPendingMessages, pendingAuthorsForSession } from "./messages.ts";
+import { welcomeSoulAfterConversation } from "./souls.ts";
 
 const log = logger("Extractor");
 
@@ -54,6 +56,7 @@ export async function extractAndStore(
       return;
     }
     log.info(`Extracted conversation ${conversation.id} for user ${userId}: summary: ${summary.slice(0, 50)}...`);
+    if (sessionKey.startsWith("D")) await soulFromWelcome(userId, sessionKey);
     await broadcast("extraction_completed", {
       userId,
       sessionKey,
@@ -79,4 +82,13 @@ export async function extractSession(sessionKey: string, writeAccess: string[], 
     await extractAndStore(userId, sessionKey, writeAccess, slackChannelId);
   }
   return authors.length;
+}
+
+async function soulFromWelcome(userId: string, sessionKey: string) {
+  try {
+    const soul = await welcomeSoulAfterConversation(userId, (await getUser(userId))?.name ?? null, sessionKey);
+    if (soul) log.info(`Extractor: saved soul ${soul.id} for user ${userId} from their first DM thread`);
+  } catch (error) {
+    log.error(`Extractor: soul from the first DM failed for user ${userId}: ${(error as Error).message}`);
+  }
 }

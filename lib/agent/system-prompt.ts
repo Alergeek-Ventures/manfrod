@@ -55,9 +55,11 @@ async function currentContext(userId: string, sessionKey: string | null): Promis
 
 export async function buildSystemPrompt(userId: string, sessionKey: string | null, readableLevels: string[]): Promise<string> {
   if (!(await healthy())) return SYSTEM_PROMPT + SOUL_BASE_PROMPT;
-  const anchor = await getSoulAnchor(userId, readableLevels);
-  const onboarding = isDmSession(sessionKey) ? SOUL_ONBOARDING_PROMPT : "";
-  const base = anchor ? `${soulContext(anchor)}\n\n${SYSTEM_PROMPT}` : `${SYSTEM_PROMPT}${SOUL_BASE_PROMPT}${onboarding}`;
+  const dm = isDmSession(sessionKey);
+  const anchor = dm ? await getSoulAnchor(userId, readableLevels) : null;
+  const base = anchor
+    ? `${soulContext(anchor)}\n\n${SYSTEM_PROMPT}`
+    : `${SYSTEM_PROMPT}${SOUL_BASE_PROMPT}${dm ? SOUL_ONBOARDING_PROMPT : ""}`;
   const secrets = await secretsText();
   return `${base}\n\n${await currentContext(userId, sessionKey)}${secrets ? `\n\n${secrets}` : ""}`;
 }
