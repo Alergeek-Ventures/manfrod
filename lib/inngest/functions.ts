@@ -6,6 +6,7 @@ import { executeJob, JobError } from "../jobs/execute.ts";
 import { completeJob, dispatchUndispatched, failJob, getJob, markExecuting, pruneJobs } from "../jobs/index.ts";
 import { logger } from "../log.ts";
 import { ensureValidToken, invalidateTools, listAllConnectionsWithProvider, markExpired, markNotified } from "../mcp/index.ts";
+import { expiredConnectionPrompt } from "../mcp/tools.ts";
 import { flush, staleKeys } from "../memory/buffer.ts";
 import { extractSession } from "../memory/extractor.ts";
 import { sweep } from "../memory/pending.ts";
@@ -117,10 +118,7 @@ const mcpExpiry = cronFunction("mcp-expiry", "15 * * * *", async () => {
     invalidateTools(connection.userId, provider.id);
     const updated = await markExpired(connection);
     if (updated.notifiedExpiredAt === null) {
-      await deliverProactive(
-        connection.userId,
-        `Your ${provider.name} connection expired — reconnect it in the admin panel (MCP tab) so I can keep using it.`,
-      );
+      await deliverProactive(connection.userId, expiredConnectionPrompt(provider.name));
       await markNotified(updated);
     }
   }

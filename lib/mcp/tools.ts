@@ -1,3 +1,4 @@
+import { config } from "../config.ts";
 import { logger } from "../log.ts";
 import { deliverProactive, sendProactive } from "../proactive.ts";
 import { callTool, formatResult } from "./client.ts";
@@ -31,8 +32,12 @@ function toolName(prefix: string, remoteName: string): string {
   return `${prefix}__${remoteName.replace(/[^A-Za-z0-9_-]/g, "_")}`.slice(0, 64);
 }
 
+export function expiredConnectionPrompt(providerName: string): string {
+  return `Tell the user that their ${providerName} connection expired and that they can reconnect it at ${config.appUrl}/integrations so you can keep using it. Write only about this, in the user's language, and do not bring up notes, reservations or anything else.`;
+}
+
 async function notifyExpired(userId: string, provider: Provider) {
-  const text = `Your ${provider.name} connection expired — reconnect it in the admin panel (MCP tab) so I can keep using it.`;
+  const text = expiredConnectionPrompt(provider.name);
   try {
     await deliverProactive(userId, text);
   } catch {

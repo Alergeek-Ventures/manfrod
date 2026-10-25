@@ -85,18 +85,20 @@ async function postReply(where: Where, content: string, withFeedback: boolean) {
 async function titleThreads(where: Where, content: string) {
   if (!where.threadTs) return;
   const threadTs = where.threadTs;
+  let pending: Promise<string> | null = null;
+  const title = () => (pending ??= threadTitle(content));
   if (await isUntitledProactiveThread(where.channel, threadTs)) {
     await markProactiveThreadTitled(threadTs);
-    void threadTitle(content).then(async (title) => {
-      const result = await post("chat.update", { channel: where.channel, ts: threadTs, text: title });
+    void title().then(async (text) => {
+      const result = await post("chat.update", { channel: where.channel, ts: threadTs, text });
       if (!result.ok) log.error(`Slack ActivityHandler failed to update thread title in ${where.channel}: ${result.error}`);
     });
   }
   const key = `${where.channel}:${threadTs}`;
   if (where.channel.startsWith("D") && !titled.has(key)) {
     titled.set(key, true);
-    void threadTitle(content).then(async (title) => {
-      const result = await setTitle(where.channel, threadTs, title);
+    void title().then(async (text) => {
+      const result = await setTitle(where.channel, threadTs, text);
       if (!result.ok) log.warn(`Slack ActivityHandler failed to set thread title in ${where.channel}: ${result.error}`);
     });
   }
