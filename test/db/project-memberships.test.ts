@@ -36,7 +36,7 @@ describe.skipIf(!enabled)("project memberships", () => {
     expect(await resolveForRead(user.id, "D0001")).toContain(level);
   });
 
-  it("lets admins read every client's notes without memberships", async () => {
+  it("lets admins read every client's notes in DMs without memberships", async () => {
     const [admin, teammate] = await Promise.all(
       [1, 2].map(() => findOrCreateBySlackId(`U${randomUUID().slice(0, 10)}`, `D${randomUUID().slice(0, 10)}`)),
     );
@@ -44,5 +44,6 @@ describe.skipIf(!enabled)("project memberships", () => {
     await db.update(tables.users).set({ role: "admin" }).where(eq(tables.users.id, admin.id));
     expect(await resolveForRead(admin.id, "D0001")).toContain(level);
     expect(await resolveForRead(teammate.id, "D0001")).not.toContain(level);
+    expect(await resolveForRead(admin.id, `C${randomUUID().slice(0, 8)}`)).not.toContain(level);
   });
 });

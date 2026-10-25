@@ -57,7 +57,6 @@ async function allClientIds(): Promise<string[]> {
 }
 
 async function clientIdsForUser(userId: string): Promise<string[]> {
-  if (isAdmin(await getUser(userId))) return allClientIds();
   const rows = await db
     .selectDistinct({ clientId: channelMappings.clientId })
     .from(projectMemberships)
@@ -84,7 +83,8 @@ export async function clientIdForProject(projectId: string): Promise<string | nu
 
 export async function resolveForRead(userId: string, slackChannelId: string): Promise<string[]> {
   if (slackChannelId.startsWith("D")) {
-    const external = (await clientIdsForUser(userId)).map((id) => `external/${id}`);
+    const clientIds = isAdmin(await getUser(userId)) ? await allClientIds() : await clientIdsForUser(userId);
+    const external = clientIds.map((id) => `external/${id}`);
     return [privateLevel(userId), "internal", ...external, "external/all"];
   }
 
