@@ -5,7 +5,6 @@ const env = (key: string): string | undefined => {
 };
 
 export const config = {
-  adminEmails: ["franek@alergeek.ventures", "kamil@alergeek.ventures"],
   timezone: "Europe/Warsaw",
   get slackStreaming() {
     return env("SLACK_STREAMING") !== "false";
@@ -84,7 +83,3 @@ export const config = {
     return process.env.NODE_ENV === "production";
   },
 };
-
-export function isAdminEmail(email: string | null | undefined): boolean {
-  return typeof email === "string" && config.adminEmails.includes(email);
-}

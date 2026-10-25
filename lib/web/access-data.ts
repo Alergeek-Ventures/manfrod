@@ -59,6 +59,7 @@ export async function loadAccessData() {
       user_id: user.id,
       user_name: user.name,
       user_slack_id: user.slackId,
+      is_admin: user.isAdmin,
       memberships: memberRows
         .filter((row) => row.user_id === user.id)
         .map(({ project_id, project_name, project_slug, source }) => ({ project_id, project_name, project_slug, source })),

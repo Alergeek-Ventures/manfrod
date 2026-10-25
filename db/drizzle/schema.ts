@@ -463,6 +463,7 @@ export const users = pgTable("users", {
 	soulNodeId: uuid("soul_node_id"),
 	emailVerified: boolean("email_verified").default(false).notNull(),
 	image: text(),
+	isAdmin: boolean("is_admin").default(false).notNull(),
 }, (table) => [
 	uniqueIndex().using("btree", table.email.asc().nullsLast().op("text_ops")),
 	uniqueIndex().using("btree", table.slackId.asc().nullsLast().op("text_ops")),

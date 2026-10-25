@@ -6,7 +6,7 @@ if (enabled) process.env.DATABASE_URL = process.env.TEST_DATABASE_URL;
 
 const { db, tables } = await import("../../lib/db/index.ts");
 const { addMembership, ensureMembership, isMember, removeMembership, resolveForRead } = await import("../../lib/memory/access.ts");
-const { findOrCreateBySlackId } = await import("../../lib/accounts.ts");
+const { findOrCreateBySlackId, setAdmin } = await import("../../lib/accounts.ts");
 
 async function clientProject() {
   const slug = `acme-${randomUUID().slice(0, 6)}`;
@@ -33,5 +33,15 @@ describe.skipIf(!enabled)("project memberships", () => {
     await addMembership(user.id, project.id);
     expect(await isMember(user.id, project.id)).toBe(true);
     expect(await resolveForRead(user.id, "D0001")).toContain(level);
+  });
+
+  it("lets admins read every client's notes without memberships", async () => {
+    const [admin, teammate] = await Promise.all(
+      [1, 2].map(() => findOrCreateBySlackId(`U${randomUUID().slice(0, 10)}`, `D${randomUUID().slice(0, 10)}`)),
+    );
+    const { level } = await clientProject();
+    await setAdmin(admin.id, true);
+    expect(await resolveForRead(admin.id, "D0001")).toContain(level);
+    expect(await resolveForRead(teammate.id, "D0001")).not.toContain(level);
   });
 });

@@ -1,5 +1,4 @@
-import { isAdminEmail } from "../config.ts";
-import { getUser } from "../accounts.ts";
+import { getUser, isAdmin } from "../accounts.ts";
 
 export interface MsgCtx {
   channel: string | null;
@@ -69,5 +68,5 @@ export function flaggable(msgCtx: MsgCtx): { channel: string; ts: string } | nul
 
 export async function requireAdmin(userId: string): Promise<string | null> {
   const user = await getUser(userId);
-  return isAdminEmail(user?.email) ? null : "Only an admin can do that.";
+  return isAdmin(user) ? null : "Only an admin can do that.";
 }

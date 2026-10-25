@@ -13,9 +13,9 @@ export default async function AccessSectionPage({
   params: Promise<{ section: string }>;
   searchParams: Promise<{ error?: string; info?: string }>;
 }) {
-  await requireAdmin();
+  const admin = await requireAdmin();
   const { section } = await params;
   if (!TABS.includes(section as Tab)) notFound();
   const { error, info } = await searchParams;
-  return <AccessClient tab={section as Tab} data={await loadAccessData()} flash={{ error, info }} />;
+  return <AccessClient tab={section as Tab} data={await loadAccessData()} flash={{ error, info }} currentUserId={admin.id} />;
 }

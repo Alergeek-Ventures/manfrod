@@ -1,8 +1,7 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { getUser } from "../accounts.ts";
+import { getUser, isAdmin } from "../accounts.ts";
 import { auth } from "../auth.ts";
-import { isAdminEmail } from "../config.ts";
 import type { User } from "../db/schema.ts";
 
 export async function currentUser(): Promise<User | null> {
@@ -18,10 +17,10 @@ export async function requireUser(): Promise<User> {
 
 export async function requireAdmin(): Promise<User> {
   const user = await requireUser();
-  if (!isAdminEmail(user.email)) redirect("/integrations");
+  if (!isAdmin(user)) redirect("/integrations");
   return user;
 }
 
 export function homeFor(user: User): string {
-  return isAdminEmail(user.email) ? "/" : "/integrations";
+  return isAdmin(user) ? "/" : "/integrations";
 }

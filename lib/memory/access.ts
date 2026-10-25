@@ -1,4 +1,5 @@
 import { and, arrayOverlaps, eq, isNotNull, isNull, sql, type Column, type SQL } from "drizzle-orm";
+import { getUser, isAdmin } from "../accounts.ts";
 import { db, tables } from "../db/index.ts";
 import type { ChannelMapping, Project } from "../db/schema.ts";
 
@@ -47,7 +48,16 @@ export async function resolveForWrite(slackChannelId: string, authorUserId: stri
   return mapping ? mappingWriteAccess(mapping) : ["internal"];
 }
 
+async function allClientIds(): Promise<string[]> {
+  const rows = await db
+    .selectDistinct({ clientId: channelMappings.clientId })
+    .from(channelMappings)
+    .where(and(isNotNull(channelMappings.clientId), eq(channelMappings.status, "active")));
+  return rows.map((row) => row.clientId!);
+}
+
 async function clientIdsForUser(userId: string): Promise<string[]> {
+  if (isAdmin(await getUser(userId))) return allClientIds();
   const rows = await db
     .selectDistinct({ clientId: channelMappings.clientId })
     .from(projectMemberships)
