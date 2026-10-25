@@ -126,11 +126,11 @@ function prettyArgs(args: unknown): string {
 function ToolCard({ call, expanded, onToggle }: { call: ToolCall; expanded: boolean; onToggle: () => void }) {
   return (
     <Collapsible open={expanded} onOpenChange={onToggle} className="rounded-lg border">
-      <CollapsibleTrigger
-        render={<Button variant="ghost" className="h-auto w-full justify-between px-3 py-2 font-normal" />}
-      >
+      <CollapsibleTrigger render={<Button variant="ghost" className="h-auto w-full justify-between px-3 py-2 font-normal" />}>
         <span className="flex min-w-0 items-center gap-2">
-          <Badge variant={call.success === false || DESTRUCTIVE.has(call.action) ? "destructive" : "secondary"}>{call.action ?? "unknown"}</Badge>
+          <Badge variant={call.success === false || DESTRUCTIVE.has(call.action) ? "destructive" : "secondary"}>
+            {call.action ?? "unknown"}
+          </Badge>
           <span className="truncate text-xs text-muted-foreground">{summary(call)}</span>
         </span>
         <span className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -191,7 +191,9 @@ export function Conversation({ run, events }: { run: RunView; events: ActivityVi
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
             {turn.narrative && (
-              <p className="whitespace-pre-wrap text-sm italic leading-relaxed text-muted-foreground">{String(turn.narrative.meta.text ?? "")}</p>
+              <p className="whitespace-pre-wrap text-sm italic leading-relaxed text-muted-foreground">
+                {String(turn.narrative.meta.text ?? "")}
+              </p>
             )}
             {turn.toolCalls.map((call) => (
               <ToolCard key={call.actionId} call={call} expanded={expanded.has(call.actionId)} onToggle={() => toggle(call.actionId)} />

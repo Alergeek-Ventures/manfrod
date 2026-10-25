@@ -23,8 +23,7 @@ const PROJECT_DOC =
 
 const noteDate = (node: Node) => dateIsoInZone(node.insertedAt);
 
-const unknownProject = (name: string | undefined) =>
-  `Nie znalazłem projektu "${name}" — sprawdź listę przez list_projects.`;
+const unknownProject = (name: string | undefined) => `Nie znalazłem projektu "${name}" — sprawdź listę przez list_projects.`;
 
 async function resolveProject(name: string | undefined, msgCtx: MsgCtx): Promise<{ ok: true; id: string | null } | { ok: false }> {
   if (name === undefined || name === null || name === "") {

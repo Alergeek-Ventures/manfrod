@@ -150,9 +150,7 @@ function segmentToBlocks(segment: Segment): Record<string, unknown>[] {
   if (segment.kind === "text") {
     return [{ type: "section", text: { type: "mrkdwn", text: fromMarkdown(segment.text).slice(0, 2900) } }];
   }
-  const rows = segment.rows
-    .slice(0, MAX_TABLE_ROWS)
-    .map((row) => row.slice(0, MAX_TABLE_COLS).map(tableCell));
+  const rows = segment.rows.slice(0, MAX_TABLE_ROWS).map((row) => row.slice(0, MAX_TABLE_COLS).map(tableCell));
   return [{ type: "table", rows }];
 }
 

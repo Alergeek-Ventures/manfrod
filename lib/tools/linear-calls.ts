@@ -4,7 +4,10 @@ import { getConnection } from "../linear/index.ts";
 function formatIssues(issues: any[]): string {
   if (issues.length === 0) return "Brak issues.";
   return issues
-    .map((issue) => `${issue.identifier} [${issue.state?.name ?? "?"}] ${issue.title} (${issue.assignee?.name ?? "unassigned"}) — ${issue.url}`)
+    .map(
+      (issue) =>
+        `${issue.identifier} [${issue.state?.name ?? "?"}] ${issue.title} (${issue.assignee?.name ?? "unassigned"}) — ${issue.url}`,
+    )
     .join("\n");
 }
 

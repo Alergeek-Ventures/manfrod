@@ -10,8 +10,7 @@ const log = logger("Buffer");
 
 export const FLUSH_AFTER_MESSAGES = 8;
 
-const threadMatch = (threadTs: string | null) =>
-  threadTs === null ? isNull(memoryBuffer.threadTs) : eq(memoryBuffer.threadTs, threadTs);
+const threadMatch = (threadTs: string | null) => (threadTs === null ? isNull(memoryBuffer.threadTs) : eq(memoryBuffer.threadTs, threadTs));
 
 export async function push(channelId: string, threadTs: string | null, channelName: string | null, message: BufferedMessage) {
   await db.insert(memoryBuffer).values({ channelId, threadTs, channelName, message });
@@ -36,7 +35,12 @@ export async function flush(channelId: string, threadTs: string | null): Promise
       .orderBy(asc(memoryBuffer.id))
       .for("update", { skipLocked: true });
     if (locked.length > 0) {
-      await tx.delete(memoryBuffer).where(inArray(memoryBuffer.id, locked.map((row) => row.id)));
+      await tx.delete(memoryBuffer).where(
+        inArray(
+          memoryBuffer.id,
+          locked.map((row) => row.id),
+        ),
+      );
     }
     return locked;
   });

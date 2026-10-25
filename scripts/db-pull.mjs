@@ -22,7 +22,10 @@ let schema = readFileSync(schemaPath, "utf8")
   .replace(/\t\/\/ TODO: failed to parse database type 'bytea'\n\t(\w+): unknown\(("[^"]+")\)/g, "\t$1: bytea($2)");
 
 if (schema.includes("bytea(")) {
-  schema = schema.replace('import { sql } from "drizzle-orm"', 'import { sql } from "drizzle-orm"\nimport { bytea } from "../../lib/db/types.ts"');
+  schema = schema.replace(
+    'import { sql } from "drizzle-orm"',
+    'import { sql } from "drizzle-orm"\nimport { bytea } from "../../lib/db/types.ts"',
+  );
 }
 
 const leftovers = schema.match(/TODO: failed to parse[^\n]*/g);

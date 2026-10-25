@@ -88,10 +88,7 @@ export const userContext = {
   get(slackUserId: string): Record<string, unknown> | null {
     return contexts.get(slackUserId) ?? null;
   },
-  async describe(
-    slackUserId: string,
-    resolveChannelName: (channelId: string) => Promise<string | null>,
-  ): Promise<string | null> {
+  async describe(slackUserId: string, resolveChannelName: (channelId: string) => Promise<string | null>): Promise<string | null> {
     const appContext = contexts.get(slackUserId);
     const channelId = appContext?.channel_id;
     if (typeof channelId !== "string" || channelId.startsWith("D")) return null;

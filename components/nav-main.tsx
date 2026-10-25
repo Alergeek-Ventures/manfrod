@@ -1,7 +1,7 @@
-"use client"
+"use client";
 
-import Link from "next/link"
-import { usePathname } from "next/navigation"
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 
 import {
   SidebarGroup,
@@ -10,21 +10,21 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-} from "@/components/ui/sidebar"
+} from "@/components/ui/sidebar";
 
 export type NavItem = {
-  title: string
-  url: string
-  icon?: React.ReactNode
-}
+  title: string;
+  url: string;
+  icon?: React.ReactNode;
+};
 
 export type NavGroup = {
-  label: string
-  items: NavItem[]
-}
+  label: string;
+  items: NavItem[];
+};
 
 export function NavMain({ groups }: { groups: NavGroup[] }) {
-  const pathname = usePathname()
+  const pathname = usePathname();
   return (
     <>
       {groups.map((group) => (
@@ -45,5 +45,5 @@ export function NavMain({ groups }: { groups: NavGroup[] }) {
         </SidebarGroup>
       ))}
     </>
-  )
+  );
 }

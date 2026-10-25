@@ -150,7 +150,10 @@ class StreamSession {
 
   task(task: Task) {
     const previous = this.tasks.get(task.id);
-    const merged: Task = { ...previous, ...Object.fromEntries(Object.entries(task).filter(([, value]) => value !== null && value !== undefined)) } as Task;
+    const merged: Task = {
+      ...previous,
+      ...Object.fromEntries(Object.entries(task).filter(([, value]) => value !== null && value !== undefined)),
+    } as Task;
     this.turnText = "";
     this.tasks.set(merged.id, merged);
     this.enqueue(taskChunk(merged));

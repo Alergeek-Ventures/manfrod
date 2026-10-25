@@ -49,7 +49,17 @@ function StatusBadge({ status, mock }: { status: string | undefined; mock: boole
   return <Badge variant="outline">Not connected</Badge>;
 }
 
-function ProviderCard({ provider, status, deletable, run }: { provider: ProviderView; status: string | undefined; deletable: boolean; run: Run }) {
+function ProviderCard({
+  provider,
+  status,
+  deletable,
+  run,
+}: {
+  provider: ProviderView;
+  status: string | undefined;
+  deletable: boolean;
+  run: Run;
+}) {
   const active = status === "connected" || status === "expired";
   return (
     <Card>
@@ -64,7 +74,12 @@ function ProviderCard({ provider, status, deletable, run }: { provider: Provider
       </CardHeader>
       {!provider.mock && (
         <CardFooter className="gap-2">
-          <Button size="sm" variant={active ? "outline" : "default"} nativeButton={false} render={<a href={`/mcp/${provider.id}/connect`} />}>
+          <Button
+            size="sm"
+            variant={active ? "outline" : "default"}
+            nativeButton={false}
+            render={<a href={`/mcp/${provider.id}/connect`} />}
+          >
             {active ? "Reconnect" : "Connect"}
           </Button>
           {active && (
@@ -122,12 +137,20 @@ function AddProviderDialog({ run, pending }: { run: Run; pending: boolean }) {
         >
           <DialogHeader>
             <DialogTitle>Add custom MCP server</DialogTitle>
-            <DialogDescription>Manfrod tries to detect the server&apos;s name and logo — if it can&apos;t, name it yourself.</DialogDescription>
+            <DialogDescription>
+              Manfrod tries to detect the server&apos;s name and logo — if it can&apos;t, name it yourself.
+            </DialogDescription>
           </DialogHeader>
           <FieldGroup>
             <Field>
               <FieldLabel htmlFor="mcp-url">MCP URL</FieldLabel>
-              <Input id="mcp-url" placeholder="https://mcp.example.com/mcp" value={url} onChange={(event) => setUrl(event.target.value)} required />
+              <Input
+                id="mcp-url"
+                placeholder="https://mcp.example.com/mcp"
+                value={url}
+                onChange={(event) => setUrl(event.target.value)}
+                required
+              />
             </Field>
             <Field>
               <FieldLabel htmlFor="mcp-name">Name</FieldLabel>
@@ -152,7 +175,17 @@ function AddProviderDialog({ run, pending }: { run: Run; pending: boolean }) {
   );
 }
 
-function KalafiorniaCard({ connection, defaultEmail, run, pending }: { connection: { email: string } | null; defaultEmail: string; run: Run; pending: boolean }) {
+function KalafiorniaCard({
+  connection,
+  defaultEmail,
+  run,
+  pending,
+}: {
+  connection: { email: string } | null;
+  defaultEmail: string;
+  run: Run;
+  pending: boolean;
+}) {
   const [step, setStep] = useState<"status" | "email" | "pin">("status");
   const [email, setEmail] = useState(defaultEmail);
   const [pin, setPin] = useState("");
@@ -176,7 +209,12 @@ function KalafiorniaCard({ connection, defaultEmail, run, pending }: { connectio
               {connection ? "Reconnect" : "Connect"}
             </Button>
             {connection && (
-              <ConfirmAction label="Disconnect" title="Disconnect Kalafiornia?" confirmLabel="Disconnect" onConfirm={() => run(kalafiorniaDisconnect)} />
+              <ConfirmAction
+                label="Disconnect"
+                title="Disconnect Kalafiornia?"
+                confirmLabel="Disconnect"
+                onConfirm={() => run(kalafiorniaDisconnect)}
+              />
             )}
           </div>
         )}
@@ -213,7 +251,14 @@ function KalafiorniaCard({ connection, defaultEmail, run, pending }: { connectio
               ) : (
                 <Field>
                   <FieldLabel htmlFor="kalafiornia-pin">PIN</FieldLabel>
-                  <Input id="kalafiornia-pin" inputMode="numeric" placeholder="1234" value={pin} onChange={(event) => setPin(event.target.value)} required />
+                  <Input
+                    id="kalafiornia-pin"
+                    inputMode="numeric"
+                    placeholder="1234"
+                    value={pin}
+                    onChange={(event) => setPin(event.target.value)}
+                    required
+                  />
                   <FieldDescription>Sent to {email}</FieldDescription>
                 </Field>
               )}

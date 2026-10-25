@@ -47,7 +47,15 @@ function themePalette() {
   };
 }
 
-function PlainSelect({ items, value, onChange }: { items: { label: string; value: string }[]; value: string; onChange: (value: string) => void }) {
+function PlainSelect({
+  items,
+  value,
+  onChange,
+}: {
+  items: { label: string; value: string }[];
+  value: string;
+  onChange: (value: string) => void;
+}) {
   return (
     <Select items={items} value={value} onValueChange={(next) => next !== null && onChange(next as string)}>
       <SelectTrigger size="sm">
@@ -260,8 +268,14 @@ export function GraphClient({
   ];
   const userItems = users.map((user) => ({ label: user.label, value: user.id }));
   const clientItems = [{ label: "All clients", value: "all" }, ...clients.map((client) => ({ label: client, value: client }))];
-  const projectItems = [{ label: "All projects", value: "all" }, ...projects.map((project) => ({ label: project.name, value: project.id }))];
-  const nodeProjectItems = [{ label: "No project", value: NONE }, ...projects.map((project) => ({ label: project.name, value: project.id }))];
+  const projectItems = [
+    { label: "All projects", value: "all" },
+    ...projects.map((project) => ({ label: project.name, value: project.id })),
+  ];
+  const nodeProjectItems = [
+    { label: "No project", value: NONE },
+    ...projects.map((project) => ({ label: project.name, value: project.id })),
+  ];
 
   return (
     <div className="flex h-[calc(100svh-var(--header-height)-1rem)] min-h-0 flex-col">
@@ -296,8 +310,12 @@ export function GraphClient({
             <ToggleGroupItem value="slipbox">Slipbox</ToggleGroupItem>
           </ToggleGroup>
           <PlainSelect items={scopeItems} value={scope} onChange={(value) => changeAccess(value as Scope, null)} />
-          {scope === "private" && <PlainSelect items={userItems} value={target ?? ""} onChange={(value) => changeAccess("private", value)} />}
-          {scope === "external" && <PlainSelect items={clientItems} value={target ?? "all"} onChange={(value) => changeAccess("external", value)} />}
+          {scope === "private" && (
+            <PlainSelect items={userItems} value={target ?? ""} onChange={(value) => changeAccess("private", value)} />
+          )}
+          {scope === "external" && (
+            <PlainSelect items={clientItems} value={target ?? "all"} onChange={(value) => changeAccess("external", value)} />
+          )}
           {scope === "internal" && (
             <PlainSelect
               items={projectItems}

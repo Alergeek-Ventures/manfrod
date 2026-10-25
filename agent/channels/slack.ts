@@ -42,7 +42,9 @@ async function reportFailure(message: SlackMessage, error: unknown) {
 
 function route(ctx: SlackInboundMessageContext, message: SlackMessage, isMention: boolean) {
   void handleMessage(inboundFromRaw(message.raw, message.channelId), dispatcher(ctx), isMention).catch((error) =>
-    reportFailure(message, error).catch((reportError) => log.error(`Slack EventHandler could not report failure: ${(reportError as Error).message}`)),
+    reportFailure(message, error).catch((reportError) =>
+      log.error(`Slack EventHandler could not report failure: ${(reportError as Error).message}`),
+    ),
   );
   return null;
 }

@@ -47,7 +47,9 @@ export default defineDynamic({
             term: z.string().describe("Search term"),
             limit: z.number().int().optional().describe("Max results to return (default 25)"),
           }),
-          execute: secured("linear_search_issues", ({ term, limit }: { term: string; limit?: number }) => searchIssues(projectId, term, limit)),
+          execute: secured("linear_search_issues", ({ term, limit }: { term: string; limit?: number }) =>
+            searchIssues(projectId, term, limit),
+          ),
         });
         entries.linear_list_projects = defineTool({
           description: "Lists Linear projects owned by this project's connected team.",

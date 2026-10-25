@@ -29,7 +29,9 @@ describe("substituteWith", () => {
 
 describe("redactWith", () => {
   it("swaps secret values in output back to placeholders", () => {
-    expect(redactWith({ body: "echo tok_abcdef for team-123456" }, values)).toEqual({ body: "echo {{ API_TOKEN }} for {{ SECRET_TEAM_ID }}" });
+    expect(redactWith({ body: "echo tok_abcdef for team-123456" }, values)).toEqual({
+      body: "echo {{ API_TOKEN }} for {{ SECRET_TEAM_ID }}",
+    });
   });
 
   it("does not redact values too short to be meaningful", () => {

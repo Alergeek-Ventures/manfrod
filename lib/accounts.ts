@@ -66,11 +66,7 @@ export async function findOrCreateBySlackId(
 export async function systemUserId(slackId: string, name: string, email: string): Promise<string> {
   const existing = await getUserBySlackId(slackId);
   if (existing) return existing.id;
-  const [created] = await db
-    .insert(users)
-    .values({ slackId, slackDmChannelId: slackId, name, email })
-    .onConflictDoNothing()
-    .returning();
+  const [created] = await db.insert(users).values({ slackId, slackDmChannelId: slackId, name, email }).onConflictDoNothing().returning();
   return created?.id ?? (await getUserBySlackId(slackId))!.id;
 }
 

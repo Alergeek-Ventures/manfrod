@@ -101,7 +101,8 @@ async function connect(attempt = 0) {
     if (message.type === "disconnect") return socket.close();
     if (!message.envelope_id) return;
 
-    const ack = (payload) => socket.send(JSON.stringify(payload ? { envelope_id: message.envelope_id, payload } : { envelope_id: message.envelope_id }));
+    const ack = (payload) =>
+      socket.send(JSON.stringify(payload ? { envelope_id: message.envelope_id, payload } : { envelope_id: message.envelope_id }));
     let acked = false;
     const fallback = setTimeout(() => {
       acked = true;

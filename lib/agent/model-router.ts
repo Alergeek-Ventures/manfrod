@@ -95,7 +95,8 @@ export async function routeStep(sessionId: string, messages: readonly ModelMessa
     log.error(`ModelRouter: ${sessionId} hit the ${MAX_STEPS_PER_TURN}-step limit on ${current.route}, stopping the turn`);
     throw new StepBudgetExceededError(sessionId);
   }
-  if (current.steps === STEP_WARNING_AT) log.warn(`ModelRouter: ${sessionId} is at step ${STEP_WARNING_AT} of this turn on ${current.route}`);
+  if (current.steps === STEP_WARNING_AT)
+    log.warn(`ModelRouter: ${sessionId} is at step ${STEP_WARNING_AT} of this turn on ${current.route}`);
   return {
     model: openrouterProvider().chat(ROUTES[current.route].model, {
       usage: { include: true },

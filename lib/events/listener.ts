@@ -7,8 +7,11 @@ type Subscriber = (payload: string) => void;
 const log = logger("AuditListener");
 const RECONNECT_DELAY_MS = 2_000;
 
-const state = (globalThis as unknown as { manfrodAuditListener?: { subscribers: Set<Subscriber>; client: Client | null; connecting: Promise<void> | null } })
-  .manfrodAuditListener ?? { subscribers: new Set<Subscriber>(), client: null, connecting: null };
+const state = (
+  globalThis as unknown as {
+    manfrodAuditListener?: { subscribers: Set<Subscriber>; client: Client | null; connecting: Promise<void> | null };
+  }
+).manfrodAuditListener ?? { subscribers: new Set<Subscriber>(), client: null, connecting: null };
 (globalThis as unknown as { manfrodAuditListener: typeof state }).manfrodAuditListener = state;
 
 async function connect(): Promise<void> {

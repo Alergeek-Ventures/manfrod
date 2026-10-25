@@ -713,7 +713,9 @@ function definitions(): ToolSet {
         project: z
           .string()
           .optional()
-          .describe("Project name or slug this node belongs to, if project-specific (see list_projects). Omit for general/cross-project nodes."),
+          .describe(
+            "Project name or slug this node belongs to, if project-specific (see list_projects). Omit for general/cross-project nodes.",
+          ),
       }),
     }),
     update_node: tool({
@@ -725,7 +727,9 @@ function definitions(): ToolSet {
         project: z
           .string()
           .optional()
-          .describe("Set/correct this node's project (name or slug, see list_projects). Omit to leave its current project attribution unchanged."),
+          .describe(
+            "Set/correct this node's project (name or slug, see list_projects). Omit to leave its current project attribution unchanged.",
+          ),
       }),
     }),
     create_link: tool({
@@ -856,7 +860,8 @@ async function toolHandlers(userId: string, readableLevels: string[], writeAcces
       } catch (error) {
         return `Failed to generate embedding: ${(error as Error).message}`;
       }
-      const attrs = args.project !== undefined ? { content: args.content, embedding, projectId: project.id } : { content: args.content, embedding };
+      const attrs =
+        args.project !== undefined ? { content: args.content, embedding, projectId: project.id } : { content: args.content, embedding };
       try {
         const node = await updateNodeAccessible(readableLevels, args.id, attrs);
         return node ? `Updated node: ${args.id}` : `Node not found: ${args.id}`;

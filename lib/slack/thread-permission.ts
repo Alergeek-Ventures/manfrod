@@ -29,9 +29,7 @@ async function kickRow(channel: string, threadTs: string): Promise<boolean> {
 }
 
 export async function allow(channel: string, threadTs: string): Promise<void> {
-  await db
-    .delete(threadKicks)
-    .where(and(eq(threadKicks.slackChannelId, channel), eq(threadKicks.threadTs, threadTs)));
+  await db.delete(threadKicks).where(and(eq(threadKicks.slackChannelId, channel), eq(threadKicks.threadTs, threadTs)));
   verdicts.set(key(channel, threadTs), "allowed");
 }
 

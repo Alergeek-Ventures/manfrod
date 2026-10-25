@@ -39,10 +39,7 @@ export async function getActiveMapping(channelId: string | null | undefined): Pr
   return row ? { ...row.mapping, project: row.project } : null;
 }
 
-export async function resolveForWrite(
-  slackChannelId: string,
-  authorUserId: string | null = null,
-): Promise<string[]> {
+export async function resolveForWrite(slackChannelId: string, authorUserId: string | null = null): Promise<string[]> {
   if (slackChannelId.startsWith("D")) {
     return authorUserId ? [privateLevel(authorUserId)] : ["internal"];
   }
@@ -70,13 +67,7 @@ export async function clientIdForProject(projectId: string): Promise<string | nu
   const [row] = await db
     .select({ clientId: channelMappings.clientId })
     .from(channelMappings)
-    .where(
-      and(
-        eq(channelMappings.projectId, projectId),
-        eq(channelMappings.status, "active"),
-        isNotNull(channelMappings.clientId),
-      ),
-    )
+    .where(and(eq(channelMappings.projectId, projectId), eq(channelMappings.status, "active"), isNotNull(channelMappings.clientId)))
     .limit(1);
   return row?.clientId ?? null;
 }

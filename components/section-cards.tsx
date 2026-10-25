@@ -1,21 +1,15 @@
-import {
-  Card,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
+import { Card, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 
 export type Metric = {
-  label: string
-  value: React.ReactNode
-  sublabel?: React.ReactNode
-}
+  label: string;
+  value: React.ReactNode;
+  sublabel?: React.ReactNode;
+};
 
 export function formatNumber(n: number): string {
-  if (n >= 1_000_000) return `${(Math.round(n / 100_000) / 10).toFixed(1)}M`
-  if (n >= 1_000) return `${(Math.round(n / 100) / 10).toFixed(1)}K`
-  return String(n)
+  if (n >= 1_000_000) return `${(Math.round(n / 100_000) / 10).toFixed(1)}M`;
+  if (n >= 1_000) return `${(Math.round(n / 100) / 10).toFixed(1)}K`;
+  return String(n);
 }
 
 export function SectionCards({ metrics }: { metrics: Metric[] }) {
@@ -25,15 +19,11 @@ export function SectionCards({ metrics }: { metrics: Metric[] }) {
         <Card key={metric.label} className="@container/card">
           <CardHeader>
             <CardDescription>{metric.label}</CardDescription>
-            <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
-              {metric.value}
-            </CardTitle>
+            <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">{metric.value}</CardTitle>
           </CardHeader>
-          {metric.sublabel && (
-            <CardFooter className="text-sm text-muted-foreground">{metric.sublabel}</CardFooter>
-          )}
+          {metric.sublabel && <CardFooter className="text-sm text-muted-foreground">{metric.sublabel}</CardFooter>}
         </Card>
       ))}
     </div>
-  )
+  );
 }

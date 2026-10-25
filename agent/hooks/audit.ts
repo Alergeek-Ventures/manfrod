@@ -83,7 +83,13 @@ export default defineHook({
       emit("llm_call_failed", {
         ...eventCtx(tool),
         source: "llm",
-        meta: { model: turnFor(ctx.session.id)?.modelId ?? "unknown", provider: "openrouter", tier: "paid", purpose: "agent", error: event.data.message },
+        meta: {
+          model: turnFor(ctx.session.id)?.modelId ?? "unknown",
+          provider: "openrouter",
+          tier: "paid",
+          purpose: "agent",
+          error: event.data.message,
+        },
       });
     },
 

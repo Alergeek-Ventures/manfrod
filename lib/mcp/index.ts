@@ -33,11 +33,7 @@ export function builtinProviders(): Provider[] {
 }
 
 export async function listCustomProviders(userId: string) {
-  return db
-    .select()
-    .from(mcpCustomProviders)
-    .where(eq(mcpCustomProviders.userId, userId))
-    .orderBy(asc(mcpCustomProviders.insertedAt));
+  return db.select().from(mcpCustomProviders).where(eq(mcpCustomProviders.userId, userId)).orderBy(asc(mcpCustomProviders.insertedAt));
 }
 
 export async function providersForUser(userId: string): Promise<Provider[]> {
@@ -73,11 +69,7 @@ export async function createCustomProvider(userId: string, url: string, name: st
   if (resolvedName) updates.name = resolvedName;
   if (logoUrl) updates.logoUrl = logoUrl;
   if (Object.keys(updates).length === 0) return provider;
-  const [updated] = await db
-    .update(mcpCustomProviders)
-    .set(updates)
-    .where(eq(mcpCustomProviders.id, provider.id))
-    .returning();
+  const [updated] = await db.update(mcpCustomProviders).set(updates).where(eq(mcpCustomProviders.id, provider.id)).returning();
   return updated;
 }
 
@@ -139,31 +131,25 @@ export async function saveTokens(userId: string, provider: string, attrs: TokenA
     const [updated] = await db.update(mcpConnections).set(values).where(eq(mcpConnections.id, existing.id)).returning();
     return updated;
   }
-  const [created] = await db.insert(mcpConnections).values({ userId, provider, ...values }).returning();
+  const [created] = await db
+    .insert(mcpConnections)
+    .values({ userId, provider, ...values })
+    .returning();
   return created;
 }
 
 export async function markExpired(connection: McpConnection): Promise<McpConnection> {
   if (connection.status === "expired") return connection;
-  const [updated] = await db
-    .update(mcpConnections)
-    .set({ status: "expired" })
-    .where(eq(mcpConnections.id, connection.id))
-    .returning();
+  const [updated] = await db.update(mcpConnections).set({ status: "expired" }).where(eq(mcpConnections.id, connection.id)).returning();
   return updated;
 }
 
 export async function markNotified(connection: McpConnection): Promise<void> {
-  await db
-    .update(mcpConnections)
-    .set({ notifiedExpiredAt: new Date() })
-    .where(eq(mcpConnections.id, connection.id));
+  await db.update(mcpConnections).set({ notifiedExpiredAt: new Date() }).where(eq(mcpConnections.id, connection.id));
 }
 
 export async function disconnect(userId: string, provider: string): Promise<void> {
-  await db
-    .delete(mcpConnections)
-    .where(and(eq(mcpConnections.userId, userId), eq(mcpConnections.provider, provider)));
+  await db.delete(mcpConnections).where(and(eq(mcpConnections.userId, userId), eq(mcpConnections.provider, provider)));
 }
 
 export async function ensureValidToken(connection: McpConnection): Promise<McpResult<string>> {

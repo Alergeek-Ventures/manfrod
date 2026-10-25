@@ -46,7 +46,10 @@ export default async function RetrospectionPage({ searchParams }: { searchParams
 
   return (
     <div className="flex h-[calc(100svh-var(--header-height)-1rem)] min-h-0">
-      <LiveRefresh types={["retrospection_started", "retrospection_completed", "retrospection_failed"]} sources={selected?.outcome === "running" ? ["retrospector", "memory"] : []} />
+      <LiveRefresh
+        types={["retrospection_started", "retrospection_completed", "retrospection_failed"]}
+        sources={selected?.outcome === "running" ? ["retrospector", "memory"] : []}
+      />
       <ScrollArea className="w-80 shrink-0 border-r">
         <div className="flex flex-col gap-1 p-2">
           <p className="px-3 py-2 text-xs font-medium text-muted-foreground">Runs · last 7 days</p>
@@ -58,7 +61,9 @@ export default async function RetrospectionPage({ searchParams }: { searchParams
               </EmptyHeader>
             </Empty>
           ) : (
-            runs.map((run) => <RunItem key={run.startedAt.toISOString()} run={run} selected={selected?.startedAt.getTime() === run.startedAt.getTime()} />)
+            runs.map((run) => (
+              <RunItem key={run.startedAt.toISOString()} run={run} selected={selected?.startedAt.getTime() === run.startedAt.getTime()} />
+            ))
           )}
         </div>
       </ScrollArea>

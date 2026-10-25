@@ -29,19 +29,16 @@ export function parseExpansion(response: string, original: string): string[] {
   if (!Array.isArray(parsed)) return [original];
 
   const queries = parsed.filter((item): item is string => typeof item === "string").slice(0, 5);
-  const ordered = queries.includes(original)
-    ? [original, ...queries.filter((query) => query !== original)]
-    : [original, ...queries];
+  const ordered = queries.includes(original) ? [original, ...queries.filter((query) => query !== original)] : [original, ...queries];
   return ordered.slice(0, 3);
 }
 
 export async function expand(query: string, opts: { timeoutMs?: number } = {}): Promise<string[]> {
   try {
-    const response = await generateSimple(
-      FAST_MODEL,
-      [system(SYSTEM_MESSAGE), user(EXPANSION_PROMPT.replace("{{QUERY}}", query))],
-      { purpose: "query_expansion", timeoutMs: opts.timeoutMs ?? 10_000 },
-    );
+    const response = await generateSimple(FAST_MODEL, [system(SYSTEM_MESSAGE), user(EXPANSION_PROMPT.replace("{{QUERY}}", query))], {
+      purpose: "query_expansion",
+      timeoutMs: opts.timeoutMs ?? 10_000,
+    });
     return parseExpansion(response, query);
   } catch {
     return [query];

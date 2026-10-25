@@ -92,12 +92,7 @@ export async function listTools(url: string, accessToken: string): Promise<McpRe
   return { ok: true, value: Array.isArray(result.value.tools) ? result.value.tools : [] };
 }
 
-export async function callTool(
-  url: string,
-  accessToken: string,
-  name: string,
-  args: unknown,
-): Promise<McpResult<Record<string, any>>> {
+export async function callTool(url: string, accessToken: string, name: string, args: unknown): Promise<McpResult<Record<string, any>>> {
   const session = await initialize(url, accessToken);
   if (!session.ok) return session;
   return rpc(url, accessToken, session.value, "tools/call", { name, arguments: args });
@@ -106,9 +101,7 @@ export async function callTool(
 export function formatResult(result: Record<string, any>): string {
   if (Array.isArray(result.content)) {
     return result.content
-      .map((part: Record<string, unknown>) =>
-        part.type === "text" && typeof part.text === "string" ? part.text : JSON.stringify(part),
-      )
+      .map((part: Record<string, unknown>) => (part.type === "text" && typeof part.text === "string" ? part.text : JSON.stringify(part)))
       .join("\n");
   }
   return JSON.stringify(result);

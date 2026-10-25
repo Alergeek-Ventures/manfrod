@@ -77,8 +77,7 @@ export const tools = {
   }),
 
   get_fact: spec({
-    description:
-      "Look up a structured fact by key (vacations, meetings). Key format: 'absence:user_id:date', 'meeting:channel:ts'.",
+    description: "Look up a structured fact by key (vacations, meetings). Key format: 'absence:user_id:date', 'meeting:channel:ts'.",
     inputSchema: z.object({ key: z.string().describe("Exact fact key") }),
     async execute({ key }, ctx) {
       const fact = await getFact(key, ctx.readableLevels);

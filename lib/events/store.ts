@@ -5,10 +5,7 @@ import { toActivity, type Activity } from "./index.ts";
 
 const ae = tables.auditEvents;
 
-export async function getEventsSince(
-  since: Date,
-  opts: { limit?: number; types?: string[] } = {},
-): Promise<Activity[]> {
+export async function getEventsSince(since: Date, opts: { limit?: number; types?: string[] } = {}): Promise<Activity[]> {
   const conditions = [gt(ae.timestamp, since)];
   if (opts.types) conditions.push(inArray(ae.type, opts.types));
   const rows = await db
@@ -31,9 +28,7 @@ export interface RecentFilter {
 export async function listRecentFiltered(limit = 200, filter: RecentFilter = {}): Promise<Activity[]> {
   const conditions = [];
   if (!filter.includeAllLogs) {
-    conditions.push(
-      or(ne(ae.type, "log"), sql`(${ae.meta}->>'level')::text in ('warning', 'error')`),
-    );
+    conditions.push(or(ne(ae.type, "log"), sql`(${ae.meta}->>'level')::text in ('warning', 'error')`));
   }
   if (filter.from) conditions.push(gte(ae.timestamp, filter.from));
   if (filter.to) conditions.push(lte(ae.timestamp, filter.to));
@@ -133,11 +128,7 @@ export function agentRunFromEvents(start: Activity, end?: Activity): AgentRun {
     };
   }
 
-  const outcome: RunOutcome = end.type.endsWith("_completed")
-    ? "success"
-    : end.type.endsWith("_failed")
-      ? "failure"
-      : "running";
+  const outcome: RunOutcome = end.type.endsWith("_completed") ? "success" : end.type.endsWith("_failed") ? "failure" : "running";
 
   return {
     agent: "retrospector",
@@ -156,12 +147,7 @@ export async function listAgentRuns(days = 7): Promise<AgentRun[]> {
   const rows = await db
     .select()
     .from(ae)
-    .where(
-      and(
-        gte(ae.timestamp, cutoff),
-        inArray(ae.type, ["retrospection_started", "retrospection_completed", "retrospection_failed"]),
-      ),
-    )
+    .where(and(gte(ae.timestamp, cutoff), inArray(ae.type, ["retrospection_started", "retrospection_completed", "retrospection_failed"])))
     .orderBy(asc(ae.timestamp));
   const events = rows.map(toActivity);
   const starts = events.filter((e) => e.type === "retrospection_started");
@@ -172,10 +158,7 @@ export async function listAgentRuns(days = 7): Promise<AgentRun[]> {
       const end = ends.find(
         (candidate) =>
           candidate.timestamp >= start.timestamp &&
-          !starts.some(
-            (other) =>
-              other !== start && other.timestamp > start.timestamp && other.timestamp < candidate.timestamp,
-          ),
+          !starts.some((other) => other !== start && other.timestamp > start.timestamp && other.timestamp < candidate.timestamp),
       );
       return agentRunFromEvents(start, end);
     })
@@ -219,14 +202,7 @@ export async function aggregateLlmMetrics(days = 7) {
     .where(
       and(
         gte(ae.timestamp, cutoff),
-        inArray(ae.type, [
-          "llm_call_succeeded",
-          "llm_retry",
-          "llm_fallback",
-          "message_received",
-          "responding",
-          "action_started",
-        ]),
+        inArray(ae.type, ["llm_call_succeeded", "llm_retry", "llm_fallback", "message_received", "responding", "action_started"]),
       ),
     );
 
@@ -286,9 +262,10 @@ export async function aggregateLlmMetrics(days = 7) {
     daily.push(byDate.get(date) ?? blank(date));
   }
 
-  const totals = Object.fromEntries(
-    METRIC_KEYS.map((key) => [key, daily.reduce((sum, day) => sum + day[key], 0)]),
-  ) as Omit<DailyLlmMetrics, "date">;
+  const totals = Object.fromEntries(METRIC_KEYS.map((key) => [key, daily.reduce((sum, day) => sum + day[key], 0)])) as Omit<
+    DailyLlmMetrics,
+    "date"
+  >;
 
   return { daily, totals };
 }

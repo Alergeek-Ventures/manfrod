@@ -36,9 +36,7 @@ export async function extractAndStore(
     meta: { message_count: pending.length },
   });
 
-  const conversationText = pending
-    .map((message) => `${message.role === "user" ? "User" : "Assistant"}: ${message.content}`)
-    .join("\n\n");
+  const conversationText = pending.map((message) => `${message.role === "user" ? "User" : "Assistant"}: ${message.content}`).join("\n\n");
 
   try {
     const summary = !pending.some((message) => message.role === "user")
@@ -73,11 +71,7 @@ export async function extractAndStore(
   }
 }
 
-export async function extractSession(
-  sessionKey: string,
-  writeAccess: string[],
-  slackChannelId: string | null,
-): Promise<number> {
+export async function extractSession(sessionKey: string, writeAccess: string[], slackChannelId: string | null): Promise<number> {
   const authors = await pendingAuthorsForSession(sessionKey);
   for (const userId of authors) {
     log.info(`FlushHandler: idle detected for user ${userId}, session ${sessionKey}, triggering extraction`);

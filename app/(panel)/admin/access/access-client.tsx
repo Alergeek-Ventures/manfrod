@@ -162,7 +162,12 @@ function ChannelsTab({ data, run }: { data: AccessData; run: Run }) {
                   >
                     {channel.status === "active" ? "Deactivate" : "Activate"}
                   </Button>
-                  <ConfirmAction label="Delete" title="Delete this mapping?" confirmLabel="Delete" onConfirm={() => run(() => deleteMapping(channel.id))} />
+                  <ConfirmAction
+                    label="Delete"
+                    title="Delete this mapping?"
+                    confirmLabel="Delete"
+                    onConfirm={() => run(() => deleteMapping(channel.id))}
+                  />
                 </div>
               </TableCell>
             </TableRow>
@@ -203,11 +208,21 @@ function ProjectsTab({ data, run, pending }: { data: AccessData; run: Run; pendi
         >
           <Field>
             <FieldLabel htmlFor="project-slug">Slug</FieldLabel>
-            <Input id="project-slug" placeholder="client-abc" value={project.slug} onChange={(event) => setProject({ ...project, slug: event.target.value })} />
+            <Input
+              id="project-slug"
+              placeholder="client-abc"
+              value={project.slug}
+              onChange={(event) => setProject({ ...project, slug: event.target.value })}
+            />
           </Field>
           <Field>
             <FieldLabel htmlFor="project-name">Name</FieldLabel>
-            <Input id="project-name" placeholder="Client ABC Inc." value={project.name} onChange={(event) => setProject({ ...project, name: event.target.value })} />
+            <Input
+              id="project-name"
+              placeholder="Client ABC Inc."
+              value={project.name}
+              onChange={(event) => setProject({ ...project, name: event.target.value })}
+            />
           </Field>
         </FormDialog>
       }
@@ -302,7 +317,11 @@ function VacationsTab({ data, run, pending }: { data: AccessData; run: Run; pend
         >
           <Field>
             <FieldLabel>Person</FieldLabel>
-            <Select items={userItems} value={vacation.userId || null} onValueChange={(value) => setVacation({ ...vacation, userId: (value as string) ?? "" })}>
+            <Select
+              items={userItems}
+              value={vacation.userId || null}
+              onValueChange={(value) => setVacation({ ...vacation, userId: (value as string) ?? "" })}
+            >
               <SelectTrigger className="w-full">
                 <SelectValue placeholder="Select a person" />
               </SelectTrigger>
@@ -320,11 +339,21 @@ function VacationsTab({ data, run, pending }: { data: AccessData; run: Run; pend
           <div className="grid grid-cols-2 gap-4">
             <Field>
               <FieldLabel htmlFor="vacation-from">From</FieldLabel>
-              <Input id="vacation-from" type="date" value={vacation.startDate} onChange={(event) => setVacation({ ...vacation, startDate: event.target.value })} />
+              <Input
+                id="vacation-from"
+                type="date"
+                value={vacation.startDate}
+                onChange={(event) => setVacation({ ...vacation, startDate: event.target.value })}
+              />
             </Field>
             <Field>
               <FieldLabel htmlFor="vacation-to">To</FieldLabel>
-              <Input id="vacation-to" type="date" value={vacation.endDate} onChange={(event) => setVacation({ ...vacation, endDate: event.target.value })} />
+              <Input
+                id="vacation-to"
+                type="date"
+                value={vacation.endDate}
+                onChange={(event) => setVacation({ ...vacation, endDate: event.target.value })}
+              />
             </Field>
           </div>
           <Field>
@@ -374,7 +403,15 @@ function VacationsTab({ data, run, pending }: { data: AccessData; run: Run; pend
                 <div className="flex justify-end gap-1">
                   {editing?.id === row.id ? (
                     <>
-                      <Button size="sm" onClick={() => run(() => updateVacation(row.id, editing.value), () => setEditing(null))}>
+                      <Button
+                        size="sm"
+                        onClick={() =>
+                          run(
+                            () => updateVacation(row.id, editing.value),
+                            () => setEditing(null),
+                          )
+                        }
+                      >
                         Save
                       </Button>
                       <Button size="sm" variant="ghost" onClick={() => setEditing(null)}>
@@ -387,7 +424,12 @@ function VacationsTab({ data, run, pending }: { data: AccessData; run: Run; pend
                         <PencilIcon data-icon="inline-start" />
                         Edit
                       </Button>
-                      <ConfirmAction label="Delete" title="Delete this vacation?" confirmLabel="Delete" onConfirm={() => run(() => deleteVacation(row.id))} />
+                      <ConfirmAction
+                        label="Delete"
+                        title="Delete this vacation?"
+                        confirmLabel="Delete"
+                        onConfirm={() => run(() => deleteVacation(row.id))}
+                      />
                     </>
                   )}
                 </div>
@@ -435,13 +477,25 @@ function CronTab({ data, run }: { data: AccessData; run: Run }) {
                 </TableCell>
                 <TableCell>
                   {draft ? (
-                    <Input className="w-36 font-mono" value={draft.cron} onChange={(event) => setEditing({ ...draft, cron: event.target.value })} />
+                    <Input
+                      className="w-36 font-mono"
+                      value={draft.cron}
+                      onChange={(event) => setEditing({ ...draft, cron: event.target.value })}
+                    />
                   ) : (
                     <span className="font-mono text-xs">{row.cron}</span>
                   )}
                 </TableCell>
                 <TableCell>
-                  {draft ? <Input className="w-36" value={draft.timezone} onChange={(event) => setEditing({ ...draft, timezone: event.target.value })} /> : row.timezone}
+                  {draft ? (
+                    <Input
+                      className="w-36"
+                      value={draft.timezone}
+                      onChange={(event) => setEditing({ ...draft, timezone: event.target.value })}
+                    />
+                  ) : (
+                    row.timezone
+                  )}
                 </TableCell>
                 <TableCell>
                   <div>{row.owner_name ?? "–"}</div>
@@ -467,7 +521,15 @@ function CronTab({ data, run }: { data: AccessData; run: Run }) {
                     <div className="flex justify-end gap-1">
                       {draft ? (
                         <>
-                          <Button size="sm" onClick={() => run(() => saveCron(draft.id, draft.cron, draft.timezone, draft.instructions), () => setEditing(null))}>
+                          <Button
+                            size="sm"
+                            onClick={() =>
+                              run(
+                                () => saveCron(draft.id, draft.cron, draft.timezone, draft.instructions),
+                                () => setEditing(null),
+                              )
+                            }
+                          >
                             Save
                           </Button>
                           <Button size="sm" variant="ghost" onClick={() => setEditing(null)}>
@@ -484,7 +546,12 @@ function CronTab({ data, run }: { data: AccessData; run: Run }) {
                             <PencilIcon data-icon="inline-start" />
                             Edit
                           </Button>
-                          <ConfirmAction label="Delete" title="Delete this recurring reminder?" confirmLabel="Delete" onConfirm={() => run(() => deleteCron(row.id!))} />
+                          <ConfirmAction
+                            label="Delete"
+                            title="Delete this recurring reminder?"
+                            confirmLabel="Delete"
+                            onConfirm={() => run(() => deleteCron(row.id!))}
+                          />
                         </>
                       )}
                     </div>
@@ -531,7 +598,12 @@ function RemindersTab({ data, run }: { data: AccessData; run: Run }) {
               </TableCell>
               <TableCell>
                 <div className="flex justify-end">
-                  <ConfirmAction label="Cancel" title="Cancel this reminder?" confirmLabel="Cancel reminder" onConfirm={() => run(() => cancelReminder(reminder.id))} />
+                  <ConfirmAction
+                    label="Cancel"
+                    title="Cancel this reminder?"
+                    confirmLabel="Cancel reminder"
+                    onConfirm={() => run(() => cancelReminder(reminder.id))}
+                  />
                 </div>
               </TableCell>
             </TableRow>
@@ -574,7 +646,12 @@ function LinearTab({ data, run }: { data: AccessData; run: Run }) {
               <TableCell>
                 <div className="flex justify-end">
                   {connection.status === "connected" && (
-                    <ConfirmAction label="Revoke" title="Revoke this Linear connection?" confirmLabel="Revoke" onConfirm={() => run(() => revokeLinear(connection.id))} />
+                    <ConfirmAction
+                      label="Revoke"
+                      title="Revoke this Linear connection?"
+                      confirmLabel="Revoke"
+                      onConfirm={() => run(() => revokeLinear(connection.id))}
+                    />
                   )}
                 </div>
               </TableCell>

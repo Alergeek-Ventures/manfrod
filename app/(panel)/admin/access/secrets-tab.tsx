@@ -18,15 +18,7 @@ import { saveSecret, saveSecretDescription, removeSecret } from "./actions.ts";
 
 const placeholder = (name: string) => `{{ ${name} }}`;
 
-function SecretDialog({
-  run,
-  pending,
-  existing,
-}: {
-  run: Run;
-  pending: boolean;
-  existing?: { name: string; description: string | null };
-}) {
+function SecretDialog({ run, pending, existing }: { run: Run; pending: boolean; existing?: { name: string; description: string | null } }) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState({ name: existing?.name ?? "", value: "", description: existing?.description ?? "" });
   return (
@@ -92,7 +84,11 @@ function SecretDialog({
             </Field>
             <Field>
               <FieldLabel htmlFor="secret-description">Description</FieldLabel>
-              <Input id="secret-description" value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} />
+              <Input
+                id="secret-description"
+                value={draft.description}
+                onChange={(event) => setDraft({ ...draft, description: event.target.value })}
+              />
             </Field>
           </FieldGroup>
           <DialogFooter>
@@ -113,8 +109,8 @@ export function SecretsTab({ secrets, run, pending }: { secrets: AccessData["sec
       <CardHeader>
         <CardTitle>Secrets</CardTitle>
         <CardDescription>
-          Reference a secret in a skill or instruction as {placeholder("NAME")}. The agent only sees the placeholder; the value is filled in when a tool
-          runs. Tools that save notes, souls or reminders keep the placeholder.
+          Reference a secret in a skill or instruction as {placeholder("NAME")}. The agent only sees the placeholder; the value is filled in
+          when a tool runs. Tools that save notes, souls or reminders keep the placeholder.
         </CardDescription>
         <CardAction>
           <SecretDialog run={run} pending={pending} />

@@ -40,7 +40,12 @@ export async function saveVacation(userId: string, startDate: string, endDate: s
   await requireAdmin();
   if (userId === "" || startDate === "" || endDate === "") return { ok: false, message: "Select a person and vacation dates" };
   try {
-    await setFact(`absence:${userId}:${startDate}`, `${startDate}..${endDate} — ${note || "vacation"}`, ["internal", "external/all"], userId);
+    await setFact(
+      `absence:${userId}:${startDate}`,
+      `${startDate}..${endDate} — ${note || "vacation"}`,
+      ["internal", "external/all"],
+      userId,
+    );
   } catch (error) {
     return { ok: false, message: `Error: ${errorText(error)}` };
   }
@@ -87,7 +92,9 @@ export async function deleteCron(id: string): Promise<Result> {
   await requireAdmin();
   const reminder = await getRecurringReminderById(id);
   if (!reminder) return { ok: false, message: "Cron not found" };
-  return (await deleteRecurringReminder(reminder.userId, reminder)) ? done("Cron deleted") : { ok: false, message: "Failed to delete cron" };
+  return (await deleteRecurringReminder(reminder.userId, reminder))
+    ? done("Cron deleted")
+    : { ok: false, message: "Failed to delete cron" };
 }
 
 export async function cancelReminder(id: number): Promise<Result> {
@@ -108,7 +115,10 @@ export async function setMappingStatus(id: string, status: "active" | "pending")
 
 export async function deleteMapping(id: string): Promise<Result> {
   await requireAdmin();
-  const result = await db.delete(tables.channelMappings).where(eq(tables.channelMappings.id, id)).returning({ id: tables.channelMappings.id });
+  const result = await db
+    .delete(tables.channelMappings)
+    .where(eq(tables.channelMappings.id, id))
+    .returning({ id: tables.channelMappings.id });
   return result.length === 0 ? { ok: false, message: "Mapping not found" } : done("Deleted");
 }
 

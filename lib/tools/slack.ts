@@ -111,8 +111,7 @@ export const tools = {
     async execute({ channel, thread_ts }, ctx) {
       const explicit = blank(thread_ts);
       const named = blank(channel);
-      const threadTs =
-        explicit ?? ((named === null || named === ctx.msgCtx.channel) && ctx.msgCtx.threadTs ? ctx.msgCtx.threadTs : null);
+      const threadTs = explicit ?? ((named === null || named === ctx.msgCtx.channel) && ctx.msgCtx.threadTs ? ctx.msgCtx.threadTs : null);
       if (!threadTs) return "Podaj thread_ts wątku - pokazuje go read_slack_channel przy wiadomościach z odpowiedziami.";
       const resolved = await channelFor(channel, ctx.msgCtx);
       if (!resolved.ok) {
@@ -178,9 +177,7 @@ export const tools = {
       if (!files) return "Nie udało się pobrać listy canvasów: :api_error";
       if (files.length === 0) return "Brak canvasów w tym kanale.";
       const pinned = (await getChannelCanvasId(resolved.id)) ?? null;
-      return files
-        .map((file) => `${file.id}: ${file.title ?? "(bez tytułu)"}${file.id === pinned ? " [canvas kanału]" : ""}`)
-        .join("\n");
+      return files.map((file) => `${file.id}: ${file.title ?? "(bez tytułu)"}${file.id === pinned ? " [canvas kanału]" : ""}`).join("\n");
     },
   }),
 

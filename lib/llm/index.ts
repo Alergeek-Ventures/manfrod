@@ -1,11 +1,5 @@
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
-import {
-  APICallError,
-  generateText as aiGenerateText,
-  type LanguageModelUsage,
-  type ModelMessage,
-  type ToolSet,
-} from "ai";
+import { APICallError, generateText as aiGenerateText, type LanguageModelUsage, type ModelMessage, type ToolSet } from "ai";
 import { config } from "../config.ts";
 import { emit } from "../events/index.ts";
 import { cost } from "../pricing.ts";
@@ -72,11 +66,7 @@ function retryable(error: unknown): boolean {
   }
   if (error instanceof Error) {
     const name = error.name;
-    return (
-      name === "AbortError" ||
-      name === "TimeoutError" ||
-      /fetch failed|ECONNRESET|ETIMEDOUT|socket|network/i.test(error.message)
-    );
+    return name === "AbortError" || name === "TimeoutError" || /fetch failed|ECONNRESET|ETIMEDOUT|socket|network/i.test(error.message);
   }
   return false;
 }
@@ -130,11 +120,7 @@ function event(attribution: Attribution, meta: Record<string, unknown>) {
 
 type GenerateResult = Awaited<ReturnType<typeof aiGenerateText>>;
 
-async function callOnce(
-  entry: ChainEntry,
-  messages: ModelMessage[],
-  options: GenerateOptions,
-): Promise<GenerateResult> {
+async function callOnce(entry: ChainEntry, messages: ModelMessage[], options: GenerateOptions): Promise<GenerateResult> {
   const hasTools = options.tools !== undefined && Object.keys(options.tools).length > 0;
   const result = await aiGenerateText({
     model: chatModel(entry.model),
@@ -149,11 +135,7 @@ async function callOnce(
   return result;
 }
 
-async function withRetries(
-  entry: ChainEntry,
-  messages: ModelMessage[],
-  options: GenerateOptions,
-): Promise<GenerateResult> {
+async function withRetries(entry: ChainEntry, messages: ModelMessage[], options: GenerateOptions): Promise<GenerateResult> {
   const attribution: Attribution = { userId: options.userId, sessionKey: options.sessionKey };
   let lastError: unknown;
 
@@ -173,10 +155,7 @@ async function withRetries(
       const result = await callOnce(entry, messages, options);
       emit(
         "llm_call_succeeded",
-        event(
-          attribution,
-          usageMeta(entry.model, entry.provider, entry.tier, options.purpose, Date.now() - started, result.usage),
-        ),
+        event(attribution, usageMeta(entry.model, entry.provider, entry.tier, options.purpose, Date.now() - started, result.usage)),
       );
       return result;
     } catch (error) {
@@ -222,10 +201,7 @@ export class AllModelsFailedError extends Error {
   }
 }
 
-export async function generateText(
-  messages: ModelMessage[],
-  options: GenerateOptions,
-): Promise<GenerateResult> {
+export async function generateText(messages: ModelMessage[], options: GenerateOptions): Promise<GenerateResult> {
   const attribution: Attribution = { userId: options.userId, sessionKey: options.sessionKey };
   let lastError: unknown;
 
@@ -260,11 +236,7 @@ export interface SimpleOptions extends Attribution {
   timeoutMs?: number;
 }
 
-export async function generateSimple(
-  modelId: string,
-  messages: ModelMessage[],
-  options: SimpleOptions,
-): Promise<string> {
+export async function generateSimple(modelId: string, messages: ModelMessage[], options: SimpleOptions): Promise<string> {
   const attribution: Attribution = { userId: options.userId, sessionKey: options.sessionKey };
   const timeoutMs = options.timeoutMs ?? 30_000;
   let lastError: unknown;
@@ -291,10 +263,7 @@ export async function generateSimple(
       });
       emit(
         "llm_call_succeeded",
-        event(
-          attribution,
-          usageMeta(modelId, "openrouter", "free", options.purpose, Date.now() - started, result.usage),
-        ),
+        event(attribution, usageMeta(modelId, "openrouter", "free", options.purpose, Date.now() - started, result.usage)),
       );
       return result.text;
     } catch (error) {

@@ -60,28 +60,18 @@ export async function getRecurringReminderById(id: string): Promise<RecurringRem
   return row ?? null;
 }
 
-export async function listRecurringReminders(
-  userId: string,
-  opts: { enabled?: boolean } = {},
-): Promise<RecurringReminder[]> {
+export async function listRecurringReminders(userId: string, opts: { enabled?: boolean } = {}): Promise<RecurringReminder[]> {
   return db
     .select()
     .from(recurringReminders)
     .where(
-      and(
-        eq(recurringReminders.userId, userId),
-        opts.enabled === undefined ? undefined : eq(recurringReminders.enabled, opts.enabled),
-      ),
+      and(eq(recurringReminders.userId, userId), opts.enabled === undefined ? undefined : eq(recurringReminders.enabled, opts.enabled)),
     )
     .orderBy(asc(recurringReminders.name));
 }
 
 export async function listEnabledReminders(): Promise<RecurringReminder[]> {
-  return db
-    .select()
-    .from(recurringReminders)
-    .where(eq(recurringReminders.enabled, true))
-    .orderBy(asc(recurringReminders.name));
+  return db.select().from(recurringReminders).where(eq(recurringReminders.enabled, true)).orderBy(asc(recurringReminders.name));
 }
 
 export async function getRecurringReminder(userId: string, id: string): Promise<RecurringReminder | null> {
@@ -103,7 +93,10 @@ export async function createRecurringReminder(
 
   let reminder: RecurringReminder;
   try {
-    [reminder] = await db.insert(recurringReminders).values({ ...values, userId }).returning();
+    [reminder] = await db
+      .insert(recurringReminders)
+      .values({ ...values, userId })
+      .returning();
   } catch (error) {
     if (String((error as { code?: string }).code) === "23505") {
       throw new ValidationError({ name: "has already been taken" });
@@ -126,11 +119,7 @@ export async function updateRecurringReminder(
 ): Promise<RecurringReminder> {
   validate(attrs, false);
   const cronChanged = attrs.cron !== undefined && attrs.cron !== reminder.cron;
-  const [updated] = await db
-    .update(recurringReminders)
-    .set(attrs)
-    .where(eq(recurringReminders.id, reminder.id))
-    .returning();
+  const [updated] = await db.update(recurringReminders).set(attrs).where(eq(recurringReminders.id, reminder.id)).returning();
 
   if (cronChanged) await cancelPendingTriggerJobs(updated.id);
 
@@ -142,12 +131,8 @@ export async function updateRecurringReminder(
   return updated;
 }
 
-export async function deleteRecurringReminder(
-  userId: string,
-  reminderOrId: RecurringReminder | string,
-): Promise<RecurringReminder | null> {
-  const reminder =
-    typeof reminderOrId === "string" ? await getRecurringReminder(userId, reminderOrId) : reminderOrId;
+export async function deleteRecurringReminder(userId: string, reminderOrId: RecurringReminder | string): Promise<RecurringReminder | null> {
+  const reminder = typeof reminderOrId === "string" ? await getRecurringReminder(userId, reminderOrId) : reminderOrId;
   if (!reminder) return null;
 
   await cancelPendingTriggerJobs(reminder.id);

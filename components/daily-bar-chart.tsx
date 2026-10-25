@@ -1,15 +1,9 @@
-"use client"
+"use client";
 
-import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts"
+import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
 
-import { formatNumber } from "@/components/section-cards"
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
+import { formatNumber } from "@/components/section-cards";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   ChartContainer,
   ChartLegend,
@@ -17,11 +11,11 @@ import {
   ChartTooltip,
   ChartTooltipContent,
   type ChartConfig,
-} from "@/components/ui/chart"
+} from "@/components/ui/chart";
 
-export type Series = { key: string; label: string; color?: string }
+export type Series = { key: string; label: string; color?: string };
 
-const COLORS = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)"]
+const COLORS = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)"];
 
 export function DailyBarChart({
   title,
@@ -31,17 +25,17 @@ export function DailyBarChart({
   stacked = false,
   money = false,
 }: {
-  title: string
-  description?: string
-  data: object[]
-  series: Series[]
-  stacked?: boolean
-  money?: boolean
+  title: string;
+  description?: string;
+  data: object[];
+  series: Series[];
+  stacked?: boolean;
+  money?: boolean;
 }) {
-  const format = (value: number) => (money ? `$${value.toFixed(value < 1 ? 3 : 2)}` : formatNumber(value))
+  const format = (value: number) => (money ? `$${value.toFixed(value < 1 ? 3 : 2)}` : formatNumber(value));
   const config = Object.fromEntries(
-    series.map((item, index) => [item.key, { label: item.label, color: item.color ?? COLORS[index % COLORS.length] }])
-  ) satisfies ChartConfig
+    series.map((item, index) => [item.key, { label: item.label, color: item.color ?? COLORS[index % COLORS.length] }]),
+  ) satisfies ChartConfig;
   return (
     <Card>
       <CardHeader>
@@ -63,17 +57,11 @@ export function DailyBarChart({
             <ChartTooltip content={<ChartTooltipContent indicator="dot" />} />
             <ChartLegend content={<ChartLegendContent />} />
             {series.map((item) => (
-              <Bar
-                key={item.key}
-                dataKey={item.key}
-                fill={`var(--color-${item.key})`}
-                radius={4}
-                stackId={stacked ? "stack" : undefined}
-              />
+              <Bar key={item.key} dataKey={item.key} fill={`var(--color-${item.key})`} radius={4} stackId={stacked ? "stack" : undefined} />
             ))}
           </BarChart>
         </ChartContainer>
       </CardContent>
     </Card>
-  )
+  );
 }

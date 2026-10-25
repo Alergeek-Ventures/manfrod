@@ -77,7 +77,10 @@ function mapStrings(value: unknown, fn: (text: string) => string): unknown {
 }
 
 export class UnknownSecretError extends Error {
-  constructor(readonly names: string[], available: string[]) {
+  constructor(
+    readonly names: string[],
+    available: string[],
+  ) {
     super(
       `Unknown secret placeholder(s): ${names.join(", ")}. ` +
         (available.length > 0 ? `Available: ${available.join(", ")}.` : "No secrets are configured.") +
@@ -104,7 +107,9 @@ export function substituteWith<T>(input: T, values: Map<string, string>): { valu
 }
 
 export function redactWith<T>(output: T, values: Map<string, string>): T {
-  const entries = [...values.entries()].filter(([, secret]) => secret.length >= MIN_REDACT_LENGTH).sort((a, b) => b[1].length - a[1].length);
+  const entries = [...values.entries()]
+    .filter(([, secret]) => secret.length >= MIN_REDACT_LENGTH)
+    .sort((a, b) => b[1].length - a[1].length);
   if (entries.length === 0) return output;
   return mapStrings(output, (text) => entries.reduce((acc, [name, secret]) => acc.split(secret).join(placeholder(name)), text)) as T;
 }

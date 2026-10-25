@@ -1,0 +1,6 @@
+pnpm-lock.yaml
+pnpm-workspace.yaml
+db/drizzle/
+*.md
+.eve/
+.output/

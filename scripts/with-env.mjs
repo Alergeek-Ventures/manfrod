@@ -34,14 +34,7 @@ function infisicalEnv() {
 
   const result = spawnSync(
     "infisical",
-    [
-      "export",
-      "--env=dev",
-      "--path=/app",
-      "--format=dotenv",
-      "--domain=https://infisical.alergeek.me",
-      "--silent",
-    ],
+    ["export", "--env=dev", "--path=/app", "--format=dotenv", "--domain=https://infisical.alergeek.me", "--silent"],
     { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 20_000 },
   );
 

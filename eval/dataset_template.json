@@ -3,20 +3,8 @@
   "description": "Labeled dataset for memory classification eval. Samples picked from eval/slack_raw.json and manually labeled.",
   "label_schema": {
     "channel_kind": ["dm", "company", "project_internal", "project_public_client", "unknown"],
-    "expected_action": [
-      "ignore",
-      "create_memory",
-      "create_fact",
-      "propose_memory",
-      "requires_human_confirmation"
-    ],
-    "target_scope": [
-      "none",
-      "user/internal",
-      "company/internal",
-      "project/internal",
-      "project/public_client"
-    ],
+    "expected_action": ["ignore", "create_memory", "create_fact", "propose_memory", "requires_human_confirmation"],
+    "target_scope": ["none", "user/internal", "company/internal", "project/internal", "project/public_client"],
     "safety_class": ["safe", "internal_only", "client_safe", "private", "sensitive", "forbidden"],
     "fact_kind": [null, "vacation", "availability", "desk", "meeting", "project_status", "other"]
   },

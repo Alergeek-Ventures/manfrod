@@ -23,12 +23,24 @@ interface Filter {
 const ALL = "__all__";
 
 const formatDateTime = (iso: string, timeZone?: string) =>
-  new Date(iso).toLocaleString("en-US", { month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false, timeZone });
+  new Date(iso).toLocaleString("en-US", {
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+    timeZone,
+  });
 
 const subscribeNever = () => () => {};
 
 function useViewerTimeZone(): string | undefined {
-  const hydrated = useSyncExternalStore(subscribeNever, () => true, () => false);
+  const hydrated = useSyncExternalStore(
+    subscribeNever,
+    () => true,
+    () => false,
+  );
   return hydrated ? undefined : "UTC";
 }
 

@@ -11,7 +11,18 @@ import { ensureMapping } from "../memory/channel-detector.ts";
 import { createMessage, getRecentSessionMessages, lastSessionMessageAt } from "../memory/messages.ts";
 import { userAuth } from "../proactive.ts";
 import { containsSecret, languageHint, secretWarning } from "../security/secrets.ts";
-import { addReaction, botIdentity, fetchUserInfo, fetchUserName, getChannelInfo, listFullThread, listMessages, post, setStatus, type SlackBody } from "./api.ts";
+import {
+  addReaction,
+  botIdentity,
+  fetchUserInfo,
+  fetchUserName,
+  getChannelInfo,
+  listFullThread,
+  listMessages,
+  post,
+  setStatus,
+  type SlackBody,
+} from "./api.ts";
 import { firstDelivery, shared, threadSeen, userContext } from "./state.ts";
 import { allow, isAllowed, isKicked } from "./thread-permission.ts";
 
@@ -190,7 +201,9 @@ async function dispatch(
     await deliver();
   } catch (error) {
     if (!unresumable(error)) throw error;
-    log.warn(`Agent.Server: session for ${sessionKey} cannot be resumed (${(error as Error).name}), starting a fresh one from saved history`);
+    log.warn(
+      `Agent.Server: session for ${sessionKey} cannot be resumed (${(error as Error).name}), starting a fresh one from saved history`,
+    );
     await dispatcher.reset("session could not be resumed");
     await deliver();
   }

@@ -63,10 +63,7 @@ Respond with exactly one line: "respond", "react:<emoji>",
 `;
 
 export type GateDecision =
-  | { kind: "respond" }
-  | { kind: "react"; emoji: string }
-  | { kind: "react_and_respond"; emoji: string }
-  | { kind: "ignore" };
+  { kind: "respond" } | { kind: "react"; emoji: string } | { kind: "react_and_respond"; emoji: string } | { kind: "ignore" };
 
 const LINE_LIMIT = 800;
 

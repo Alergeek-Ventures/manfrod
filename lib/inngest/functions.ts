@@ -14,14 +14,7 @@ import { processAllBuckets, reviewProcessedGraph } from "../memory/retrospector.
 import { deliverProactive } from "../proactive.ts";
 import { scheduleCronSkills, scheduleFirmowidEvening, scheduleFirmowidMorning, scheduleReminders } from "../schedulers.ts";
 import { refresh as refreshGitleaks } from "../security/gitleaks.ts";
-import {
-  EVENTS,
-  inngest,
-  ROOT_THREAD_KEY,
-  type BufferPushedData,
-  type JobScheduledData,
-  type SessionActivityData,
-} from "./client.ts";
+import { EVENTS, inngest, ROOT_THREAD_KEY, type BufferPushedData, type JobScheduledData, type SessionActivityData } from "./client.ts";
 
 const tz = (cron: string) => `TZ=Europe/Warsaw ${cron}`;
 

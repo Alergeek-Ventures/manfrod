@@ -153,10 +153,15 @@ Message: "${sample.message_text ?? ""}"
 }
 
 function parse(text: string): { ok: true; value: Result["predicted"] } | { ok: false; error: string } {
-  const cleaned = text.replace(/```json\s*/gi, "").replace(/```\s*/gi, "").trim();
+  const cleaned = text
+    .replace(/```json\s*/gi, "")
+    .replace(/```\s*/gi, "")
+    .trim();
   try {
     const parsed = JSON.parse(cleaned);
-    return parsed && typeof parsed === "object" && "action" in parsed ? { ok: true, value: parsed } : { ok: false, error: "missing action field" };
+    return parsed && typeof parsed === "object" && "action" in parsed
+      ? { ok: true, value: parsed }
+      : { ok: false, error: "missing action field" };
   } catch (error) {
     return { ok: false, error: (error as Error).message };
   }
@@ -193,7 +198,10 @@ async function runChunk(chunk: Sample[], chunkIndex: number, total: number): Pro
 }
 
 function parseFirst(text: string): Result["predicted"] | null {
-  const cleaned = text.replace(/```json\s*/gi, "").replaceAll("```", "").trim();
+  const cleaned = text
+    .replace(/```json\s*/gi, "")
+    .replaceAll("```", "")
+    .trim();
   try {
     const parsed = JSON.parse(cleaned);
     const first = Array.isArray(parsed) ? parsed[0] : parsed;
@@ -263,7 +271,9 @@ async function runConcurrent(all: Sample[]): Promise<Result[]> {
         const index = next++;
         results[index] = await evaluate(all[index]);
         const result = results[index];
-        info(`  [${index + 1}/${all.length}] ${all[index].id} ${result.correct ? "✓" : "✗"} ${prediction(result)} (${result.predicted?.source ?? "error"})`);
+        info(
+          `  [${index + 1}/${all.length}] ${all[index].id} ${result.correct ? "✓" : "✗"} ${prediction(result)} (${result.predicted?.source ?? "error"})`,
+        );
       }
     }),
   );
@@ -305,7 +315,8 @@ function printReport(results: Result[]) {
     const fn = evaluated.filter((result) => result.sample.expected_action === action && prediction(result) !== action).length;
     const precision = tp + fp > 0 ? round1((tp / (tp + fp)) * 100) : null;
     const recall = tp + fn > 0 ? round1((tp / (tp + fn)) * 100) : null;
-    const f1 = precision !== null && recall !== null && precision + recall > 0 ? round1((2 * precision * recall) / (precision + recall)) : null;
+    const f1 =
+      precision !== null && recall !== null && precision + recall > 0 ? round1((2 * precision * recall) / (precision + recall)) : null;
     info(`  ${pad(action, 30)} ${pad(fmtPct(precision), 8)} ${pad(fmtPct(recall), 8)} ${pad(fmtPct(f1), 8)} ${tp}   ${fp}   ${fn}`);
   }
   info("");
@@ -359,7 +370,9 @@ function printReport(results: Result[]) {
     info(`  Failures (${failures.length}):`);
     for (const result of failures) {
       info("");
-      info(`    [${result.sample.id}] ${result.sample.channel_kind} | expected: ${result.sample.expected_action} | predicted: ${prediction(result)}`);
+      info(
+        `    [${result.sample.id}] ${result.sample.channel_kind} | expected: ${result.sample.expected_action} | predicted: ${prediction(result)}`,
+      );
       info(`    Msg: ${(result.sample.message_text ?? "").slice(0, 100)}`);
       info(`    Reason: ${result.sample.reason}`);
       if (result.predicted) info(`    LLM reasoning: ${result.predicted.reasoning}`);
@@ -437,7 +450,9 @@ if (dryRun) {
   info(`  Avg latency: Jev ${average(latencies.jev)}ms, LLM ${average(latencies.llm)}ms`);
   saveResults(results);
 } else {
-  const chunks = Array.from({ length: Math.ceil(samples.length / CHUNK_SIZE) }, (_, index) => samples.slice(index * CHUNK_SIZE, (index + 1) * CHUNK_SIZE));
+  const chunks = Array.from({ length: Math.ceil(samples.length / CHUNK_SIZE) }, (_, index) =>
+    samples.slice(index * CHUNK_SIZE, (index + 1) * CHUNK_SIZE),
+  );
   info(`  Chunks: ${chunks.length} (max ${CHUNK_SIZE} samples each)`);
   info("");
   const results: Result[] = [];

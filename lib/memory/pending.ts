@@ -79,14 +79,8 @@ export async function putConfirmation(botTs: string, channelId: string, payload:
     });
 }
 
-export async function getConfirmation(
-  botTs: string,
-): Promise<{ channelId: string; payload: ConfirmationPayload } | null> {
-  const [row] = await db
-    .select()
-    .from(memoryPendingConfirmations)
-    .where(eq(memoryPendingConfirmations.botTs, botTs))
-    .limit(1);
+export async function getConfirmation(botTs: string): Promise<{ channelId: string; payload: ConfirmationPayload } | null> {
+  const [row] = await db.select().from(memoryPendingConfirmations).where(eq(memoryPendingConfirmations.botTs, botTs)).limit(1);
   if (!row || row.expiresAt < new Date()) return null;
   return { channelId: row.channelId, payload: row.payload as unknown as ConfirmationPayload };
 }

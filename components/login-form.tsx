@@ -1,28 +1,18 @@
-"use client"
+"use client";
 
-import { useState } from "react"
+import { useState } from "react";
 
-import { cn } from "@/lib/utils"
-import { authClient } from "@/lib/auth-client"
+import { cn } from "@/lib/utils";
+import { authClient } from "@/lib/auth-client";
 
-import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Button } from "@/components/ui/button"
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
-import { Field, FieldDescription, FieldGroup } from "@/components/ui/field"
-import { Spinner } from "@/components/ui/spinner"
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Field, FieldDescription, FieldGroup } from "@/components/ui/field";
+import { Spinner } from "@/components/ui/spinner";
 
-export function LoginForm({
-  error,
-  className,
-  ...props
-}: React.ComponentProps<"div"> & { error?: string }) {
-  const [pending, setPending] = useState(false)
+export function LoginForm({ error, className, ...props }: React.ComponentProps<"div"> & { error?: string }) {
+  const [pending, setPending] = useState(false);
   return (
     <div className={cn("flex flex-col gap-6", className)} {...props}>
       <Card>
@@ -42,8 +32,8 @@ export function LoginForm({
                 variant="outline"
                 disabled={pending}
                 onClick={async () => {
-                  setPending(true)
-                  await authClient.signIn.social({ provider: "google", callbackURL: "/", errorCallbackURL: "/login" })
+                  setPending(true);
+                  await authClient.signIn.social({ provider: "google", callbackURL: "/", errorCallbackURL: "/login" });
                 }}
               >
                 {pending ? (
@@ -64,5 +54,5 @@ export function LoginForm({
         </CardContent>
       </Card>
     </div>
-  )
+  );
 }
