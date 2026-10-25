@@ -190,9 +190,8 @@ decryption and the Oban import. Run it before and after the cutover.
   longer used.
 - Build: `pnpm build` (eve build + next build). Start: `pnpm start`
   (migrations, then `next start`).
-- `deployment/coolify/compose.yml`: app, Inngest (SQLite on a volume),
-  ParadeDB (unchanged). eve workflow state lives in `.eve/.workflow-data` on a
-  volume.
+- Coolify: separate resources for ParadeDB, Inngest and the app. eve
+  workflow state lives in `.eve/.workflow-data` on a volume.
 
 ## Future: self-modification
 

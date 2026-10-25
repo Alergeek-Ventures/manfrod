@@ -102,8 +102,10 @@ stream; if `chat.startStream` fails the answer is posted as one message.
 
 ## Deployment
 
-`deployment/coolify/compose.yml` runs the app, a self-hosted Inngest server
-and ParadeDB. Secrets are listed in `deployment/coolify/.env.example`.
-`LINEAR_ENCRYPTION_KEY` must stay the same as before, or stored Linear keys
+Production runs on Coolify as three separate resources: a ParadeDB database
+(with scheduled backups to S3), Inngest, and the app built from `Dockerfile`
+on port 35233 with a persistent volume at `/app/.eve/.workflow-data`. Pushes
+to `main` deploy the app through `.github/workflows/deploy-production.yml`,
+which syncs secrets from Infisical. `LINEAR_ENCRYPTION_KEY` must stay the same as before, or stored Linear keys
 cannot be decrypted. After the first deploy, run `pnpm db:verify` against the
 production database.
