@@ -1,4 +1,4 @@
-import { FAST_MODEL, generateSimple, system, user } from "../llm/index.ts";
+import { PRIMARY_MODEL, generateSimple, system, user } from "../llm/index.ts";
 
 const SYSTEM_MESSAGE =
   "You are a query expansion assistant. Rewrite search queries into multiple variations to improve retrieval. Always output valid JSON arrays only, no other text.";
@@ -35,7 +35,7 @@ export function parseExpansion(response: string, original: string): string[] {
 
 export async function expand(query: string, opts: { timeoutMs?: number } = {}): Promise<string[]> {
   try {
-    const response = await generateSimple(FAST_MODEL, [system(SYSTEM_MESSAGE), user(EXPANSION_PROMPT.replace("{{QUERY}}", query))], {
+    const response = await generateSimple(PRIMARY_MODEL, [system(SYSTEM_MESSAGE), user(EXPANSION_PROMPT.replace("{{QUERY}}", query))], {
       purpose: "query_expansion",
       timeoutMs: opts.timeoutMs ?? 10_000,
     });

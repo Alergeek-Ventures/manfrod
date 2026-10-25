@@ -1,4 +1,4 @@
-import { FAST_MODEL, generateSimple, system, user } from "../llm/index.ts";
+import { PRIMARY_MODEL, generateSimple, system, user } from "../llm/index.ts";
 import { logger } from "../log.ts";
 import { matches } from "./gitleaks.ts";
 
@@ -62,7 +62,7 @@ export async function secretWarning(context: string | null, fallbackLang: "pl" |
   const content =
     context && context !== "" ? `Recent messages from this person, oldest first (language/tone reference only):\n${context}` : fallbackLang;
   try {
-    const text = await generateSimple(FAST_MODEL, [system(SYSTEM_MESSAGE), user(content)], {
+    const text = await generateSimple(PRIMARY_MODEL, [system(SYSTEM_MESSAGE), user(content)], {
       purpose: "secret_warning",
       timeoutMs: 8_000,
     });
