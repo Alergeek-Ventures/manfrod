@@ -3,7 +3,7 @@ import { isEmptyReply } from "../agent/system-prompt.ts";
 import { planTitle, threadTitle } from "../agent/titles.ts";
 import { logger } from "../log.ts";
 import { isUntitledProactiveThread, markProactiveThreadTitled } from "../proactive.ts";
-import { toolCtx, type ToolCtx } from "../tools/context.ts";
+import { toolCtx, type ToolCtx } from "../agent/context.ts";
 import { post, setStatus, setTitle, type SlackBody } from "./api.ts";
 import { feedbackBlock, feedbackChunk } from "./feedback.ts";
 import { fromMarkdown, toBlocks } from "./mrkdwn.ts";

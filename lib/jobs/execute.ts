@@ -7,7 +7,7 @@ import { logger } from "../log.ts";
 import { builtinProviders, ensureValidToken, getConnection } from "../mcp/index.ts";
 import { getRecurringReminder } from "../memory/reminders.ts";
 import { deliverProactive, startThread, userAuth } from "../proactive.ts";
-import { get as getSkill } from "../skills.ts";
+import { get as getRoutine } from "../routines.ts";
 
 export class JobError extends Error {}
 
@@ -73,7 +73,7 @@ async function skillRunnerAuth(): Promise<HandoffAuth> {
 
 export async function runSkill(skillName: string, userId: string | null): Promise<void> {
   const log = logger("SkillRunner");
-  const skill = getSkill(skillName);
+  const skill = getRoutine(skillName);
   if (!skill) {
     log.error(`SkillRunner: cannot run '${skillName}': not_found`);
     throw new JobError("not_found");

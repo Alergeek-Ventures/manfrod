@@ -9,7 +9,7 @@ import { decideAction, type MemoryAction } from "./action-decider.ts";
 import { logger } from "../log.ts";
 import { ensureValidToken, getConnection } from "../mcp/index.ts";
 import { sendProactive } from "../proactive.ts";
-import { getBody } from "../skills.ts";
+import { getBody } from "../routines.ts";
 import { post } from "../slack/api.ts";
 import { isValidIsoDate, localToday, weekdayName } from "../time.ts";
 import { embedQuery } from "../voyage.ts";

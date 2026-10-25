@@ -5,7 +5,7 @@ import { listPendingJobs } from "../jobs/index.ts";
 import { listConnections } from "../linear/index.ts";
 import { listInstallations } from "../linear/installation.ts";
 import { listAllRecurringReminders } from "../memory/reminders.ts";
-import { listCronSkills } from "../skills.ts";
+import { listCronRoutines } from "../routines.ts";
 
 const { agentSecrets, channelMappings, facts, projectMemberships, projects: projectsTable, users: usersTable } = tables;
 const stamp = (value: unknown) => (value instanceof Date ? value.toISOString() : value ? String(value) : null);
@@ -87,7 +87,7 @@ export async function loadAccessData() {
   ).map((row) => ({ ...row, inserted_at: stamp(row.inserted_at), updated_at: stamp(row.updated_at) }));
 
   const cronRows = [
-    ...listCronSkills().map((skill) => ({
+    ...listCronRoutines().map((skill) => ({
       type: "skill" as const,
       id: null as string | null,
       name: skill.name,

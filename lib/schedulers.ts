@@ -5,7 +5,7 @@ import { enqueue } from "./jobs/index.ts";
 import { logger } from "./log.ts";
 import { builtinProviders, ensureValidToken, listConnectionsForProvider } from "./mcp/index.ts";
 import { listEnabledReminders } from "./memory/reminders.ts";
-import { listCronSkills, parseCron, type SkillMeta } from "./skills.ts";
+import { listCronRoutines, parseCron, type RoutineMeta } from "./routines.ts";
 import { addDays, isoSeconds, localIsoWithOffset, localToday, TIMEZONE, zonedToUtc } from "./time.ts";
 
 const SCHEDULE_WINDOW_HOURS = 12;
@@ -70,7 +70,7 @@ function randomInstant(date: string, start: string, end: string): Date {
   return new Date(startAt + Math.floor(Math.random() * span) * 1000);
 }
 
-async function scheduleRandomOnce(skill: SkillMeta, date: string, start: string, end: string, userId: string | null) {
+async function scheduleRandomOnce(skill: RoutineMeta, date: string, start: string, end: string, userId: string | null) {
   const args: Record<string, unknown> = { skill_name: skill.name, date };
   if (userId) args.user_id = userId;
   const uniqueKey = userId ? `skill_trigger:${skill.name}:${userId}:${date}` : `skill_trigger:${skill.name}:${date}`;
@@ -78,7 +78,7 @@ async function scheduleRandomOnce(skill: SkillMeta, date: string, start: string,
   return conflict ? 0 : 1;
 }
 
-async function scheduleSkill(skill: SkillMeta, now: Date): Promise<number> {
+async function scheduleSkill(skill: RoutineMeta, now: Date): Promise<number> {
   const log = logger("SkillSchedulerWorker");
   const parsed = parseCron(skill.cron, TIMEZONE);
   if (!parsed) {
@@ -124,7 +124,7 @@ export async function scheduleCronSkills(now = new Date()): Promise<number> {
   const log = logger("SkillSchedulerWorker");
   log.info("SkillSchedulerWorker: scheduling cron-skill triggers");
   let count = 0;
-  for (const skill of listCronSkills()) count += await scheduleSkill(skill, now);
+  for (const skill of listCronRoutines()) count += await scheduleSkill(skill, now);
   log.info(`SkillSchedulerWorker: scheduled ${count} new trigger job(s)`);
   return count;
 }

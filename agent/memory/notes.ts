@@ -2,7 +2,7 @@ import { defineMemory, defineMemoryProvider } from "eve/memory";
 import { logger } from "../../lib/log.ts";
 import { projectIdForChannel } from "../../lib/memory/access.ts";
 import { getNoteContext } from "../../lib/memory/search.ts";
-import { toolCtx } from "../../lib/tools/context.ts";
+import { toolCtx } from "../../lib/agent/context.ts";
 
 const NOTE_QUERY_CHARS = 2_000;
 const log = logger("Agent.Notes");
