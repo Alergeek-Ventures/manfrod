@@ -1,4 +1,6 @@
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { getGoogleAccount } from "@/lib/accounts.ts";
+import { calendarStatus } from "@/lib/google.ts";
 import { getConnection as getKalafiornia } from "@/lib/kalafiornia.ts";
 import { listConnections, providersForUser } from "@/lib/mcp/index.ts";
 import { requireUser } from "@/lib/web/session.ts";
@@ -14,6 +16,7 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
     [...(await listConnections(user.id)).entries()].map(([provider, connection]) => [provider, connection.status]),
   );
   const kalafiornia = await getKalafiornia(user.id);
+  const calendar = await calendarStatus(await getGoogleAccount(user.id));
 
   return (
     <div className="flex flex-col gap-6 p-4 lg:p-6">
@@ -36,6 +39,7 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
         custom={providers.filter((provider) => provider.custom)}
         connections={connections}
         kalafiornia={kalafiornia ? { email: kalafiornia.email } : null}
+        calendar={{ status: calendar, email: user.email }}
         defaultEmail={kalafiornia?.email ?? user.email ?? ""}
       />
     </div>

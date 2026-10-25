@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { PlusIcon } from "lucide-react";
+import { CalendarIcon, PlusIcon } from "lucide-react";
 import { toast } from "sonner";
 import { ConfirmAction } from "@/components/confirm-action";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -12,6 +12,8 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
+import { authClient } from "@/lib/auth-client";
+import type { CalendarStatus } from "@/lib/google.ts";
 import {
   addCustomProvider,
   disconnectProvider,
@@ -279,6 +281,54 @@ function KalafiorniaCard({
   );
 }
 
+const CALENDAR_STATES: Record<CalendarStatus, { badge: React.ReactNode; description: (email: string | null) => string }> = {
+  connected: { badge: <Badge>Connected</Badge>, description: (email) => `Connected as ${email ?? "your Google account"}` },
+  expired: {
+    badge: <Badge variant="destructive">Expired</Badge>,
+    description: () => "Google no longer accepts the saved access. Reconnect to let Manfrod read your calendar again.",
+  },
+  missing_scope: {
+    badge: <Badge variant="destructive">No calendar access</Badge>,
+    description: () => "You signed in without calendar access. Reconnect and allow it.",
+  },
+  not_connected: { badge: <Badge variant="outline">Not connected</Badge>, description: () => "Lets Manfrod read your calendar events" },
+};
+
+function GoogleCalendarCard({ status, email }: { status: CalendarStatus; email: string | null }) {
+  const [pending, setPending] = useState(false);
+  const state = CALENDAR_STATES[status];
+  return (
+    <Card>
+      <CardHeader className="flex items-center gap-3">
+        <Avatar className="size-10 rounded-lg">
+          <AvatarFallback className="rounded-lg">
+            <CalendarIcon />
+          </AvatarFallback>
+        </Avatar>
+        <div className="flex min-w-0 flex-col gap-1">
+          <CardTitle>Google Calendar</CardTitle>
+          <CardDescription>{state.description(email)}</CardDescription>
+        </div>
+        <CardAction>{state.badge}</CardAction>
+      </CardHeader>
+      <CardFooter>
+        <Button
+          size="sm"
+          variant={status === "connected" ? "outline" : "default"}
+          disabled={pending}
+          onClick={async () => {
+            setPending(true);
+            await authClient.signIn.social({ provider: "google", callbackURL: "/integrations", errorCallbackURL: "/integrations" });
+          }}
+        >
+          {pending && <Spinner data-icon="inline-start" />}
+          {status === "not_connected" ? "Connect" : "Reconnect"}
+        </Button>
+      </CardFooter>
+    </Card>
+  );
+}
+
 function SectionTitle({ title, description }: { title: string; description?: string }) {
   return (
     <div className="flex flex-col gap-1">
@@ -293,12 +343,14 @@ export function IntegrationsClient({
   custom,
   connections,
   kalafiornia,
+  calendar,
   defaultEmail,
 }: {
   builtin: ProviderView[];
   custom: ProviderView[];
   connections: Record<string, string>;
   kalafiornia: { email: string } | null;
+  calendar: { status: CalendarStatus; email: string | null };
   defaultEmail: string;
 }) {
   const [pending, startTransition] = useTransition();
@@ -336,6 +388,7 @@ export function IntegrationsClient({
       <section className="flex flex-col gap-4">
         <SectionTitle title="Other integrations" />
         <div className="grid grid-cols-1 gap-4 @xl/main:grid-cols-2 @4xl/main:grid-cols-3">
+          <GoogleCalendarCard status={calendar.status} email={calendar.email} />
           <KalafiorniaCard connection={kalafiornia} defaultEmail={defaultEmail} run={run} pending={pending} />
         </div>
       </section>
