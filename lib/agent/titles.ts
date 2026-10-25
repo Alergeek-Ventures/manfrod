@@ -1,4 +1,4 @@
-import { FAST_MODEL, generateSimple, system, user } from "../llm/index.ts";
+import { PRIMARY_MODEL, generateSimple, system, user } from "../llm/index.ts";
 import { logger } from "../log.ts";
 
 const log = logger("Titles");
@@ -28,7 +28,7 @@ function fallbackTitle(content: string): string {
 
 export async function threadTitle(content: string): Promise<string> {
   try {
-    const title = await generateSimple(FAST_MODEL, [system(THREAD_TITLE_SYSTEM), user(content)], {
+    const title = await generateSimple(PRIMARY_MODEL, [system(THREAD_TITLE_SYSTEM), user(content)], {
       purpose: "thread_title",
       timeoutMs: 8_000,
     });
@@ -58,7 +58,7 @@ export async function planTitle(request: string | null | undefined): Promise<str
   if (typeof request !== "string") return null;
   const trimmed = request.length > PLAN_REQUEST_LIMIT ? request.slice(-PLAN_REQUEST_LIMIT) : request;
   try {
-    const title = await generateSimple(FAST_MODEL, [system(PLAN_TITLE_SYSTEM), user(trimmed)], {
+    const title = await generateSimple(PRIMARY_MODEL, [system(PLAN_TITLE_SYSTEM), user(trimmed)], {
       purpose: "plan_title",
       timeoutMs: 6_000,
     });
