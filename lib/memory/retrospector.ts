@@ -14,7 +14,7 @@ import { MEMORY_CHAIN, generateText, system, user } from "../llm/index.ts";
 import { logger } from "../log.ts";
 import { addDays, dateIsoInZone, localToday, weekdayName } from "../time.ts";
 import { embedQuery } from "../voyage.ts";
-import { accessEquals, isPrivate } from "./access.ts";
+import { accessEquals } from "./access.ts";
 import {
   createLink,
   createNode,
@@ -113,6 +113,10 @@ When consolidating duplicates, prefer update_node over delete+create:
 3. Delete the other node
 
 This preserves the surviving node's ID, links, and provenance.
+
+You work on one access scope per run. Nodes from other scopes can show up as
+neighbors and can be linked, but only nodes from this scope can be edited or
+deleted — when a duplicate pair spans scopes, delete this scope's copy.
 
 ## Link Context
 
@@ -349,7 +353,6 @@ async function absorb(survivor: Node, loser: Node, groupIds: Set<string>) {
     const other = link.nodeAId === loser.id ? link.nodeBId : link.nodeAId;
     if (!groupIds.has(other)) await createLink(null, survivor.id, other, { context: link.context });
   }
-  await db.delete(links).where(or(eq(links.nodeAId, loser.id), eq(links.nodeBId, loser.id)));
   await db.delete(nodes).where(eq(nodes.id, loser.id));
   await broadcast("memory_node_deleted", {
     userId: loser.userId,
@@ -358,9 +361,15 @@ async function absorb(survivor: Node, loser: Node, groupIds: Set<string>) {
   });
 }
 
-function bucketReadableLevels(bucket: string[]): string[] {
-  return isPrivate(bucket) ? bucket : [...new Set(["internal", ...bucket])];
+export function bucketReadableLevels(bucket: string[]): string[] {
+  if (bucket.includes("external/all")) return ["external/all"];
+  const clients = bucket.filter((level) => level.startsWith("external/"));
+  if (clients.length > 0) return clients.length === 1 ? [clients[0], "external/all"] : ["external/all"];
+  if (bucket.includes("internal")) return ["internal", "external/all"];
+  return bucket;
 }
+
+const sameLevels = (a: string[], b: string[]) => a.length === b.length && a.every((level) => b.includes(level));
 
 async function findBucketUserId(bucket: string[]): Promise<string | null> {
   const [row] = await db
@@ -441,25 +450,25 @@ function writtenOn(node: Node): string {
 
 async function formatNodes(list: Node[], readableLevels: string[]): Promise<string> {
   if (list.length === 0) return "";
-  const names = await projectNames();
-  const souls = await soulNodeIds();
+  const [names, souls] = await Promise.all([projectNames(), soulNodeIds()]);
   const soulTag = (node: Node) => (souls.has(node.id) ? " [soul]" : "");
   const projectTag = (node: Node) => {
     const name = node.projectId ? names.get(node.projectId) : undefined;
     return name ? ` [project: ${name}]` : "";
   };
 
-  const lines: string[] = [];
-  for (const node of list) {
-    const base = `- [${node.id}]${soulTag(node)}${projectTag(node)} (${writtenOn(node)}) ${node.content}`;
-    const neighbors = await similarNodes(node, readableLevels, { limit: NEIGHBOR_LIMIT, maxDistance: NEIGHBOR_MAX_DISTANCE });
-    const neighborLines = neighbors.map(({ node: other, distance }) => {
-      const similarity = Math.round((1 - distance) * 100) / 100;
-      const flag = distance < LIKELY_DUPLICATE_DISTANCE ? " LIKELY DUPLICATE —" : "";
-      return `    ~ [${other.id}]${soulTag(other)}${projectTag(other)} (${writtenOn(other)}, sim ${similarity})${flag} ${other.content}`;
-    });
-    lines.push([base, ...neighborLines].join("\n"));
-  }
+  const lines = await Promise.all(
+    list.map(async (node) => {
+      const base = `- [${node.id}]${soulTag(node)}${projectTag(node)} (${writtenOn(node)}) ${node.content}`;
+      const neighbors = await similarNodes(node, readableLevels, { limit: NEIGHBOR_LIMIT, maxDistance: NEIGHBOR_MAX_DISTANCE });
+      const neighborLines = neighbors.map(({ node: other, distance }) => {
+        const similarity = Math.round((1 - distance) * 100) / 100;
+        const flag = distance < LIKELY_DUPLICATE_DISTANCE ? " LIKELY DUPLICATE —" : "";
+        return `    ~ [${other.id}]${soulTag(other)}${projectTag(other)} (${writtenOn(other)}, sim ${similarity})${flag} ${other.content}`;
+      });
+      return [base, ...neighborLines].join("\n");
+    }),
+  );
   return lines.join("\n");
 }
 
@@ -545,9 +554,9 @@ async function runAgent(
   budget: RunBudget = newBudget(),
   stopWhen?: () => Promise<boolean>,
 ): Promise<boolean> {
-  const slipboxText = await formatNodes(slipbox, readableLevels);
-  const reviewText = await formatNodes(reviewSample, readableLevels);
-  const timeBoundText = await formatNodes(timeBound, readableLevels);
+  const [slipboxText, reviewText, timeBoundText] = await Promise.all(
+    [slipbox, reviewSample, timeBound].map((list) => formatNodes(list, readableLevels)),
+  );
 
   await broadcast("retrospection_started", {
     userId,
@@ -775,6 +784,8 @@ function definitions(): ToolSet {
 
 const unknownProject = (name: string) => `Nie znalazłem projektu "${name}" — sprawdź listę przez list_projects.`;
 const soulMessage = (id: string) => `Node ${id} is a soul — it can't be rewritten or deleted here. Link to it instead.`;
+const foreignScopeMessage = (id: string) =>
+  `Node ${id} belongs to a different access scope than this run — you can link to it, but only edit or delete nodes from this scope. If a node from this scope duplicates it, delete that copy instead: everyone who sees this scope can already see ${id}.`;
 
 async function resolveProjectId(name: string | undefined): Promise<{ ok: true; id: string | null } | { ok: false }> {
   if (name === undefined || name === null) return { ok: true, id: null };
@@ -800,6 +811,12 @@ type Handler = (args: Record<string, any>) => Promise<string>;
 
 async function toolHandlers(userId: string, readableLevels: string[], writeAccess: string[]): Promise<Record<string, Handler>> {
   const createUserId = await systemUserId("system:retrospector", "Retrospector", "retrospector@system.manfrod");
+
+  const notEditable = async (id: string): Promise<string | null> => {
+    const node = await getNodeAccessible(readableLevels, id);
+    if (!node) return `Node not found: ${id}`;
+    return sameLevels(node.access, writeAccess) ? null : foreignScopeMessage(id);
+  };
 
   return {
     async search(args) {
@@ -852,6 +869,8 @@ async function toolHandlers(userId: string, readableLevels: string[], writeAcces
     },
     async update_node(args) {
       if (await isSoul(args.id)) return soulMessage(args.id);
+      const refusal = await notEditable(args.id);
+      if (refusal) return refusal;
       const project = await resolveProjectId(args.project);
       if (!project.ok) return unknownProject(args.project);
       let embedding: number[];
@@ -870,13 +889,23 @@ async function toolHandlers(userId: string, readableLevels: string[], writeAcces
       }
     },
     async create_link(args) {
-      const result = await createLink(userId, args.node_a_id, args.node_b_id, args.context ? { context: args.context } : {});
+      const [a, b] = await Promise.all([
+        getNodeAccessible(readableLevels, args.node_a_id),
+        getNodeAccessible(readableLevels, args.node_b_id),
+      ]);
+      if (!a || !b) return `Node not found: ${!a ? args.node_a_id : args.node_b_id}`;
+      const result = await createLink(userId, a.id, b.id, args.context ? { context: args.context } : {});
       return result.ok ? `Linked ${args.node_a_id} <-> ${args.node_b_id}` : `Failed to create link: ${result.error}`;
     },
     async mark_processed(args) {
+      const refusal = await notEditable(args.id);
+      if (refusal) return refusal;
       return (await markProcessedAccessible(readableLevels, args.id)) ? `Marked ${args.id} as processed` : `Node not found: ${args.id}`;
     },
     async delete_node(args) {
+      if (await isSoul(args.id)) return soulMessage(args.id);
+      const refusal = await notEditable(args.id);
+      if (refusal) return refusal;
       const result = await deleteNodeAccessible(readableLevels, args.id);
       if (result.ok) return `Deleted node: ${args.id}`;
       return result.error === "soul" ? soulMessage(args.id) : `Node not found: ${args.id}`;
