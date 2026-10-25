@@ -11,7 +11,7 @@ describe("containsSecret", () => {
     expect(containsSecret("tutaj klucz: qX7pL2vR9zK4mN8wJ3hT6yB1cF5dS0gA-uE_oP")).toBe(true);
     expect(containsSecret("token=Zm9vYmFyLXJhbmRvbS1sb29raW5nLXRlc3QtdG9rZW4tMTIzNDU")).toBe(true);
     expect(containsSecret("ważne hasło: X9jo84N8LCpGpds!")).toBe(true);
-    expect(containsSecret("api key: new1_98a23ce2152c40bca6d7a98c494ff02a")).toBe(true);
+    expect(containsSecret("api key: new1_890ca0d4ad79b01b02f9d6e835bd42bf")).toBe(true);
   });
 
   it("does not flag ordinary sentences", () => {
