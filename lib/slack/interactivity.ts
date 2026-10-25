@@ -1,5 +1,15 @@
 import { disconnect } from "../linear/index.ts";
-import { CONNECT_CALLBACK_ID, getProject, handleConnectSubmission, openConnectModal, refresh } from "../linear/status.ts";
+import {
+  CONNECT_CALLBACK_ID,
+  getProject,
+  handleConnectSubmission,
+  handleTeamPick,
+  INSTALL_ACTION_ID,
+  openConnectModal,
+  PICK_TEAM_ACTION_ID,
+  refresh,
+  selectedTeam,
+} from "../linear/status.ts";
 import { logger } from "../log.ts";
 import { preselectedLevels, resolveEscalation } from "../memory/classifier.ts";
 import { FEEDBACK_ACTION_ID, recordFeedback, REMOVE_ACTION_ID, removeMessage } from "./feedback.ts";
@@ -10,6 +20,8 @@ const log = logger("Slack.EventHandler");
 const OWNED_ACTIONS = new Set([
   "linear_connect",
   "linear_disconnect",
+  INSTALL_ACTION_ID,
+  PICK_TEAM_ACTION_ID,
   FEEDBACK_ACTION_ID,
   REMOVE_ACTION_ID,
   "memory_escalation_save",
@@ -43,9 +55,14 @@ async function handleBlockActions(payload: Record<string, any>) {
     case "linear_disconnect": {
       await disconnect(action.value);
       const project = await getProject(action.value);
-      if (project) await refresh(payload.response_url, project);
+      if (project) await refresh(payload.response_url, project, payload.user?.id ?? null);
       return;
     }
+    case PICK_TEAM_ACTION_ID:
+      await handleTeamPick(payload.user?.id, action.block_id ?? "", action.selected_option?.value ?? "", payload.response_url ?? null);
+      return;
+    case INSTALL_ACTION_ID:
+      return;
   }
   if (!channelId || !botTs) return;
   switch (action.action_id) {
@@ -92,8 +109,7 @@ export function interceptInteractivity(headers: Headers, body: string): Intercep
   const work = (async () => {
     try {
       if (ownedSubmission) {
-        const apiKey = payload.view?.state?.values?.api_key_block?.api_key_input?.value ?? null;
-        await handleConnectSubmission(payload.view.private_metadata, payload.user?.id, apiKey);
+        await handleConnectSubmission(payload.view.private_metadata, payload.user?.id, selectedTeam(payload));
       } else {
         await handleBlockActions(payload);
       }

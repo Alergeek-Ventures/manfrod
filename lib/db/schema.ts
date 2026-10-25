@@ -10,6 +10,7 @@ import {
   googleIdentities,
   jobs,
   kalafiorniaConnections,
+  linearInstallations,
   links,
   mcpConnections,
   mcpCustomProviders,
@@ -50,6 +51,7 @@ export type McpOauthClient = typeof mcpOauthClients.$inferSelect;
 export type GoogleIdentity = typeof googleIdentities.$inferSelect;
 export type KalafiorniaConnection = typeof kalafiorniaConnections.$inferSelect;
 export type ProjectLinearConnection = typeof projectLinearConnections.$inferSelect;
+export type LinearInstallation = typeof linearInstallations.$inferSelect;
 export type Job = typeof jobs.$inferSelect;
 export type AgentSecret = typeof agentSecrets.$inferSelect;
 export type Account = typeof account.$inferSelect;

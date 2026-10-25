@@ -1,5 +1,5 @@
 import { relations } from "drizzle-orm/relations";
-import { conversations, nodes, projects, users, recurringReminders, links, auditEvents, messages, desks, deskReservations, projectMemberships, facts, mcpCustomProviders, googleIdentities, userTokens, channelMappings, mcpConnections, usageDailyRollups, activityDailyRollups, threadKicks, messageFeedback, kalafiorniaConnections, projectLinearConnections, agentSecrets, session, account } from "./schema";
+import { conversations, nodes, projects, users, recurringReminders, links, auditEvents, messages, desks, deskReservations, projectMemberships, facts, mcpCustomProviders, googleIdentities, userTokens, channelMappings, mcpConnections, usageDailyRollups, activityDailyRollups, threadKicks, messageFeedback, kalafiorniaConnections, projectLinearConnections, linearInstallations, agentSecrets, session, account } from "./schema";
 
 export const nodesRelations = relations(nodes, ({one, many}) => ({
 	conversation: one(conversations, {
@@ -64,6 +64,7 @@ export const usersRelations = relations(users, ({one, many}) => ({
 	messageFeedbacks: many(messageFeedback),
 	kalafiorniaConnections: many(kalafiorniaConnections),
 	projectLinearConnections: many(projectLinearConnections),
+	linearInstallations: many(linearInstallations),
 	agentSecrets: many(agentSecrets),
 	node: one(nodes, {
 		fields: [users.soulNodeId],
@@ -224,9 +225,21 @@ export const projectLinearConnectionsRelations = relations(projectLinearConnecti
 		fields: [projectLinearConnections.connectedByUserId],
 		references: [users.id]
 	}),
+	linearInstallation: one(linearInstallations, {
+		fields: [projectLinearConnections.installationId],
+		references: [linearInstallations.id]
+	}),
 	project: one(projects, {
 		fields: [projectLinearConnections.projectId],
 		references: [projects.id]
+	}),
+}));
+
+export const linearInstallationsRelations = relations(linearInstallations, ({one, many}) => ({
+	projectLinearConnections: many(projectLinearConnections),
+	user: one(users, {
+		fields: [linearInstallations.installedByUserId],
+		references: [users.id]
 	}),
 }));
 

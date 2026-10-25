@@ -6,6 +6,7 @@ import { db, tables } from "@/lib/db/index.ts";
 import { setFact } from "@/lib/facts.ts";
 import { cancelJob } from "@/lib/jobs/index.ts";
 import { disconnect as disconnectLinear } from "@/lib/linear/index.ts";
+import { uninstall as uninstallLinearApp } from "@/lib/linear/installation.ts";
 import { ValidationError } from "@/lib/memory/nodes.ts";
 import { deleteRecurringReminder, getRecurringReminderById, updateRecurringReminder } from "@/lib/memory/reminders.ts";
 import { deleteSecret, SECRET_NAME, setSecret, updateSecretDescription } from "@/lib/secrets.ts";
@@ -132,6 +133,12 @@ export async function revokeLinear(id: string): Promise<Result> {
   if (!connection) return { ok: false, message: "Linear connection not found" };
   await disconnectLinear(connection.projectId);
   return done("Linear connection revoked");
+}
+
+export async function uninstallLinear(id: string): Promise<Result> {
+  await requireAdmin();
+  if (!(await uninstallLinearApp(id))) return { ok: false, message: "Linear app installation not found" };
+  return done("Linear app uninstalled");
 }
 
 export async function saveSecret(name: string, value: string, description: string): Promise<Result> {

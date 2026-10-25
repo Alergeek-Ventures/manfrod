@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
-import { db, pool } from "../lib/db/index.ts";
-import { getConnection, listConnections } from "../lib/linear/index.ts";
+import { db, pool, tables } from "../lib/db/index.ts";
+import { listConnections } from "../lib/linear/index.ts";
+import { decrypt } from "../lib/vault.ts";
 import { search } from "../lib/memory/search.ts";
 
 type Check = { name: string; ok: boolean; detail: string };
@@ -72,18 +73,14 @@ if (sample?.content && process.env.VOYAGE_API_KEY) {
 }
 
 try {
-  const connections = await listConnections();
-  let decrypted = 0;
-  for (const connection of connections) {
-    if (connection.status === "connected" && (await getConnection(connection.projectId))?.apiKey) decrypted += 1;
-  }
-  record(
-    "linear keys decrypt",
-    true,
-    `${decrypted}/${connections.filter((connection) => connection.status === "connected").length} connected keys decrypted`,
-  );
+  const encrypted = [
+    ...(await listConnections()).flatMap((connection) => (connection.encryptedApiKey ? [connection.encryptedApiKey] : [])),
+    ...(await db.select({ token: tables.linearInstallations.accessToken }).from(tables.linearInstallations)).map((row) => row.token),
+  ];
+  for (const payload of encrypted) decrypt(payload);
+  record("linear secrets decrypt", true, `${encrypted.length} stored Linear keys and tokens decrypted`);
 } catch (error) {
-  record("linear keys decrypt", false, `${(error as Error).message} — is LINEAR_ENCRYPTION_KEY the same as before?`);
+  record("linear secrets decrypt", false, `${(error as Error).message} — is LINEAR_ENCRYPTION_KEY the same as before?`);
 }
 
 const google = await one(sql`
