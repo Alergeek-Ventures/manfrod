@@ -13,6 +13,10 @@ export const EVENTS = {
 
 export interface JobScheduledData {
   jobId: number;
+  kind?: string;
+  label?: string;
+  userId?: string | null;
+  scheduledAt?: string;
 }
 
 export interface SessionActivityData {
