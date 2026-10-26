@@ -149,11 +149,35 @@ export async function jobLog(jobId: number): Promise<string> {
 }
 
 export async function getPull(number: number) {
-  const pull = await repo<{ number: number; state: string; merged: boolean; html_url: string; head: { ref: string } }>(
-    "GET",
-    `/pulls/${number}`,
+  const pull = await repo<{
+    number: number;
+    node_id: string;
+    state: string;
+    draft: boolean;
+    merged: boolean;
+    html_url: string;
+    head: { ref: string };
+  }>("GET", `/pulls/${number}`);
+  return (
+    pull && {
+      number: pull.number,
+      nodeId: pull.node_id,
+      state: pull.state,
+      draft: pull.draft,
+      merged: pull.merged,
+      url: pull.html_url,
+      branch: pull.head.ref,
+    }
   );
-  return pull && { number: pull.number, state: pull.state, merged: pull.merged, url: pull.html_url, branch: pull.head.ref };
+}
+
+export async function markReadyForReview(nodeId: string): Promise<void> {
+  const response = await call(await installationToken(), "POST", "/graphql", {
+    query: "mutation($id: ID!) { markPullRequestReadyForReview(input: { pullRequestId: $id }) { clientMutationId } }",
+    variables: { id: nodeId },
+  });
+  const result = (await response.json()) as { errors?: { message: string }[] };
+  if (result.errors?.length) throw new Error(`GitHub could not mark the pull request ready: ${result.errors[0].message}`);
 }
 
 export async function commentOnPull(number: number, body: string): Promise<void> {

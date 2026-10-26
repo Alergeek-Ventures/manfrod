@@ -31,7 +31,7 @@ const MODES = new Set(["100644", "100755"]);
 export default defineManfrodTool({
   keepSecretPlaceholders: true,
   description:
-    "Publish every change in the checkout as one commit on a draft GitHub pull request against main. The first call opens the pull request; later calls add a commit to it. Validates allowed paths, file count, size and secrets first, and lists what it rejected.",
+    "Publish every change in the checkout as one commit on a GitHub pull request against main. The first call opens it as a draft; later calls add a commit to it. Validates allowed paths, file count, size and secrets first, and lists what it rejected.",
   inputSchema: z.object({
     title: z
       .string()
@@ -103,6 +103,6 @@ export default defineManfrodTool({
     proposal.update((current) => ({ ...current, branch, headSha: commit, pullNumber, pullUrl }));
 
     const listed = changes.map((change) => `- ${change.status} ${change.path}`).join("\n");
-    return `Published commit ${commit.slice(0, 7)} to draft pull request ${pullUrl}\nChanged files:\n${listed}`;
+    return `Published commit ${commit.slice(0, 7)} to pull request ${pullUrl}\nChanged files:\n${listed}`;
   },
 });
