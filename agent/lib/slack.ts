@@ -20,7 +20,10 @@ export function authorName(message: SlackBody, names: Map<string, string>): stri
     if (typeof message.bot_profile?.name === "string" && message.bot_profile.name !== "") return `${message.bot_profile.name} (bot)`;
     return "bot";
   }
-  if (typeof message.user === "string") return names.get(message.user) ?? message.user;
+  if (typeof message.user === "string") {
+    const name = names.get(message.user);
+    return name ? `${name} <${message.user}>` : message.user;
+  }
   return "?";
 }
 
@@ -32,7 +35,10 @@ export async function formatMessages(messages: SlackBody[]): Promise<string> {
     for (const match of String(message.text ?? "").matchAll(MENTION_RE)) ids.add(match[1]);
   }
   const names = new Map<string, string>();
-  for (const id of ids) names.set(id, (await fetchUserName(id)) ?? id);
+  for (const id of ids) {
+    const name = await fetchUserName(id);
+    if (name) names.set(id, name);
+  }
 
   return messages
     .map((message) => {
@@ -40,7 +46,7 @@ export async function formatMessages(messages: SlackBody[]): Promise<string> {
       const raw = String(message.text ?? "");
       const text = containsSecret(raw)
         ? "[wiadomość ukryta — wygląda na klucz API/hasło]"
-        : raw.replace(MENTION_RE, (_whole, id: string) => `@${names.get(id) ?? id}`);
+        : raw.replace(MENTION_RE, (whole, id: string) => (names.get(id) ? `${whole} (${names.get(id)})` : whole));
       const count = message.reply_count;
       const thread =
         typeof count === "number" && count > 0
