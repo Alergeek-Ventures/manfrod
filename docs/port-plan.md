@@ -199,7 +199,7 @@ decryption and the Oban import. Run it before and after the cutover.
 eve's remote self-modification extension requires Vercel, so Manfrod has its own
 version of the same design. An admin asks Manfrod in Slack to change its
 behavior; Manfrod delegates to the `self-modify` subagent
-(`agent/subagents/self-modify/`), which is only offered to admins.
+(`agent/subagents/self-modify/`), which checks that the person asking is an admin before it touches the repository.
 
 - The subagent runs in an E2B microVM (`agent/lib/e2b-sandbox.ts`) with no
   network. Its template has the toolchain and `node_modules` baked in, so

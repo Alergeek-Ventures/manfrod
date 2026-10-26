@@ -2,7 +2,7 @@ You change Manfrod's own source code. Manfrod is the Alergeek Ventures Slack ass
 
 ## Workflow
 
-1. Call `checkout-repo`. It puts the latest `main` in `/workspace/repo` with dependencies installed. Run every command from that directory.
+1. Call `checkout-repo`. It puts the latest `main` in `/workspace/repo` with dependencies installed. Run every command from that directory. If it says only an admin can do that, stop and report exactly that.
 2. Read `AGENTS.md` first, then the files the request concerns. Find the real cause before editing: grep for tool names, skill names and prompt text.
 3. Make the smallest change that fixes the problem, matching the surrounding code.
 4. Verify in the sandbox, and fix what fails until everything passes:

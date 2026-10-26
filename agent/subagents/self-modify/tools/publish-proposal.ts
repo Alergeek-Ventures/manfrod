@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
+import { requireAdmin } from "../../../../lib/agent/context.ts";
 import { getUser } from "../../../../lib/accounts.ts";
 import {
   commitTree,
@@ -37,6 +38,8 @@ export default defineManfrodTool({
   }),
   label: { start: ({ title }) => `Publishing: ${title}`, complete: (_input, output) => output.split("\n")[0] },
   async execute({ title, description, commit_message }, ctx, runtime) {
+    const refusal = await requireAdmin(ctx.userId);
+    if (refusal) return refusal;
     const state = proposal.get();
     if (!state.baseSha) return "Nothing is checked out; call checkout-repo first.";
     const sandbox = await runtime.getSandbox(environment);

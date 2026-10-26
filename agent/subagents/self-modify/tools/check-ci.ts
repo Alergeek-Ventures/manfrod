@@ -1,5 +1,6 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import { z } from "zod";
+import { requireAdmin } from "../../../../lib/agent/context.ts";
 import { checkRuns, jobLog, type CheckRun } from "../../../../lib/github.ts";
 import { defineManfrodTool } from "../../../lib/define-tool.ts";
 import { proposal } from "../../../lib/self-modify.ts";
@@ -22,7 +23,9 @@ export default defineManfrodTool({
     wait_seconds: z.number().int().min(0).max(540).optional().describe("How long to wait for running checks (default 300)"),
   }),
   label: { start: () => "Waiting for CI", complete: (_input, output) => output.split("\n")[0] },
-  async execute({ wait_seconds }, _ctx, runtime) {
+  async execute({ wait_seconds }, ctx, runtime) {
+    const refusal = await requireAdmin(ctx.userId);
+    if (refusal) return refusal;
     const { headSha, pullUrl } = proposal.get();
     if (!headSha) return "Nothing has been published yet; call publish-proposal first.";
     const deadline = Date.now() + (wait_seconds ?? 300) * 1000;
