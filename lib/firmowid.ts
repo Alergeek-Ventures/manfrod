@@ -3,9 +3,10 @@ import { dateIsoInZone, secondsOfDay, timeFromSeconds } from "./time.ts";
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: string };
 
-function extractRecords(result: Record<string, any>): Record<string, any>[] {
+export function extractRecords(result: Record<string, any>): Record<string, any>[] {
   const structured = result.structuredContent;
   if (structured && Array.isArray(structured.records)) return structured.records;
+  if (structured && Array.isArray(structured.results)) return structured.results;
   if (Array.isArray(structured)) return structured;
   if (Array.isArray(result.content)) {
     const text = result.content
@@ -16,6 +17,7 @@ function extractRecords(result: Record<string, any>): Record<string, any>[] {
       const parsed = JSON.parse(text);
       if (Array.isArray(parsed)) return parsed;
       if (parsed && Array.isArray(parsed.records)) return parsed.records;
+      if (parsed && Array.isArray(parsed.results)) return parsed.results;
     } catch {}
   }
   return [];
