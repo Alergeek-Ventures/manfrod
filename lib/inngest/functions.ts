@@ -12,6 +12,7 @@ import { extractSession } from "../memory/extractor.ts";
 import { sweep } from "../memory/pending.ts";
 import { processAllBuckets, reviewProcessedGraph } from "../memory/retrospector.ts";
 import { deliverProactive } from "../proactive.ts";
+import { runMorning as selfReviewMorning, runNightly as selfReviewNightly } from "../self-review/index.ts";
 import { scheduleCronSkills, scheduleFirmowidEvening, scheduleFirmowidMorning, scheduleReminders } from "../schedulers.ts";
 import { refresh as refreshGitleaks } from "../security/gitleaks.ts";
 import { EVENTS, inngest, ROOT_THREAD_KEY, type BufferPushedData, type JobScheduledData, type SessionActivityData } from "./client.ts";
@@ -152,6 +153,8 @@ const allFunctions = [
     logger("RollupWorker").info("RollupWorker: rolled up the last 4 day(s)");
   }),
   cronFunction("gitleaks-refresh", "0 3 * * *", () => refreshGitleaks()),
+  cronFunction("self-review", "30 3 * * *", () => selfReviewNightly()),
+  cronFunction("self-review-outreach", "30 9 * * 1-5", () => selfReviewMorning()),
   mcpExpiry,
   maintenance,
   cleanup,

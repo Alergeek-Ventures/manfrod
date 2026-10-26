@@ -21,6 +21,8 @@ import {
   projectLinearConnections,
   projects,
   recurringReminders,
+  selfReviewCases,
+  selfReviewFindings,
   users,
 } from "../../db/drizzle/schema.ts";
 
@@ -57,3 +59,5 @@ export type AgentSecret = typeof agentSecrets.$inferSelect;
 export type Account = typeof account.$inferSelect;
 export type AuditEvent = typeof auditEvents.$inferSelect;
 export type MessageFeedback = typeof messageFeedback.$inferSelect;
+export type SelfReviewFinding = typeof selfReviewFindings.$inferSelect;
+export type SelfReviewCase = typeof selfReviewCases.$inferSelect;

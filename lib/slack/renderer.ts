@@ -3,7 +3,7 @@ import { isEmptyReply } from "../agent/system-prompt.ts";
 import { planTitle, threadTitle } from "../agent/titles.ts";
 import { logger } from "../log.ts";
 import { isUntitledProactiveThread, markProactiveThreadTitled } from "../proactive.ts";
-import { toolCtx, type ToolCtx } from "../agent/context.ts";
+import { isBackgroundKind, toolCtx, type ToolCtx } from "../agent/context.ts";
 import { post, setStatus, setTitle, type SlackBody } from "./api.ts";
 import { feedbackBlock, feedbackChunk } from "./feedback.ts";
 import { fromMarkdown, toBlocks } from "./mrkdwn.ts";
@@ -106,7 +106,7 @@ async function titleThreads(where: Where, content: string) {
 
 async function deliverFinal(where: Where, rawContent: string) {
   const content = rawContent.trim() === "" ? "👍" : rawContent;
-  const skill = where.tool.kind === "skill_channel" || where.tool.kind === "skill_user";
+  const skill = isBackgroundKind(where.tool.kind);
   const stream = where.threadTs ? getStream(where.channel, where.threadTs) : undefined;
 
   if (skill && isEmptyReply(content)) {

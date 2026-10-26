@@ -1,7 +1,5 @@
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
-import { requireAdmin } from "../../../../lib/agent/context.ts";
-import { getUser } from "../../../../lib/accounts.ts";
 import {
   commitTree,
   createBlob,
@@ -13,8 +11,11 @@ import {
   type TreeEntry,
 } from "../../../../lib/github.ts";
 import { matches as secretRule } from "../../../../lib/security/gitleaks.ts";
+import { MAX_OPEN_PULLS } from "../../../../lib/self-review/rules.ts";
+import { attachPull, countActive } from "../../../../lib/self-review/store.ts";
 import { defineManfrodTool } from "../../../lib/define-tool.ts";
 import {
+  authorize,
   BRANCH_PREFIX,
   localChanges,
   MAX_BYTES,
@@ -47,10 +48,13 @@ export default defineManfrodTool({
   }),
   label: { start: ({ title }) => `Publishing: ${title}`, complete: (_input, output) => output.split("\n")[0] },
   async execute({ title, description, commit_message }, ctx, runtime) {
-    const refusal = await requireAdmin(ctx.userId);
-    if (refusal) return refusal;
+    const requester = await authorize(ctx);
+    if (typeof requester === "string") return requester;
     const state = proposal.get();
     if (!state.baseSha) return "Nothing is checked out; call checkout-repo first.";
+    if (requester.kind === "self_review" && !state.pullNumber && (await countActive(requester.finding.id)) >= MAX_OPEN_PULLS) {
+      return `Self-review already has ${MAX_OPEN_PULLS} pull requests in progress; nothing was published.`;
+    }
     const sandbox = await runtime.getSandbox(environment);
 
     const changes = await localChanges(sandbox);
@@ -96,9 +100,15 @@ export default defineManfrodTool({
       await createBranch(branch, commit);
     }
     if (!pullNumber || !pullUrl) {
-      const requester = (await getUser(ctx.userId))?.name;
-      const footer = `\n\n---\nProposed by Manfrod's self-modify agent${requester ? ` at the request of ${requester}` : ""}.`;
+      const origin =
+        requester.kind === "self_review"
+          ? " after its self-review of negative ratings"
+          : requester.name
+            ? ` at the request of ${requester.name}`
+            : "";
+      const footer = `\n\n---\nProposed by Manfrod's self-modify agent${origin}.`;
       ({ number: pullNumber, url: pullUrl } = await createDraftPull(branch, TARGET_BRANCH, title, description + footer));
+      if (requester.kind === "self_review") await attachPull(requester.finding.id, pullNumber, pullUrl);
     }
     proposal.update((current) => ({ ...current, branch, headSha: commit, pullNumber, pullUrl }));
 
