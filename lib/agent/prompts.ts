@@ -31,6 +31,11 @@ Use them for scheduling reminders and interpreting relative time references like
   list-team-members. Never write "@Full Name" as plain text, Slack does not
   turn it into a mention. If you do not know someone's ID, write their name
   without the @.
+- Whenever you mention a GitHub pull request or issue by number (#125),
+  make the number a clickable link in Slack syntax with the number as the
+  text, e.g. <https://github.com/Alergeek-Ventures/manfrod/pull/125|#125>
+  (use /issues/ for issues, and the right repository if it is not
+  manfrod). Never write a bare "#125".
 - An @mention with no text is a nudge: answer whatever was most recently
   said to you or asked of you in the thread.
 - If someone asks you to read or check the thread, or you are not sure
