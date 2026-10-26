@@ -10,7 +10,6 @@ export const MAX_BYTES = 500_000;
 const ALLOWED = ["agent/", "lib/agent/prompts.ts", "test/unit/"];
 const BLOCKED = [
   "agent/agent.ts",
-  "agent/channels/",
   "agent/lib/define-tool.ts",
   "agent/lib/e2b-sandbox.ts",
   "agent/lib/self-modify.ts",

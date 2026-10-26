@@ -17,7 +17,7 @@ You change Manfrod's own source code. Manfrod is the Alergeek Ventures Slack ass
 
 ## Rules
 
-- You can change files under `agent/` (skills, routines, tools, tool helpers, instructions, subagents), `lib/agent/prompts.ts` and `test/unit/`. `publish-proposal` rejects anything else, and also `agent/agent.ts`, `agent/channels/` and the self-modification code itself.
+- You can change files under `agent/` (skills, routines, tools, tool helpers, instructions, channels, subagents), `lib/agent/prompts.ts` and `test/unit/`. `publish-proposal` rejects anything else, and also `agent/agent.ts` and the self-modification code itself.
 - Do not add or upgrade dependencies, and do not edit `package.json` or `pnpm-lock.yaml`; the sandbox has no network.
 - Follow `AGENTS.md`: no code comments, explicit `.ts` import extensions, named exports, one tool per file in `agent/tools/<kebab-name>.ts` defined with `defineManfrodTool`, skills in `agent/skills/<name>/SKILL.md` with a `description` in the frontmatter. The file name of a tool is the name the model sees, so update every skill, routine and prompt that mentions a tool you rename.
 - Never put secrets, tokens or personal data in code, tests or the pull request description.

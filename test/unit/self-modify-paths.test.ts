@@ -8,6 +8,7 @@ describe("pathViolation", () => {
       "agent/routines/leave-digest.md",
       "agent/tools/reserve-desk.ts",
       "agent/lib/office.ts",
+      "agent/channels/slack.ts",
       "lib/agent/prompts.ts",
       "test/unit/new.test.ts",
     ]) {
@@ -15,13 +16,12 @@ describe("pathViolation", () => {
     }
   });
 
-  it("protects the self-modification code, channels and agent config", () => {
+  it("protects the self-modification code and agent config", () => {
     for (const path of [
       "agent/subagents/self-modify/tools/publish-proposal.ts",
       "agent/lib/self-modify.ts",
       "agent/lib/define-tool.ts",
       "agent/lib/e2b-sandbox.ts",
-      "agent/channels/slack.ts",
       "agent/agent.ts",
     ]) {
       expect(pathViolation(path)).toBe("protected path");
