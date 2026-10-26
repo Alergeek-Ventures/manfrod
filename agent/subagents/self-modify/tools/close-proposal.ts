@@ -1,8 +1,7 @@
 import { z } from "zod";
-import { requireAdmin } from "../../../../lib/agent/context.ts";
 import { closePull, commentOnPull, deleteBranch, getPull } from "../../../../lib/github.ts";
 import { defineManfrodTool } from "../../../lib/define-tool.ts";
-import { BRANCH_PREFIX, proposal } from "../../../lib/self-modify.ts";
+import { authorize, BRANCH_PREFIX, proposal } from "../../../lib/self-modify.ts";
 
 export default defineManfrodTool({
   keepSecretPlaceholders: true,
@@ -14,8 +13,11 @@ export default defineManfrodTool({
   }),
   label: { start: ({ pull_number }) => `Closing pull request #${pull_number}`, complete: (_input, output) => output.split("\n")[0] },
   async execute({ pull_number, reason }, ctx) {
-    const refusal = await requireAdmin(ctx.userId);
-    if (refusal) return refusal;
+    const requester = await authorize(ctx);
+    if (typeof requester === "string") return requester;
+    if (requester.kind === "self_review" && requester.finding.pullNumber !== pull_number) {
+      return `Self-review can only close the pull request it opened for this finding.`;
+    }
     const pull = await getPull(pull_number);
     if (!pull) return `Pull request #${pull_number} not found.`;
     if (!pull.branch.startsWith(BRANCH_PREFIX)) return `Pull request #${pull_number} was not opened by self-modify, so I can't close it.`;

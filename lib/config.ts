@@ -82,6 +82,9 @@ export const config = {
   get githubAppPrivateKey() {
     return env("GITHUB_APP_PRIVATE_KEY")?.replaceAll("\\n", "\n");
   },
+  get selfReviewChannelId() {
+    return env("SELF_REVIEW_CHANNEL_ID");
+  },
   get githubRepository() {
     return env("GITHUB_REPOSITORY") ?? "Alergeek-Ventures/manfrod";
   },

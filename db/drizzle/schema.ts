@@ -536,3 +536,46 @@ export const memoryPendingOps = pgTable("memory_pending_ops", {
 }, (table) => [
 	primaryKey({ columns: [table.channelId, table.ts], name: "memory_pending_ops_pkey"}),
 ]);
+
+export const selfReviewFindings = pgTable("self_review_findings", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	title: text().notNull(),
+	problem: text().notNull(),
+	expected: text().notNull(),
+	category: text().notNull(),
+	severity: integer().default(2).notNull(),
+	status: text().default('open').notNull(),
+	pullNumber: integer("pull_number"),
+	pullUrl: text("pull_url"),
+	sessionChannelId: text("session_channel_id"),
+	sessionThreadTs: text("session_thread_ts"),
+	startedAt: timestamp("started_at", { mode: 'date' }),
+	resolvedAt: timestamp("resolved_at", { mode: 'date' }),
+	notifiedAt: timestamp("notified_at", { mode: 'date' }),
+	insertedAt: timestamp("inserted_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
+	updatedAt: timestamp("updated_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
+}, (table) => [
+	index().using("btree", table.status.asc().nullsLast().op("text_ops")),
+	check("self_review_findings_category", sql`category = ANY (ARRAY['prompt'::text, 'skill'::text, 'routine'::text, 'tool'::text])`),
+	check("self_review_findings_severity", sql`(severity >= 1) AND (severity <= 3)`),
+	check("self_review_findings_status", sql`status = ANY (ARRAY['open'::text, 'in_progress'::text, 'proposed'::text, 'merged'::text, 'closed'::text, 'unresolved'::text, 'dismissed'::text])`),
+]);
+
+export const selfReviewCases = pgTable("self_review_cases", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	feedbackId: uuid("feedback_id").notNull(),
+	findingId: uuid("finding_id"),
+	status: text().notNull(),
+	reason: text(),
+	question: text(),
+	clarificationChannelId: text("clarification_channel_id"),
+	clarificationThreadTs: text("clarification_thread_ts"),
+	askedAt: timestamp("asked_at", { mode: 'date' }),
+	insertedAt: timestamp("inserted_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
+	updatedAt: timestamp("updated_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
+}, (table) => [
+	uniqueIndex("self_review_cases_feedback_index").using("btree", table.feedbackId.asc().nullsLast().op("uuid_ops")),
+	index("self_review_cases_finding_index").using("btree", table.findingId.asc().nullsLast().op("uuid_ops")),
+	index().using("btree", table.status.asc().nullsLast().op("text_ops")),
+	check("self_review_cases_status", sql`status = ANY (ARRAY['linked'::text, 'not_actionable'::text, 'needs_input'::text, 'asked'::text, 'expired'::text])`),
+]);

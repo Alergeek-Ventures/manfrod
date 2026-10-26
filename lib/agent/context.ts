@@ -1,5 +1,3 @@
-import { getUser, isAdmin } from "../accounts.ts";
-
 export interface MsgCtx {
   channel: string | null;
   ts: string | null;
@@ -14,6 +12,7 @@ export interface ToolCtx {
   msgCtx: MsgCtx;
   kind: string;
   sessionKey: string | null;
+  findingId: string | null;
 }
 
 type Attributes = Readonly<Record<string, string | readonly string[]>>;
@@ -55,8 +54,11 @@ export function toolCtxFromAuth(auth: AuthLike | null): ToolCtx {
     },
     kind: str(attributes, "kind") ?? "slack",
     sessionKey: channel && threadTs ? `${channel}:${threadTs}` : null,
+    findingId: str(attributes, "selfReviewFindingId"),
   };
 }
+
+export const isBackgroundKind = (kind: string) => ["skill_channel", "skill_user", "self_review"].includes(kind);
 
 export function toolCtx(ctx: SessionLike): ToolCtx {
   return toolCtxFromAuth(ctx.session.auth.current ?? ctx.session.auth.initiator);
@@ -64,9 +66,4 @@ export function toolCtx(ctx: SessionLike): ToolCtx {
 
 export function flaggable(msgCtx: MsgCtx): { channel: string; ts: string } | null {
   return msgCtx.channel && msgCtx.ts ? { channel: msgCtx.channel, ts: msgCtx.ts } : null;
-}
-
-export async function requireAdmin(userId: string): Promise<string | null> {
-  const user = await getUser(userId);
-  return isAdmin(user) ? null : "Only an admin can do that.";
 }

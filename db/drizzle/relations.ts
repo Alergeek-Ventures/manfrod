@@ -1,5 +1,5 @@
 import { relations } from "drizzle-orm/relations";
-import { conversations, nodes, projects, users, recurringReminders, links, auditEvents, messages, desks, deskReservations, projectMemberships, facts, mcpCustomProviders, googleIdentities, userTokens, channelMappings, mcpConnections, usageDailyRollups, activityDailyRollups, threadKicks, messageFeedback, kalafiorniaConnections, projectLinearConnections, linearInstallations, agentSecrets, session, account } from "./schema";
+import { conversations, nodes, projects, users, recurringReminders, links, auditEvents, messages, desks, deskReservations, projectMemberships, facts, mcpCustomProviders, googleIdentities, userTokens, channelMappings, mcpConnections, usageDailyRollups, activityDailyRollups, threadKicks, messageFeedback, kalafiorniaConnections, projectLinearConnections, linearInstallations, agentSecrets, session, account, selfReviewCases, selfReviewFindings } from "./schema";
 
 export const nodesRelations = relations(nodes, ({one, many}) => ({
 	conversation: one(conversations, {
@@ -206,11 +206,12 @@ export const threadKicksRelations = relations(threadKicks, ({one}) => ({
 	}),
 }));
 
-export const messageFeedbackRelations = relations(messageFeedback, ({one}) => ({
+export const messageFeedbackRelations = relations(messageFeedback, ({one, many}) => ({
 	user: one(users, {
 		fields: [messageFeedback.userId],
 		references: [users.id]
 	}),
+	selfReviewCases: many(selfReviewCases),
 }));
 
 export const kalafiorniaConnectionsRelations = relations(kalafiorniaConnections, ({one}) => ({
@@ -262,4 +263,19 @@ export const accountRelations = relations(account, ({one}) => ({
 		fields: [account.userId],
 		references: [users.id]
 	}),
+}));
+
+export const selfReviewCasesRelations = relations(selfReviewCases, ({one}) => ({
+	messageFeedback: one(messageFeedback, {
+		fields: [selfReviewCases.feedbackId],
+		references: [messageFeedback.id]
+	}),
+	selfReviewFinding: one(selfReviewFindings, {
+		fields: [selfReviewCases.findingId],
+		references: [selfReviewFindings.id]
+	}),
+}));
+
+export const selfReviewFindingsRelations = relations(selfReviewFindings, ({many}) => ({
+	selfReviewCases: many(selfReviewCases),
 }));

@@ -1,8 +1,7 @@
 import { z } from "zod";
-import { requireAdmin } from "../../../../lib/agent/context.ts";
 import { branchSha, tarball } from "../../../../lib/github.ts";
 import { defineManfrodTool } from "../../../lib/define-tool.ts";
-import { BASE_TAG, proposal, REPO_DIR, sh, TARGET_BRANCH } from "../../../lib/self-modify.ts";
+import { authorize, BASE_TAG, proposal, REPO_DIR, sh, TARGET_BRANCH } from "../../../lib/self-modify.ts";
 import { environment } from "../sandbox.ts";
 
 const ARCHIVE = "/tmp/manfrod.tar.gz";
@@ -12,8 +11,8 @@ export default defineManfrodTool({
   inputSchema: z.object({}),
   label: { start: () => `Checking out ${TARGET_BRANCH}`, complete: (_input, output) => output.split("\n")[0] },
   async execute(_input, ctx, runtime) {
-    const refusal = await requireAdmin(ctx.userId);
-    if (refusal) return refusal;
+    const requester = await authorize(ctx);
+    if (typeof requester === "string") return requester;
     const sha = await branchSha(TARGET_BRANCH);
     if (!sha) return `Branch ${TARGET_BRANCH} not found.`;
     const sandbox = await runtime.getSandbox(environment);

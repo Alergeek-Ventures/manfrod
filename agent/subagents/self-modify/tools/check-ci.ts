@@ -1,9 +1,8 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import { z } from "zod";
-import { requireAdmin } from "../../../../lib/agent/context.ts";
 import { checkRuns, getPull, jobLog, markReadyForReview, type CheckRun } from "../../../../lib/github.ts";
 import { defineManfrodTool } from "../../../lib/define-tool.ts";
-import { proposal } from "../../../lib/self-modify.ts";
+import { authorize, proposal } from "../../../lib/self-modify.ts";
 
 const POLL_MS = 15_000;
 const LOG_LINES = 120;
@@ -24,8 +23,8 @@ export default defineManfrodTool({
   }),
   label: { start: () => "Waiting for CI", complete: (_input, output) => output.split("\n")[0] },
   async execute({ wait_seconds }, ctx, runtime) {
-    const refusal = await requireAdmin(ctx.userId);
-    if (refusal) return refusal;
+    const requester = await authorize(ctx);
+    if (typeof requester === "string") return requester;
     const { headSha, pullNumber, pullUrl } = proposal.get();
     if (!headSha) return "Nothing has been published yet; call publish-proposal first.";
     const deadline = Date.now() + (wait_seconds ?? 300) * 1000;

@@ -1,5 +1,10 @@
 import { defineState } from "eve/context";
 import type { SandboxSession } from "eve/sandbox";
+import { getUser, isAdmin } from "../../lib/accounts.ts";
+import type { ToolCtx } from "../../lib/agent/context.ts";
+import type { SelfReviewFinding } from "../../lib/db/schema.ts";
+import { ACTIVE_STATUSES, SELF_REVIEW_KIND, SELF_REVIEW_SLACK_ID } from "../../lib/self-review/rules.ts";
+import { getFinding } from "../../lib/self-review/store.ts";
 
 export const REPO_DIR = "/workspace/repo";
 export const BASE_TAG = "manfrod-base";
@@ -37,6 +42,18 @@ export interface Change {
   path: string;
   status: "A" | "M" | "D";
   mode: string;
+}
+
+export type Requester = { kind: "admin"; name: string | null } | { kind: "self_review"; finding: SelfReviewFinding };
+
+export async function authorize(ctx: ToolCtx): Promise<Requester | string> {
+  const user = await getUser(ctx.userId);
+  if (isAdmin(user)) return { kind: "admin", name: user?.name ?? null };
+  if (ctx.kind === SELF_REVIEW_KIND && ctx.findingId && user?.slackId === SELF_REVIEW_SLACK_ID) {
+    const finding = await getFinding(ctx.findingId);
+    if (finding && (ACTIVE_STATUSES as readonly string[]).includes(finding.status)) return { kind: "self_review", finding };
+  }
+  return "Only an admin or Manfrod's self-review can do that.";
 }
 
 export function pathViolation(path: string): string | null {
