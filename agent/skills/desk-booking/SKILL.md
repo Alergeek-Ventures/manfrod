@@ -43,3 +43,5 @@ position → call `add-desk`, `update-desk`, or `deactivate-desk` directly.
 Don't pre-filter based on who's asking — the tool itself checks admin
 status and returns a refusal message if the caller isn't allowed to; just
 relay whatever it says.
+
+<!-- self-modify publishing smoke test -->
