@@ -129,6 +129,10 @@ class StreamSession {
     if (!result.ok) log.warn(`Slack StreamSession failed to append to stream in ${this.channel}: ${result.error}`);
   }
 
+  keepAlive() {
+    if (!this.closed) this.touch();
+  }
+
   text(text: string) {
     this.turnText += text;
     this.enqueue({ type: "markdown_text", text });

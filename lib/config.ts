@@ -76,6 +76,15 @@ export const config = {
   get cronsEnabled() {
     return env("DISABLE_CRONS") !== "1";
   },
+  get githubAppId() {
+    return env("GITHUB_APP_ID");
+  },
+  get githubAppPrivateKey() {
+    return env("GITHUB_APP_PRIVATE_KEY")?.replaceAll("\\n", "\n");
+  },
+  get githubRepository() {
+    return env("GITHUB_REPOSITORY") ?? "Alergeek-Ventures/manfrod";
+  },
   get typesafeApiKey() {
     return env("TYPESAFE_AI_API_KEY");
   },

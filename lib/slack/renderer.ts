@@ -33,7 +33,7 @@ function where(channel: SlackEventContext, ctx: Parameters<typeof toolCtx>[0]): 
 }
 
 const humanize = (name: string) => {
-  const spaced = name.replaceAll("_", " ");
+  const spaced = name.replaceAll(/[_-]/g, " ");
   return spaced.charAt(0).toUpperCase() + spaced.slice(1).toLowerCase();
 };
 
