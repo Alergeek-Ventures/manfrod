@@ -201,12 +201,13 @@ async function startWork(): Promise<number> {
   return started;
 }
 
-export async function runNightly(): Promise<void> {
+export async function runNightly(): Promise<{ reviewed: number; started: number }> {
   await syncPulls();
   const findings = await findingsWithStatus(["open", "in_progress", "proposed"]);
   const reviewed = (await reviewNew(findings)) + (await reviewAnswered(findings));
   const started = await startWork();
   log.info(`SelfReview: reviewed ${reviewed} rating(s), started work on ${started} finding(s)`);
+  return { reviewed, started };
 }
 
 function followUpPrompt(finding: SelfReviewFinding, mentions: string): string {
@@ -282,9 +283,10 @@ async function askUnclear(): Promise<number> {
   return asked;
 }
 
-export async function runMorning(): Promise<void> {
+export async function runMorning(): Promise<{ notified: number; asked: number }> {
   await syncPulls();
   const notified = await notifyFixed();
   const asked = await askUnclear();
   log.info(`SelfReview: sent ${notified} fix notice(s) and ${asked} question(s)`);
+  return { notified, asked };
 }

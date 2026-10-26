@@ -1,7 +1,8 @@
 import { and, asc, eq, inArray, isNull, lt, sql } from "drizzle-orm";
 import { db, tables } from "../db/index.ts";
 import type { Job } from "../db/schema.ts";
-import { EVENTS, sendEvent } from "../inngest/client.ts";
+import { getUser } from "../accounts.ts";
+import { EVENTS, sendEvent, type JobScheduledData } from "../inngest/client.ts";
 
 const { jobs } = tables;
 
@@ -19,8 +20,32 @@ export interface EnqueueResult {
   conflict: boolean;
 }
 
+export function jobLabel(kind: string, args: Record<string, unknown>, personName: string | null): string {
+  const who = personName ? ` (${personName})` : "";
+  switch (kind) {
+    case "skill_trigger":
+      return `${String(args.skill_name ?? "skill")}${who}`;
+    case "trigger":
+      return `${args.recurring_reminder_id ? "recurring reminder" : "reminder"}${who}`;
+    case "firmowid_session_check":
+      return `firmowid evening check${who}`;
+    case "firmowid_morning_session_check":
+      return `firmowid morning check${who}`;
+    default:
+      return `${kind}${who}`;
+  }
+}
+
+export async function describeJob(job: Job): Promise<JobScheduledData> {
+  const args = job.args as Record<string, unknown>;
+  const meta = job.meta as Record<string, unknown>;
+  const userId = typeof args.user_id === "string" ? args.user_id : null;
+  const personName = typeof meta.user_name === "string" ? meta.user_name : userId ? ((await getUser(userId))?.name ?? null) : null;
+  return { jobId: job.id, kind: job.kind, label: jobLabel(job.kind, args, personName), userId, scheduledAt: job.scheduledAt.toISOString() };
+}
+
 export async function dispatch(job: Job): Promise<void> {
-  if (await sendEvent(EVENTS.jobScheduled, { jobId: job.id })) {
+  if (await sendEvent(EVENTS.jobScheduled, await describeJob(job))) {
     await db.update(jobs).set({ dispatchedAt: new Date() }).where(eq(jobs.id, job.id));
   }
 }

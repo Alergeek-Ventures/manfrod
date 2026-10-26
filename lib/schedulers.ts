@@ -129,6 +129,12 @@ export async function scheduleCronSkills(now = new Date()): Promise<number> {
   return count;
 }
 
+export interface FirmowidScheduleResult {
+  date: string;
+  scheduled: { user: string; at: string }[];
+  skipped: { user: string; reason: string }[];
+}
+
 async function scheduleFirmowid(
   kind: "firmowid_session_check" | "firmowid_morning_session_check",
   name: string,
@@ -136,35 +142,46 @@ async function scheduleFirmowid(
   agg: "min" | "max",
   targetDate: (today: string) => string,
   metaKey: "avg_end_time" | "avg_start_time",
-): Promise<number> {
+): Promise<FirmowidScheduleResult> {
   const log = logger(name);
+  const today = localToday();
+  const date = targetDate(today);
+  const result: FirmowidScheduleResult = { date, scheduled: [], skipped: [] };
   const provider = builtinProviders().find((candidate) => candidate.id === FIRMOWID);
   if (!provider) {
     log.error(`${name}: missing '${FIRMOWID}' provider`);
-    return 0;
+    return result;
   }
-  const today = localToday();
-  const date = targetDate(today);
-  let count = 0;
 
   for (const connection of await listConnectionsForProvider(FIRMOWID)) {
+    const user = await getUser(connection.userId);
+    const who = user?.name ?? connection.userId;
+    const skip = (reason: string) => {
+      log.debug(`${name}: skipping ${connection.userId}: ${reason}`);
+      result.skipped.push({ user: who, reason });
+    };
     const token = await ensureValidToken(connection);
     if (!token.ok) {
-      log.debug(`${name}: skipping ${connection.userId}: ${token.error}`);
+      skip(`token: ${token.error}`);
       continue;
     }
     const sessions = await fetchRecentSessions(provider.mcpUrl, token.value, SESSION_SAMPLE_SIZE);
     if (!sessions.ok) {
-      log.debug(`${name}: skipping ${connection.userId}: ${sessions.error}`);
+      skip(`sessions: ${sessions.error}`);
       continue;
     }
     const avgTime = averageTimeOfDay(sessions.value, today, field, agg);
-    if (!avgTime) continue;
+    if (!avgTime) {
+      skip(`no average from ${sessions.value.length} session(s)`);
+      continue;
+    }
 
     const scheduledAt = new Date(zonedToUtc(date, avgTime).getTime() + FIRMOWID_OFFSET_MINUTES * 60_000);
-    if (scheduledAt <= new Date()) continue;
+    if (scheduledAt <= new Date()) {
+      skip(`${localIsoWithOffset(scheduledAt)} is already past`);
+      continue;
+    }
 
-    const user = await getUser(connection.userId);
     const { conflict } = await enqueue(
       kind,
       { user_id: connection.userId, date },
@@ -180,13 +197,14 @@ async function scheduleFirmowid(
         },
       },
     );
-    if (!conflict) count += 1;
+    if (conflict) skip("already scheduled");
+    else result.scheduled.push({ user: who, at: localIsoWithOffset(scheduledAt) });
   }
-  log.info(`${name}: scheduled ${count} check(s)`);
-  return count;
+  log.info(`${name}: scheduled ${result.scheduled.length} check(s)`);
+  return result;
 }
 
-export function scheduleFirmowidEvening(): Promise<number> {
+export function scheduleFirmowidEvening(): Promise<FirmowidScheduleResult> {
   return scheduleFirmowid(
     "firmowid_session_check",
     "FirmowidReminderSchedulerWorker",
@@ -197,7 +215,7 @@ export function scheduleFirmowidEvening(): Promise<number> {
   );
 }
 
-export function scheduleFirmowidMorning(): Promise<number> {
+export function scheduleFirmowidMorning(): Promise<FirmowidScheduleResult> {
   return scheduleFirmowid(
     "firmowid_morning_session_check",
     "FirmowidMorningReminderSchedulerWorker",

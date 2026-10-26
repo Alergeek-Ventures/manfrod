@@ -36,10 +36,7 @@ const cronFunctions = new Set<unknown>();
 
 const cronFunction = (id: string, cron: string, run: () => Promise<unknown>) => {
   const fn = inngest.createFunction({ id, triggers: [{ cron: tz(cron) }], retries: 2, concurrency: 1 }, async ({ step }) =>
-    step.run(id, async () => {
-      await run();
-      return null;
-    }),
+    step.run(id, async () => (await run()) ?? null),
   );
   cronFunctions.add(fn);
   return fn;
@@ -54,18 +51,19 @@ const runJob = inngest.createFunction(
     cancelOn: [{ event: EVENTS.jobCancelled, match: "data.jobId" }],
   },
   async ({ event, step, attempt }) => {
-    const { jobId } = event.data as JobScheduledData;
-    const scheduledAt = await step.run("load", async () => (await getJob(jobId))?.scheduledAt.toISOString() ?? null);
-    if (!scheduledAt) return { skipped: "missing" };
-    await step.sleepUntil("wait-until-due", scheduledAt);
+    const { jobId, label } = event.data as JobScheduledData;
+    const named = (id: string, name: string) => (label ? { id, name: `${name}: ${label}` } : id);
+    const scheduledAt = await step.run(named("load", "load"), async () => (await getJob(jobId))?.scheduledAt.toISOString() ?? null);
+    if (!scheduledAt) return { skipped: "missing", jobId, label };
+    await step.sleepUntil(named("wait-until-due", `wait until ${scheduledAt}`), scheduledAt);
 
-    return step.run("execute", async () => {
+    return step.run(named("execute", "execute"), async () => {
       const job = await markExecuting(jobId);
-      if (!job) return { skipped: "not_scheduled" };
+      if (!job) return { skipped: "not_scheduled", jobId, label };
       try {
         await executeJob(job);
         await completeJob(jobId);
-        return { done: true };
+        return { done: true, jobId, kind: job.kind, label };
       } catch (error) {
         const final = error instanceof JobError || attempt >= 2;
         await failJob(jobId, error, final);
@@ -97,7 +95,7 @@ const absenceFollowUp = inngest.createFunction(
   async ({ event, step }) =>
     step.run("follow-up", async () => {
       const { userId, startDate, endDate, working } = event.data as AbsenceRecordedData;
-      return { sent: await runAbsenceFollowUp(userId, startDate, endDate, working) };
+      return { userId, period: `${startDate}..${endDate}`, sent: await runAbsenceFollowUp(userId, startDate, endDate, working) };
     }),
 );
 
@@ -132,9 +130,11 @@ const flushBuffer = inngest.createFunction(
 const mcpExpiry = cronFunction("mcp-expiry", "15 * * * *", async () => {
   const log = logger("McpExpiryWorker");
   const all = await listAllConnectionsWithProvider();
+  const expired: string[] = [];
   for (const { connection, provider } of all) {
     const token = await ensureValidToken(connection);
     if (token.ok) continue;
+    expired.push(`${provider.id}/${connection.userId}`);
     log.info(`McpExpiryWorker: ${provider.id}/${connection.userId} unhealthy (${token.error}), marking expired`);
     invalidateTools(connection.userId, provider.id);
     const updated = await markExpired(connection);
@@ -144,11 +144,14 @@ const mcpExpiry = cronFunction("mcp-expiry", "15 * * * *", async () => {
     }
   }
   log.info(`McpExpiryWorker: checked ${all.length} connection(s)`);
+  return { checked: all.length, expired };
 });
 
 const maintenance = cronFunction("maintenance", "*/5 * * * *", async () => {
-  await dispatchUndispatched();
-  for (const key of await staleKeys(120)) await flush(key.channelId, key.threadTs);
+  const dispatched = await dispatchUndispatched();
+  const stale = await staleKeys(120);
+  for (const key of stale) await flush(key.channelId, key.threadTs);
+  return { dispatched, flushed: stale.length };
 });
 
 const cleanup = cronFunction("events-cleanup", "40 * * * *", async () => {
@@ -172,8 +175,8 @@ const allFunctions = [
     await reviewProcessedGraph();
     logger("GraphReviewWorker").info("GraphReviewWorker: completed");
   }),
-  cronFunction("reminder-scheduler", "0 * * * *", () => scheduleReminders()),
-  cronFunction("skill-scheduler", "0 * * * *", () => scheduleCronSkills()),
+  cronFunction("reminder-scheduler", "0 * * * *", async () => ({ scheduled: await scheduleReminders() })),
+  cronFunction("skill-scheduler", "0 * * * *", async () => ({ scheduled: await scheduleCronSkills() })),
   cronFunction("firmowid-evening-scheduler", "0 9 * * 1-5", () => scheduleFirmowidEvening()),
   cronFunction("firmowid-morning-scheduler", "0 21 * * 0-4", () => scheduleFirmowidMorning()),
   cronFunction("analytics-rollup", "25 * * * *", async () => {
@@ -181,9 +184,9 @@ const allFunctions = [
     logger("RollupWorker").info("RollupWorker: rolled up the last 4 day(s)");
   }),
   cronFunction("holiday-check", "0 10 * * 1-5", () => runHolidayCheck()),
-  cronFunction("nudges-work-start", "*/15 7-12 * * 1-5", () => runWorkStartNudges()),
-  cronFunction("nudges-weekly", "*/30 12-17 * * 5", () => runWeeklyWrapUps()),
-  cronFunction("nudges-project-summaries", "0 15 * * 5", () => runProjectSummaries()),
+  cronFunction("nudges-work-start", "*/15 7-12 * * 1-5", async () => ({ sent: await runWorkStartNudges() })),
+  cronFunction("nudges-weekly", "*/30 12-17 * * 5", async () => ({ sent: await runWeeklyWrapUps() })),
+  cronFunction("nudges-project-summaries", "0 15 * * 5", async () => ({ posted: await runProjectSummaries() })),
   cronFunction("gitleaks-refresh", "0 3 * * *", () => refreshGitleaks()),
   cronFunction("self-review", "30 3 * * *", () => selfReviewNightly()),
   cronFunction("self-review-outreach", "30 9 * * 1-5", () => selfReviewMorning()),

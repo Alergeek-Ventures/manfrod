@@ -179,14 +179,14 @@ export async function upcomingPeriods(today: string, days: number) {
   return { ok: true as const, value: holidayPeriods(result.value).filter((period) => period.end >= today && period.start <= limit) };
 }
 
-export async function runHolidayCheck(today = localToday()): Promise<number> {
+export async function runHolidayCheck(today = localToday()): Promise<{ periods: string[]; asked: string[] }> {
   const periods = await upcomingPeriods(today, LOOKAHEAD_DAYS);
   if (!periods.ok) {
     log.error(`HolidayCheck: could not read the holiday calendar: ${periods.error}`);
-    return 0;
+    return { periods: [], asked: [] };
   }
   const people = (await listUsers()).filter((user) => !isSystemUser(user) && !user.banned && user.slackDmChannelId);
-  let asked = 0;
+  const asked: string[] = [];
   for (const person of people) {
     if (!(await isEnabled(person.id, "holidays"))) continue;
     for (const period of periods.value) {
@@ -205,10 +205,10 @@ export async function runHolidayCheck(today = localToday()): Promise<number> {
         continue;
       }
       await setFact(key, `${action === "ask" ? "asked" : "reasked"}:${today}`, ["internal"], person.id);
-      asked += 1;
+      asked.push(`${person.name ?? person.id}: ${period.start} (${action})`);
       break;
     }
   }
-  log.info(`HolidayCheck: asked ${asked} person(s) about ${periods.value.length} upcoming period(s)`);
-  return asked;
+  log.info(`HolidayCheck: asked ${asked.length} person(s) about ${periods.value.length} upcoming period(s)`);
+  return { periods: periods.value.map((period) => `${period.start}..${period.end}`), asked };
 }
