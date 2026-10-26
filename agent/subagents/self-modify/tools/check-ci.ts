@@ -1,7 +1,7 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import { z } from "zod";
 import { requireAdmin } from "../../../../lib/agent/context.ts";
-import { checkRuns, jobLog, type CheckRun } from "../../../../lib/github.ts";
+import { checkRuns, getPull, jobLog, markReadyForReview, type CheckRun } from "../../../../lib/github.ts";
 import { defineManfrodTool } from "../../../lib/define-tool.ts";
 import { proposal } from "../../../lib/self-modify.ts";
 
@@ -18,7 +18,7 @@ const logTail = (log: string) =>
 
 export default defineManfrodTool({
   description:
-    "Wait for the GitHub checks on the latest published commit and report them. For a failed check it returns the end of its log. If checks are still running when the wait ends, call it again.",
+    "Wait for the GitHub checks on the latest published commit and report them. When every check passes it marks the pull request ready for review. For a failed check it returns the end of its log. If checks are still running when the wait ends, call it again.",
   inputSchema: z.object({
     wait_seconds: z.number().int().min(0).max(540).optional().describe("How long to wait for running checks (default 300)"),
   }),
@@ -26,7 +26,7 @@ export default defineManfrodTool({
   async execute({ wait_seconds }, ctx, runtime) {
     const refusal = await requireAdmin(ctx.userId);
     if (refusal) return refusal;
-    const { headSha, pullUrl } = proposal.get();
+    const { headSha, pullNumber, pullUrl } = proposal.get();
     if (!headSha) return "Nothing has been published yet; call publish-proposal first.";
     const deadline = Date.now() + (wait_seconds ?? 300) * 1000;
     let runs: CheckRun[] = [];
@@ -41,7 +41,14 @@ export default defineManfrodTool({
     const pending = runs.filter((run) => run.status !== "completed");
     const failed = runs.filter((run) => run.conclusion !== null && FAILED.has(run.conclusion));
     const summary = runs.map((run) => `- ${run.name}: ${run.status === "completed" ? run.conclusion : run.status}`).join("\n");
-    const headline = pending.length > 0 ? "CI still running" : failed.length > 0 ? "CI failed" : "CI passed";
+    let headline = pending.length > 0 ? "CI still running" : failed.length > 0 ? "CI failed" : "CI passed";
+    if (headline === "CI passed" && pullNumber) {
+      const pull = await getPull(pullNumber);
+      if (pull?.draft && pull.state === "open") {
+        await markReadyForReview(pull.nodeId);
+        headline = "CI passed, pull request marked ready for review";
+      }
+    }
     const logs = await Promise.all(failed.map(async (run) => `### ${run.name}\n${logTail(await jobLog(run.id))}`));
     return [`${headline} for ${headSha.slice(0, 7)} (${pullUrl})`, summary, ...logs].join("\n\n");
   },

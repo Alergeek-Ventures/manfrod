@@ -147,3 +147,54 @@ export async function jobLog(jobId: number): Promise<string> {
   if (!response.ok) return `Log unavailable (HTTP ${response.status}).`;
   return response.text();
 }
+
+export async function getPull(number: number) {
+  const pull = await repo<{
+    number: number;
+    node_id: string;
+    state: string;
+    draft: boolean;
+    merged: boolean;
+    html_url: string;
+    head: { ref: string };
+  }>("GET", `/pulls/${number}`);
+  return (
+    pull && {
+      number: pull.number,
+      nodeId: pull.node_id,
+      state: pull.state,
+      draft: pull.draft,
+      merged: pull.merged,
+      url: pull.html_url,
+      branch: pull.head.ref,
+    }
+  );
+}
+
+export async function markReadyForReview(nodeId: string): Promise<void> {
+  const response = await call(await installationToken(), "POST", "/graphql", {
+    query: "mutation($id: ID!) { markPullRequestReadyForReview(input: { pullRequestId: $id }) { clientMutationId } }",
+    variables: { id: nodeId },
+  });
+  const result = (await response.json()) as { errors?: { message: string }[] };
+  if (result.errors?.length) throw new Error(`GitHub could not mark the pull request ready: ${result.errors[0].message}`);
+}
+
+export async function commentOnPull(number: number, body: string): Promise<void> {
+  await required("POST", `/issues/${number}/comments`, { body });
+}
+
+export async function closePull(number: number): Promise<void> {
+  await required("PATCH", `/pulls/${number}`, { state: "closed" });
+}
+
+export async function deleteBranch(branch: string): Promise<void> {
+  const response = await fetch(`${API}/repos/${repository()}/git/refs/heads/${branch}`, {
+    method: "DELETE",
+    headers: { authorization: `Bearer ${await installationToken()}`, "x-github-api-version": "2022-11-28" },
+    signal: AbortSignal.timeout(60_000),
+  });
+  if (!response.ok && response.status !== 404 && response.status !== 422) {
+    throw new Error(`GitHub DELETE branch ${branch} failed with HTTP ${response.status}.`);
+  }
+}

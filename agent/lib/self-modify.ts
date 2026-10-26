@@ -4,6 +4,7 @@ import type { SandboxSession } from "eve/sandbox";
 export const REPO_DIR = "/workspace/repo";
 export const BASE_TAG = "manfrod-base";
 export const TARGET_BRANCH = "main";
+export const BRANCH_PREFIX = "manfrod/self-modify/";
 export const MAX_FILES = 40;
 export const MAX_BYTES = 500_000;
 
