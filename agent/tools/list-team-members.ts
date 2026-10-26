@@ -3,8 +3,7 @@ import { isSystemUser, listUsers } from "../../lib/accounts.ts";
 import { defineManfrodTool } from "../lib/define-tool.ts";
 
 export default defineManfrodTool({
-  description:
-    "List everyone Manfrod knows about (id, name and Slack ID) — for holiday-check fan-out and for finding the Slack ID to mention someone with <@SLACK_ID>.",
+  description: "List everyone Manfrod knows about (id, name and Slack ID) — for finding the Slack ID to mention someone with <@SLACK_ID>.",
   inputSchema: z.object({}),
   async execute() {
     const members = (await listUsers()).filter((user) => !isSystemUser(user));

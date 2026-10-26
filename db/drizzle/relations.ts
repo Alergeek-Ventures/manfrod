@@ -1,5 +1,5 @@
 import { relations } from "drizzle-orm/relations";
-import { conversations, nodes, projects, users, recurringReminders, links, auditEvents, messages, desks, deskReservations, projectMemberships, facts, mcpCustomProviders, googleIdentities, userTokens, channelMappings, mcpConnections, usageDailyRollups, activityDailyRollups, threadKicks, messageFeedback, kalafiorniaConnections, projectLinearConnections, linearInstallations, agentSecrets, session, account, selfReviewCases, selfReviewFindings } from "./schema";
+import { conversations, nodes, projects, users, recurringReminders, links, auditEvents, messages, desks, deskReservations, projectMemberships, facts, mcpCustomProviders, googleIdentities, userTokens, channelMappings, mcpConnections, usageDailyRollups, activityDailyRollups, threadKicks, messageFeedback, kalafiorniaConnections, projectLinearConnections, linearInstallations, agentSecrets, session, account, selfReviewCases, selfReviewFindings, nudgeDeliveries, nudgePreferences } from "./schema";
 
 export const nodesRelations = relations(nodes, ({one, many}) => ({
 	conversation: one(conversations, {
@@ -43,6 +43,8 @@ export const projectsRelations = relations(projects, ({many}) => ({
 }));
 
 export const usersRelations = relations(users, ({one, many}) => ({
+	nudgeDeliveries: many(nudgeDeliveries),
+	nudgePreferences: many(nudgePreferences),
 	nodes: many(nodes, {
 		relationName: "nodes_userId_users_id"
 	}),
@@ -278,4 +280,18 @@ export const selfReviewCasesRelations = relations(selfReviewCases, ({one}) => ({
 
 export const selfReviewFindingsRelations = relations(selfReviewFindings, ({many}) => ({
 	selfReviewCases: many(selfReviewCases),
+}));
+
+export const nudgeDeliveriesRelations = relations(nudgeDeliveries, ({one}) => ({
+	user: one(users, {
+		fields: [nudgeDeliveries.userId],
+		references: [users.id]
+	}),
+}));
+
+export const nudgePreferencesRelations = relations(nudgePreferences, ({one}) => ({
+	user: one(users, {
+		fields: [nudgePreferences.userId],
+		references: [users.id]
+	}),
 }));

@@ -11,11 +11,24 @@ import { flush, staleKeys } from "../memory/buffer.ts";
 import { extractSession } from "../memory/extractor.ts";
 import { sweep } from "../memory/pending.ts";
 import { processAllBuckets, reviewProcessedGraph } from "../memory/retrospector.ts";
+import { runHolidayCheck } from "../holidays.ts";
 import { deliverProactive } from "../proactive.ts";
 import { runMorning as selfReviewMorning, runNightly as selfReviewNightly } from "../self-review/index.ts";
 import { scheduleCronSkills, scheduleFirmowidEvening, scheduleFirmowidMorning, scheduleReminders } from "../schedulers.ts";
 import { refresh as refreshGitleaks } from "../security/gitleaks.ts";
-import { EVENTS, inngest, ROOT_THREAD_KEY, type BufferPushedData, type JobScheduledData, type SessionActivityData } from "./client.ts";
+import { runAbsenceFollowUp } from "../nudges/absence.ts";
+import { runProjectSummaries } from "../nudges/projects.ts";
+import { runWorkStartNudges } from "../nudges/waiting.ts";
+import { runWeeklyWrapUps } from "../nudges/weekly.ts";
+import {
+  EVENTS,
+  inngest,
+  ROOT_THREAD_KEY,
+  type AbsenceRecordedData,
+  type BufferPushedData,
+  type JobScheduledData,
+  type SessionActivityData,
+} from "./client.ts";
 
 const tz = (cron: string) => `TZ=Europe/Warsaw ${cron}`;
 
@@ -71,6 +84,20 @@ const proactiveSend = inngest.createFunction(
       const result = await deliverProactive(userId, prompt);
       if (!result.ok) throw new NonRetriableError(result.error);
       return null;
+    }),
+);
+
+const absenceFollowUp = inngest.createFunction(
+  {
+    id: "absence-follow-up",
+    triggers: [{ event: EVENTS.absenceRecorded }],
+    retries: 1,
+    debounce: { key: "event.data.userId", period: "2m" },
+  },
+  async ({ event, step }) =>
+    step.run("follow-up", async () => {
+      const { userId, startDate, endDate, working } = event.data as AbsenceRecordedData;
+      return { sent: await runAbsenceFollowUp(userId, startDate, endDate, working) };
     }),
 );
 
@@ -134,6 +161,7 @@ const cleanup = cronFunction("events-cleanup", "40 * * * *", async () => {
 const allFunctions = [
   runJob,
   proactiveSend,
+  absenceFollowUp,
   extractSessionFn,
   flushBuffer,
   cronFunction("retrospection", "5 */3 * * *", async () => {
@@ -152,6 +180,10 @@ const allFunctions = [
     await runRecent(4);
     logger("RollupWorker").info("RollupWorker: rolled up the last 4 day(s)");
   }),
+  cronFunction("holiday-check", "0 10 * * 1-5", () => runHolidayCheck()),
+  cronFunction("nudges-work-start", "*/15 7-12 * * 1-5", () => runWorkStartNudges()),
+  cronFunction("nudges-weekly", "*/30 12-17 * * 5", () => runWeeklyWrapUps()),
+  cronFunction("nudges-project-summaries", "0 15 * * 5", () => runProjectSummaries()),
   cronFunction("gitleaks-refresh", "0 3 * * *", () => refreshGitleaks()),
   cronFunction("self-review", "30 3 * * *", () => selfReviewNightly()),
   cronFunction("self-review-outreach", "30 9 * * 1-5", () => selfReviewMorning()),

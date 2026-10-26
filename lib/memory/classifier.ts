@@ -2,14 +2,12 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import type { BufferedMessage, Node } from "../db/schema.ts";
 import { getUserBySlackId } from "../accounts.ts";
+import { EVENTS, sendEvent } from "../inngest/client.ts";
 import { broadcast } from "../events/index.ts";
 import { addAccess, overlappingAbsences, putAbsence, setFact } from "../facts.ts";
 import { generateText, system, user } from "../llm/index.ts";
 import { decideAction, type MemoryAction } from "./action-decider.ts";
 import { logger } from "../log.ts";
-import { ensureValidToken, getConnection } from "../mcp/index.ts";
-import { sendProactive } from "../proactive.ts";
-import { getBody } from "../routines.ts";
 import { post } from "../slack/api.ts";
 import { isValidIsoDate, localToday, weekdayName } from "../time.ts";
 import { embedQuery } from "../voyage.ts";
@@ -232,7 +230,7 @@ async function createAbsence(result: Result, message: BufferedMessage, batch: Ba
 
   const proposal = escalationProposal(batch, writeAccess, "absence");
   if (proposal) await postEscalationQuestion(batch.channelId, message, node, proposal, writeAccess, lang(result), key);
-  if (result.working !== true) await maybeOfferFirmowidLeaveRequest(userId, startDate, endDate);
+  await sendEvent(EVENTS.absenceRecorded, { userId, startDate, endDate, working: result.working === true });
 }
 
 async function askHuman(result: Result, message: BufferedMessage, batch: Batch, writeAccess: string[]) {
@@ -314,17 +312,6 @@ function absenceDates(result: Result) {
   const startDate = valid(result.start_date) ?? localToday();
   const endDate = valid(result.end_date) ?? startDate;
   return { startDate, endDate };
-}
-
-async function maybeOfferFirmowidLeaveRequest(userId: string, startDate: string, endDate: string) {
-  const connection = await getConnection(userId, "firmowid");
-  if (!connection || connection.status === "disconnected") return;
-  if (!(await ensureValidToken(connection)).ok) return;
-  const body = getBody("firmowid-leave-offer");
-  if (!body) return;
-  const prompt = body.replaceAll("{{start_date}}", startDate).replaceAll("{{end_date}}", endDate);
-  const sent = await sendProactive(userId, prompt);
-  if (!sent.ok) log.debug(`Classifier: failed to offer Firmowid leave request to ${userId}: ${sent.error}`);
 }
 
 interface Proposal {

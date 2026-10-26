@@ -8,6 +8,7 @@ export const EVENTS = {
   sessionActivity: "manfrod/session.activity",
   bufferPushed: "manfrod/memory.buffer.pushed",
   proactiveRequested: "manfrod/proactive.requested",
+  absenceRecorded: "manfrod/absence.recorded",
 } as const;
 
 export interface JobScheduledData {
@@ -23,6 +24,13 @@ export interface SessionActivityData {
 export interface BufferPushedData {
   channelId: string;
   threadKey: string;
+}
+
+export interface AbsenceRecordedData {
+  userId: string;
+  startDate: string;
+  endDate: string;
+  working: boolean;
 }
 
 export const ROOT_THREAD_KEY = "root";

@@ -77,7 +77,13 @@ export function listEvents(accessToken: string, timeMin: Date, timeMax: Date, ma
   return fetchEvents(`${BASE_URL}/calendars/primary/events?${params}`, { authorization: `Bearer ${accessToken}` });
 }
 
-export async function listHolidayEvents(calendarId: string, timeMin: Date, timeMax: Date): Promise<GResult<CalendarEvent[]>> {
+const PUBLIC_HOLIDAY = /^(Święto państwowe|Public holiday)/i;
+
+export async function listPublicHolidays(
+  calendarId: string,
+  timeMin: Date,
+  timeMax: Date,
+): Promise<GResult<{ date: string; name: string }[]>> {
   const apiKey = config.googleApiKey;
   if (!apiKey) return { ok: false, error: "no_google_api_key" };
   const params = new URLSearchParams({
@@ -87,7 +93,22 @@ export async function listHolidayEvents(calendarId: string, timeMin: Date, timeM
     singleEvents: "true",
     orderBy: "startTime",
   });
-  return fetchEvents(`${BASE_URL}/calendars/${encodeURIComponent(calendarId)}/events?${params}`, {});
+  try {
+    const response = await fetch(`${BASE_URL}/calendars/${encodeURIComponent(calendarId)}/events?${params}`, {
+      signal: AbortSignal.timeout(15_000),
+    });
+    const body = (await response.json().catch(() => null)) as Record<string, any> | null;
+    if (response.status !== 200) return { ok: false, error: `{:api_error, ${response.status}, ${JSON.stringify(body)}}` };
+    const items = (body?.items ?? []) as Record<string, any>[];
+    return {
+      ok: true,
+      value: items
+        .filter((item) => item.status !== "cancelled" && item.start?.date && PUBLIC_HOLIDAY.test(item.description ?? ""))
+        .map((item) => ({ date: item.start.date as string, name: item.summary as string })),
+    };
+  } catch (error) {
+    return { ok: false, error: `{:http_error, ${(error as Error).message}}` };
+  }
 }
 
 export async function ensureValidToken(identity: Account): Promise<GResult<string>> {
