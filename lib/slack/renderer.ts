@@ -214,7 +214,6 @@ export const manfrodRenderer = defineSlackRenderer({
       await deliverFinal(at, event.message ?? "");
     },
 
-    "turn.completed"() {},
     "session.waiting"() {},
   },
 });
