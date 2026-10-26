@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { closePull, commentOnPull, deleteBranch, getPull } from "../../../../lib/github.ts";
+import { cleanUpPull } from "../../../../lib/self-modify-pulls.ts";
 import { defineManfrodTool } from "../../../lib/define-tool.ts";
 import { authorize, BRANCH_PREFIX, proposal } from "../../../lib/self-modify.ts";
 
@@ -27,9 +28,10 @@ export default defineManfrodTool({
       await closePull(pull_number);
     }
     await deleteBranch(pull.branch);
+    await cleanUpPull(pull_number);
     if (proposal.get().pullNumber === pull_number) {
       proposal.update((current) => ({ ...current, branch: null, headSha: null, pullNumber: null, pullUrl: null }));
     }
-    return `Closed pull request #${pull_number} (${pull.url}) and deleted branch ${pull.branch}.`;
+    return `Closed pull request #${pull_number} (${pull.url}), deleted branch ${pull.branch} and its sandbox.`;
   },
 });
