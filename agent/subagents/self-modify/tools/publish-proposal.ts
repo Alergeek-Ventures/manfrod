@@ -11,6 +11,7 @@ import {
   type TreeEntry,
 } from "../../../../lib/github.ts";
 import { matches as secretRule } from "../../../../lib/security/gitleaks.ts";
+import { recordPull } from "../../../../lib/self-modify-pulls.ts";
 import { MAX_OPEN_PULLS } from "../../../../lib/self-review/rules.ts";
 import { attachPull, countActive } from "../../../../lib/self-review/store.ts";
 import { defineManfrodTool } from "../../../lib/define-tool.ts";
@@ -108,6 +109,7 @@ export default defineManfrodTool({
             : "";
       const footer = `\n\n---\nProposed by Manfrod's self-modify agent${origin}.`;
       ({ number: pullNumber, url: pullUrl } = await createDraftPull(branch, TARGET_BRANCH, title, description + footer));
+      await recordPull(pullNumber, branch, runtime.session.id);
       if (requester.kind === "self_review") await attachPull(requester.finding.id, pullNumber, pullUrl);
     }
     proposal.update((current) => ({ ...current, branch, headSha: commit, pullNumber, pullUrl }));

@@ -607,3 +607,15 @@ export const channelNudges = pgTable("channel_nudges", {
 	lastSummaryPeriod: text("last_summary_period"),
 	updatedAt: timestamp("updated_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
 });
+
+export const selfModifyPulls = pgTable("self_modify_pulls", {
+	pullNumber: integer("pull_number").primaryKey().notNull(),
+	branch: text().notNull(),
+	sessionId: text("session_id").notNull(),
+	status: text().default('open').notNull(),
+	insertedAt: timestamp("inserted_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
+	closedAt: timestamp("closed_at", { mode: 'date' }),
+}, (table) => [
+	index().using("btree", table.status.asc().nullsLast().op("text_ops")),
+	check("self_modify_pulls_status", sql`status = ANY (ARRAY['open'::text, 'closed'::text])`),
+]);

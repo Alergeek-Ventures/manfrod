@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import {
   ALL_TRAFFIC,
   CommandExitError,
@@ -8,6 +7,7 @@ import {
   type SandboxNetworkUpdate,
 } from "e2b";
 import type { SandboxNetworkPolicy, SandboxNetworkRule } from "eve/sandbox";
+import { METADATA_KEY, sandboxKey } from "../../lib/sandboxes.ts";
 import {
   defineSandboxProvider,
   SANDBOX_AGENT_ENV,
@@ -20,7 +20,6 @@ export const E2B_TEMPLATE = "manfrod-sandbox";
 
 const PROVIDER = "e2b";
 const WORKSPACE_ROOT = "/workspace";
-const METADATA_KEY = "eveSandbox";
 const DEFAULT_TIMEOUT_MS = 15 * 60_000;
 
 type Extensions = { setNetworkPolicy(policy: SandboxNetworkPolicy): Promise<void> };
@@ -154,7 +153,6 @@ export const E2BSandbox = defineSandboxProvider({
   name: PROVIDER,
   environment(options: { template?: string; timeoutMs?: number; envs?: Record<string, string> }) {
     const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-    const keyFor = (sessionId: string) => createHash("sha256").update(`manfrod:${sessionId}`).digest("hex").slice(0, 32);
 
     const find = async (key: string) => {
       const found = await Sandbox.list({ query: { metadata: { [METADATA_KEY]: key } } }).nextItems();
@@ -194,7 +192,7 @@ export const E2BSandbox = defineSandboxProvider({
       },
 
       async start(ctx, open: { networkPolicy?: SandboxNetworkPolicy } | undefined, artifact) {
-        const key = keyFor(ctx.session.id);
+        const key = sandboxKey(ctx.session.id);
         const [existing] = await find(key);
         const sandbox = existing
           ? await Sandbox.connect(existing.sandboxId, { timeoutMs })
@@ -212,7 +210,7 @@ export const E2BSandbox = defineSandboxProvider({
       },
 
       async onSessionEnd(ctx, state) {
-        const ids = new Set((await find(keyFor(ctx.session.id))).map((sandbox) => sandbox.sandboxId));
+        const ids = new Set((await find(sandboxKey(ctx.session.id))).map((sandbox) => sandbox.sandboxId));
         if (state) ids.add(state.sandboxId);
         await Promise.all([...ids].map((id) => Sandbox.kill(id)));
       },

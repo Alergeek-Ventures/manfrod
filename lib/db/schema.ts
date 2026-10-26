@@ -24,6 +24,7 @@ import {
   projectLinearConnections,
   projects,
   recurringReminders,
+  selfModifyPulls,
   selfReviewCases,
   selfReviewFindings,
   users,
@@ -64,6 +65,7 @@ export type AuditEvent = typeof auditEvents.$inferSelect;
 export type MessageFeedback = typeof messageFeedback.$inferSelect;
 export type SelfReviewFinding = typeof selfReviewFindings.$inferSelect;
 export type SelfReviewCase = typeof selfReviewCases.$inferSelect;
+export type SelfModifyPull = typeof selfModifyPulls.$inferSelect;
 export type NudgeDelivery = typeof nudgeDeliveries.$inferSelect;
 export type NudgePreference = typeof nudgePreferences.$inferSelect;
 export type ChannelNudge = typeof channelNudges.$inferSelect;
