@@ -147,3 +147,30 @@ export async function jobLog(jobId: number): Promise<string> {
   if (!response.ok) return `Log unavailable (HTTP ${response.status}).`;
   return response.text();
 }
+
+export async function getPull(number: number) {
+  const pull = await repo<{ number: number; state: string; merged: boolean; html_url: string; head: { ref: string } }>(
+    "GET",
+    `/pulls/${number}`,
+  );
+  return pull && { number: pull.number, state: pull.state, merged: pull.merged, url: pull.html_url, branch: pull.head.ref };
+}
+
+export async function commentOnPull(number: number, body: string): Promise<void> {
+  await required("POST", `/issues/${number}/comments`, { body });
+}
+
+export async function closePull(number: number): Promise<void> {
+  await required("PATCH", `/pulls/${number}`, { state: "closed" });
+}
+
+export async function deleteBranch(branch: string): Promise<void> {
+  const response = await fetch(`${API}/repos/${repository()}/git/refs/heads/${branch}`, {
+    method: "DELETE",
+    headers: { authorization: `Bearer ${await installationToken()}`, "x-github-api-version": "2022-11-28" },
+    signal: AbortSignal.timeout(60_000),
+  });
+  if (!response.ok && response.status !== 404 && response.status !== 422) {
+    throw new Error(`GitHub DELETE branch ${branch} failed with HTTP ${response.status}.`);
+  }
+}

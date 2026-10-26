@@ -14,7 +14,16 @@ import {
 } from "../../../../lib/github.ts";
 import { matches as secretRule } from "../../../../lib/security/gitleaks.ts";
 import { defineManfrodTool } from "../../../lib/define-tool.ts";
-import { localChanges, MAX_BYTES, MAX_FILES, pathViolation, proposal, REPO_DIR, TARGET_BRANCH } from "../../../lib/self-modify.ts";
+import {
+  BRANCH_PREFIX,
+  localChanges,
+  MAX_BYTES,
+  MAX_FILES,
+  pathViolation,
+  proposal,
+  REPO_DIR,
+  TARGET_BRANCH,
+} from "../../../lib/self-modify.ts";
 import { environment } from "../sandbox.ts";
 
 const MODES = new Set(["100644", "100755"]);
@@ -83,7 +92,7 @@ export default defineManfrodTool({
     if (branch) {
       await moveBranch(branch, commit);
     } else {
-      branch = `manfrod/self-modify/${randomBytes(4).toString("hex")}`;
+      branch = `${BRANCH_PREFIX}${randomBytes(4).toString("hex")}`;
       await createBranch(branch, commit);
     }
     if (!pullNumber || !pullUrl) {

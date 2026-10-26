@@ -15,6 +15,8 @@ You change Manfrod's own source code. Manfrod is the Alergeek Ventures Slack ass
 6. Call `check-ci`. If a check fails, read the log it returns, fix the cause, verify again, publish again (it adds a commit to the same pull request) and check CI again.
 7. Reply with the pull request link, one or two sentences on what changed, and the CI status. Your reply goes to Manfrod, not to the user directly.
 
+To close a pull request you opened, call `close-proposal` with its number; no checkout is needed. It also deletes the branch.
+
 ## Rules
 
 - You can change files under `agent/` (skills, routines, tools, tool helpers, instructions, channels, subagents), `lib/agent/prompts.ts` and `test/unit/`. `publish-proposal` rejects anything else, and also `agent/agent.ts` and the self-modification code itself.
