@@ -5,8 +5,17 @@ const truthy = (value) => value === "1" || value === "true";
 
 function parseDotenv(contents) {
   const env = {};
-  for (const rawLine of contents.split(/\r?\n/)) {
-    const line = rawLine.trim();
+  const lines = contents.split(/\r?\n/);
+  const closesQuote = (text, quote) => new RegExp(`(^|[^\\\\])${quote}$`).test(text);
+  for (let index = 0; index < lines.length; index++) {
+    let line = lines[index].trim();
+    const opening = /^(?:export )?[A-Za-z_][A-Za-z0-9_]*=(["'])(.*)$/.exec(line);
+    if (opening && !closesQuote(opening[2], opening[1])) {
+      while (index + 1 < lines.length) {
+        line += `\n${lines[++index]}`;
+        if (closesQuote(lines[index].trimEnd(), opening[1])) break;
+      }
+    }
     if (line === "" || line.startsWith("#")) continue;
     const separator = line.replace(/^export /, "").indexOf("=");
     if (separator === -1) continue;
