@@ -579,3 +579,31 @@ export const selfReviewCases = pgTable("self_review_cases", {
 	index().using("btree", table.status.asc().nullsLast().op("text_ops")),
 	check("self_review_cases_status", sql`status = ANY (ARRAY['linked'::text, 'not_actionable'::text, 'needs_input'::text, 'asked'::text, 'expired'::text])`),
 ]);
+
+export const nudgeDeliveries = pgTable("nudge_deliveries", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	userId: uuid("user_id").notNull(),
+	kind: text().notNull(),
+	period: text().notNull(),
+	sent: boolean().notNull(),
+	reason: text(),
+	insertedAt: timestamp("inserted_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
+}, (table) => [
+	uniqueIndex("nudge_deliveries_period_index").using("btree", table.userId.asc().nullsLast().op("uuid_ops"), table.kind.asc().nullsLast().op("text_ops"), table.period.asc().nullsLast().op("text_ops")),
+]);
+
+export const nudgePreferences = pgTable("nudge_preferences", {
+	userId: uuid("user_id").notNull(),
+	kind: text().notNull(),
+	enabled: boolean().notNull(),
+	updatedAt: timestamp("updated_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
+}, (table) => [
+	primaryKey({ columns: [table.kind, table.userId], name: "nudge_preferences_pkey"}),
+]);
+
+export const channelNudges = pgTable("channel_nudges", {
+	channelId: text("channel_id").primaryKey().notNull(),
+	summaries: boolean().default(true).notNull(),
+	lastSummaryPeriod: text("last_summary_period"),
+	updatedAt: timestamp("updated_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
+});

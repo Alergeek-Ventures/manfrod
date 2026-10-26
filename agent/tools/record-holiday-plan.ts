@@ -1,29 +1,37 @@
 import { z } from "zod";
-import { addDays, utcToday } from "../../lib/time.ts";
-import { DEFAULT_SNOOZE_DAYS, writePlanFact } from "../lib/calendar.ts";
+import { getFact, setFact } from "../../lib/facts.ts";
+import { planKey, unsurePlan } from "../../lib/holidays.ts";
+import { isValidIsoDate, localToday } from "../../lib/time.ts";
 import { defineManfrodTool } from "../lib/define-tool.ts";
+
+const CONFIRMATIONS = {
+  working: "Zanotowane, pracujesz w tym czasie. Nie będę już pytać.",
+  off: "Zanotowane, masz wolne. Nie będę już pytać.",
+  declined: "Jasne, nie będę już pytać o ten termin.",
+};
 
 export default defineManfrodTool({
   keepSecretPlaceholders: true,
   description:
-    "Record the current user's plan for an upcoming holiday: 'working' (working as normal that day) or 'unsure' (they'll decide later — you'll check back in a couple of days). For vacation, call report-vacation instead, not this.",
+    "Record the current user's answer to a holiday check-in, for the period start date given in that check-in: 'working' (works on the holiday), 'off' (has the holiday off; record any extra days off with report-vacation first), 'unsure' (decides later; you'll remind them once) or 'declined' (doesn't want to say). After this they won't be asked about that period again.",
   inputSchema: z.object({
-    date: z.string().describe("Holiday date ISO8601 (YYYY-MM-DD)"),
-    status: z.string().describe("'working' or 'unsure'"),
-    recheck_in_days: z.number().int().optional().describe("Only for status 'unsure': days to wait before asking again (default 2)"),
+    period: z.string().describe("Period start date ISO8601 (YYYY-MM-DD) from the check-in"),
+    status: z.enum(["working", "off", "unsure", "declined"]),
+    note: z.string().max(300).optional().describe("Short Polish note on their plan, e.g. 'wolne do 3.01, potem zdalnie'"),
   }),
-  async execute({ date, status, recheck_in_days }, ctx) {
-    if (status === "working") return writePlanFact(ctx.userId, date, "working", `Zanotowane — pracujesz ${date}.`);
-    if (status === "unsure") {
-      const recheckIn = recheck_in_days ?? DEFAULT_SNOOZE_DAYS;
-      const recheckDate = addDays(utcToday(), recheckIn);
-      return writePlanFact(
-        ctx.userId,
-        date,
-        `unsure:${recheckDate}`,
-        `Zanotowane — wrócę z pytaniem o ${date} za ${recheckIn} dni (${recheckDate}).`,
-      );
+  async execute({ period, status, note }, ctx) {
+    if (!isValidIsoDate(period)) return `Invalid date: ${period}`;
+    try {
+      const key = planKey(ctx.userId, period);
+      if (status === "unsure") {
+        const plan = unsurePlan((await getFact(key, ["internal"]))?.value ?? null, localToday(), period);
+        await setFact(key, plan, ["internal"], ctx.userId);
+        return plan === "unsure" ? "Zanotowane, nie będę już dopytywać." : "Zanotowane, przypomnę się raz, bliżej terminu.";
+      }
+      await setFact(key, note ? `${status} — ${note}` : status, ["internal"], ctx.userId);
+      return CONFIRMATIONS[status];
+    } catch (error) {
+      return `Błąd zapisu: ${(error as Error).message}`;
     }
-    return `Nieznany status: ${status}. Użyj 'working' albo 'unsure' (dla urlopu użyj report-vacation).`;
   },
 });

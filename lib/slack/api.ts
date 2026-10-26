@@ -207,6 +207,21 @@ export async function listMessages(channel: string, limit = 20): Promise<SlackBo
   return result.ok ? [...(result.body.messages as SlackBody[])].reverse() : null;
 }
 
+export async function channelHistory(channel: string, oldest: string, limit = 200): Promise<SlackBody[] | null> {
+  const result = await get("conversations.history", { channel, oldest, limit });
+  return result.ok ? (result.body.messages as SlackBody[]) : null;
+}
+
+export async function channelMembers(channel: string): Promise<string[] | null> {
+  const result = await get("conversations.members", { channel, limit: 1000 });
+  return result.ok ? (result.body.members as string[]) : null;
+}
+
+export async function isActive(slackUserId: string): Promise<boolean> {
+  const result = await get("users.getPresence", { user: slackUserId });
+  return result.ok && result.body.presence === "active";
+}
+
 export async function listFullThread(channel: string, threadTs: string, max = 1000): Promise<SlackBody[] | null> {
   let acc: SlackBody[] = [];
   let cursor: string | undefined;

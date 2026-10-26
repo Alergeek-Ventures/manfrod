@@ -40,6 +40,7 @@ Manfrod is a Slack AI agent with a memory graph, written in TypeScript on eve (a
 
 - All background work runs as Inngest functions in `lib/inngest/functions.ts`; crons are evaluated in `Europe/Warsaw`
 - User-visible scheduled work (reminders, follow-ups, skill triggers) goes through `lib/jobs/index.ts` so it stays listable and cancellable
+- Messages Manfrod sends on its own (`lib/nudges/`) gather data in code, let `decide()` in `lib/nudges/compose.ts` choose whether to send and draft it, and respect the per-person `nudge_preferences` (`set-proactive-preferences`) and per-channel `channel_nudges` (`set-channel-summaries`)
 
 ## Tests
 
