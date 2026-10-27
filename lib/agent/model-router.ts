@@ -103,5 +103,6 @@ export async function routeStep(sessionId: string, messages: readonly ModelMessa
       models: [ROUTES[current.route].fallback],
     }),
     modelContextWindowTokens: CONTEXT_WINDOW_TOKENS,
+    modelOptions: { promptCache: { anthropic: {} } },
   };
 }
