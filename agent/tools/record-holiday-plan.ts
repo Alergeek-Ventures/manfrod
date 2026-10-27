@@ -17,7 +17,11 @@ export default defineManfrodTool({
   inputSchema: z.object({
     period: z.string().describe("Period start date ISO8601 (YYYY-MM-DD) from the check-in"),
     status: z.enum(["working", "off", "unsure", "declined"]),
-    note: z.string().max(300).optional().describe("Short Polish note on their plan, e.g. 'wolne do 3.01, potem zdalnie'"),
+    note: z
+      .string()
+      .max(300)
+      .optional()
+      .describe("Short note on their plan in the team's internal language, e.g. 'wolne do 3.01, potem zdalnie'"),
   }),
   async execute({ period, status, note }, ctx) {
     if (!isValidIsoDate(period)) return `Invalid date: ${period}`;

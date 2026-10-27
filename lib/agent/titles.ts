@@ -45,13 +45,12 @@ export async function threadTitle(content: string): Promise<string> {
   }
 }
 
-const PLAN_TITLE_SYSTEM = `You name the task an assistant is currently working on, for a progress
+const planTitleSystem = (language: string) => `You name the task an assistant is currently working on, for a progress
 indicator the user watches while they wait.
 
 Rules:
-- Polish, first person singular, present tense, as the assistant: "Sprawdzam
-  rezerwacje biurek", "Szukam notatek ze spotkania", "Przygotowuję
-  podsumowanie kanału".
+- ${language}, first person singular, present tense, as the assistant: e.g. in Polish
+  "Sprawdzam rezerwacje biurek", "Szukam notatek ze spotkania".
 - 2-5 words, under 60 characters.
 - Describe what is being done for the user, not which tools are used.
 - No quotes, no emoji, no trailing punctuation, no ellipsis.
@@ -60,11 +59,11 @@ Rules:
 
 const PLAN_REQUEST_LIMIT = 1_000;
 
-export async function planTitle(request: string | null | undefined): Promise<string | null> {
+export async function planTitle(request: string | null | undefined, language: string): Promise<string | null> {
   if (typeof request !== "string") return null;
   const trimmed = request.length > PLAN_REQUEST_LIMIT ? request.slice(-PLAN_REQUEST_LIMIT) : request;
   try {
-    const title = await generateSimple(PRIMARY_MODEL, [system(PLAN_TITLE_SYSTEM), user(trimmed)], {
+    const title = await generateSimple(PRIMARY_MODEL, [system(planTitleSystem(language)), user(trimmed)], {
       purpose: "plan_title",
       timeoutMs: 6_000,
     });

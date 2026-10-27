@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Message } from "../../lib/db/schema.ts";
-import { freeSlots, hasEnoughEvidence } from "../../lib/self-review/rules.ts";
+import { feedbackSince, freeSlots, hasEnoughEvidence, NEW_SYSTEM_SINCE } from "../../lib/self-review/rules.ts";
 import { formatTranscript, parseRanking, parseTriage } from "../../lib/self-review/triage.ts";
 
 const message = (role: "user" | "assistant", content: string, at: number, userId = "rater"): Message =>
@@ -31,6 +31,13 @@ describe("hasEnoughEvidence", () => {
   });
 });
 
+describe("feedbackSince", () => {
+  it("looks back 30 days but never before the new system went live", () => {
+    expect(feedbackSince(new Date("2026-10-27T03:30:00Z"))).toEqual(NEW_SYSTEM_SINCE);
+    expect(feedbackSince(new Date("2027-01-10T03:30:00Z"))).toEqual(new Date("2026-12-11T03:30:00Z"));
+  });
+});
+
 describe("parseTriage", () => {
   const finding = { title: "Ignores date", problem: "p", expected: "e", category: "skill", severity: 2 };
 
@@ -43,7 +50,7 @@ describe("parseTriage", () => {
     expect(parseTriage(JSON.stringify({ verdict: "actionable", reason: "r", match: "zzz", finding }), ["f1"], false)).toEqual({
       verdict: "new",
       reason: "r",
-      finding,
+      finding: { ...finding, summary: null },
     });
     expect(parseTriage(JSON.stringify({ verdict: "actionable", reason: "r", match: "zzz" }), ["f1"], false)).toBeNull();
   });

@@ -1,3 +1,4 @@
+import { channelLanguage } from "../agent-settings.ts";
 import { PRIMARY_MODEL, generateSimple, system, user } from "../llm/index.ts";
 import { logger } from "../log.ts";
 import { listFullThread, post } from "./api.ts";
@@ -8,14 +9,14 @@ const log = logger("Slack.Kick");
 const CONTEXT_MESSAGES = 8;
 const CONTEXT_CHARS = 1_500;
 
-const SYSTEM_MESSAGE = `Jesteś Manfrod, firmowy asystent na Slacku. Ktoś w tym wątku właśnie
+const systemMessage = (language: string) => `Jesteś Manfrod, firmowy asystent na Slacku. Ktoś w tym wątku właśnie
 poprosił, żebyś przestał się w nim udzielać, i faktycznie już wychodzisz.
 
 Napisz jedną krótką wiadomość pożegnalną:
 - W JĘZYKU WĄTKU. Rozpoznaj język z załączonych wiadomości i użyj dokładnie
   tego samego. Jeśli wątek jest po angielsku, pożegnaj się po angielsku;
   jeśli po polsku, po polsku. Przy mieszance wybierz język, w którym
-  poproszono Cię o wyjście. Bez kontekstu użyj polskiego.
+  poproszono Cię o wyjście. Bez kontekstu użyj języka: ${language}.
 - lekko smutną, ale bez dramatyzowania i bez proszenia się o powrót
 - nawiązującą do tego konkretnego wątku, jeśli z kontekstu widać, o czym był
 - z informacją, że wystarczy Cię oznaczyć (@Manfrod), żebyś wrócił
@@ -40,10 +41,14 @@ async function threadContext(channel: string, threadTs: string): Promise<string>
 
 export async function farewell(channel: string, threadTs: string): Promise<string> {
   try {
-    const text = await generateSimple(PRIMARY_MODEL, [system(SYSTEM_MESSAGE), user(await threadContext(channel, threadTs))], {
-      purpose: "farewell",
-      timeoutMs: 8_000,
-    });
+    const text = await generateSimple(
+      PRIMARY_MODEL,
+      [system(systemMessage((await channelLanguage(channel)).name)), user(await threadContext(channel, threadTs))],
+      {
+        purpose: "farewell",
+        timeoutMs: 8_000,
+      },
+    );
     return text.trim() === "" ? FALLBACK_FAREWELL : text.trim();
   } catch (error) {
     log.debug(`Slack Kick: farewell generation failed, using fallback: ${(error as Error).message}`);

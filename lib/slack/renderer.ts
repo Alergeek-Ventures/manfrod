@@ -1,4 +1,5 @@
 import { defineSlackRenderer, type SlackEventContext } from "eve/channels/slack";
+import { channelLanguage } from "../agent-settings.ts";
 import { isEmptyReply } from "../agent/system-prompt.ts";
 import { planTitle, threadTitle } from "../agent/titles.ts";
 import { logger } from "../log.ts";
@@ -185,9 +186,11 @@ export const manfrodRenderer = defineSlackRenderer({
         plannedTurns.set(turnKey, true);
         const request = lastUserContent(at.tool.sessionKey);
         if (request) {
-          void planTitle(request).then((title) => {
-            if (title && !stream.closed) stream.plan(title);
-          });
+          void channelLanguage(at.channel)
+            .then(({ name }) => planTitle(request, name))
+            .then((title) => {
+              if (title && !stream.closed) stream.plan(title);
+            });
         }
       }
     },

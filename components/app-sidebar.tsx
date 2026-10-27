@@ -13,6 +13,7 @@ import {
   HashIcon,
   HistoryIcon,
   KeyRoundIcon,
+  LanguagesIcon,
   NetworkIcon,
   PalmtreeIcon,
   PlugIcon,
@@ -59,6 +60,7 @@ const ADMIN_GROUPS: NavGroup[] = [
       { title: "Reminders", url: "/admin/access/reminders", icon: <ClockIcon /> },
       { title: "Linear", url: "/admin/access/linear", icon: <SquareKanbanIcon /> },
       { title: "Secrets", url: "/admin/access/secrets", icon: <KeyRoundIcon /> },
+      { title: "Agent", url: "/admin/access/agent", icon: <LanguagesIcon /> },
     ],
   },
   {

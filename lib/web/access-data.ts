@@ -1,5 +1,6 @@
 import { and, asc, countDistinct, desc, eq, isNull, like, sql } from "drizzle-orm";
 import { isAdmin, isSystemUser, listUsers } from "../accounts.ts";
+import { LANGUAGES, languageSettings } from "../agent-settings.ts";
 import { db, tables } from "../db/index.ts";
 import { listPendingJobs } from "../jobs/index.ts";
 import { listConnections } from "../linear/index.ts";
@@ -173,6 +174,8 @@ export async function loadAccessData() {
     linearConnections,
     linearInstallations,
     secrets,
+    languages: await languageSettings(),
+    languageOptions: Object.entries(LANGUAGES).map(([value, label]) => ({ value, label })),
   };
 }
 
