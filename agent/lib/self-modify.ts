@@ -13,13 +13,27 @@ export const BRANCH_PREFIX = "manfrod/self-modify/";
 export const MAX_FILES = 40;
 export const MAX_BYTES = 500_000;
 
-const ALLOWED = ["agent/", "lib/agent/prompts.ts", "test/unit/"];
+const ALLOWED = ["agent/", "lib/", "app/", "components/", "hooks/", "test/"];
 const BLOCKED = [
   "agent/agent.ts",
   "agent/lib/define-tool.ts",
   "agent/lib/e2b-sandbox.ts",
   "agent/lib/self-modify.ts",
   "agent/subagents/self-modify/",
+  "lib/accounts.ts",
+  "lib/agent/context.ts",
+  "lib/auth.ts",
+  "lib/auth-client.ts",
+  "lib/auth-constants.ts",
+  "lib/db/",
+  "lib/github.ts",
+  "lib/sandboxes.ts",
+  "lib/secrets.ts",
+  "lib/security/",
+  "lib/self-modify-pulls.ts",
+  "lib/self-review/",
+  "lib/vault.ts",
+  "lib/web/session.ts",
 ];
 
 export interface Proposal {

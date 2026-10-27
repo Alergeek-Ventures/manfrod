@@ -10,6 +10,10 @@ describe("pathViolation", () => {
       "agent/lib/office.ts",
       "agent/channels/slack.ts",
       "lib/agent/prompts.ts",
+      "lib/proactive.ts",
+      "lib/slack/renderer.ts",
+      "app/(panel)/admin/access/agent-tab.tsx",
+      "components/app-sidebar.tsx",
       "test/unit/new.test.ts",
     ]) {
       expect(pathViolation(path)).toBeNull();
@@ -23,6 +27,12 @@ describe("pathViolation", () => {
       "agent/lib/define-tool.ts",
       "agent/lib/e2b-sandbox.ts",
       "agent/agent.ts",
+      "lib/secrets.ts",
+      "lib/agent/context.ts",
+      "lib/accounts.ts",
+      "lib/github.ts",
+      "lib/self-review/rules.ts",
+      "lib/db/index.ts",
     ]) {
       expect(pathViolation(path)).toBe("protected path");
     }
@@ -34,8 +44,8 @@ describe("pathViolation", () => {
       "pnpm-lock.yaml",
       ".github/workflows/ci.yml",
       "db/migrations/0009_x.sql",
-      "lib/secrets.ts",
-      "lib/agent/context.ts",
+      "scripts/migrate.mjs",
+      "Dockerfile",
     ]) {
       expect(pathViolation(path)).toBe("outside the allowed paths");
     }
