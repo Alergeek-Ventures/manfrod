@@ -5,7 +5,7 @@ import { getPull } from "../github.ts";
 import { agentRuntime, type HandoffAuth } from "../inngest/runtime.ts";
 import { logger } from "../log.ts";
 import { getRecentSessionMessages } from "../memory/messages.ts";
-import { startThread, userAuth } from "../proactive.ts";
+import { proactiveTitle, startThread, userAuth } from "../proactive.ts";
 import { post } from "../slack/api.ts";
 import {
   feedbackSince,
@@ -278,7 +278,7 @@ async function askUnclear(): Promise<number> {
       await updateCase(row.case.id, { status: "expired" });
       continue;
     }
-    const thread = await startThread(person.slackDmChannelId);
+    const thread = await startThread(person.slackDmChannelId, await proactiveTitle(row.case.question));
     if (!thread.ok) {
       log.error(`SelfReview: failed to start a DM thread for ${person.id}: ${thread.error}`);
       continue;

@@ -32,6 +32,11 @@ export async function fetchRecentSessions(mcpUrl: string, accessToken: string, l
   return result.ok ? { ok: true, value: extractRecords(result.value) } : result;
 }
 
+export async function currentSession(mcpUrl: string, accessToken: string): Promise<Result<Record<string, any> | null>> {
+  const result = await callTool(mcpUrl, accessToken, "get_current_session", {});
+  return result.ok ? { ok: true, value: extractRecords(result.value)[0] ?? null } : result;
+}
+
 export async function hasActiveSession(mcpUrl: string, accessToken: string): Promise<Result<boolean>> {
   const result = await callTool(mcpUrl, accessToken, "get_current_session", {});
   return result.ok ? { ok: true, value: extractRecords(result.value).length > 0 } : result;
