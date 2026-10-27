@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNull, lt, ne, sql } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, isNull, lt, ne, sql } from "drizzle-orm";
 import { isAdmin, systemUserId } from "../accounts.ts";
 import { db, tables } from "../db/index.ts";
 import type { MessageFeedback, SelfReviewCase, SelfReviewFinding, User } from "../db/schema.ts";
@@ -13,6 +13,7 @@ export interface NewFinding {
   title: string;
   problem: string;
   expected: string;
+  summary: string | null;
   category: Category;
   severity: number;
 }
@@ -27,7 +28,7 @@ export function selfReviewUserId(): Promise<string> {
   return systemUserId(SELF_REVIEW_SLACK_ID, "Self Review", "self-review@system.manfrod");
 }
 
-export async function unreviewedFeedback(limit: number, excludeChannelId: string | null): Promise<MessageFeedback[]> {
+export async function unreviewedFeedback(limit: number, excludeChannelId: string | null, since: Date): Promise<MessageFeedback[]> {
   return db
     .select({ feedback: messageFeedback })
     .from(messageFeedback)
@@ -36,6 +37,7 @@ export async function unreviewedFeedback(limit: number, excludeChannelId: string
       and(
         eq(messageFeedback.rating, "bad"),
         isNull(selfReviewCases.id),
+        gte(messageFeedback.insertedAt, since),
         excludeChannelId ? ne(messageFeedback.slackChannelId, excludeChannelId) : undefined,
       ),
     )

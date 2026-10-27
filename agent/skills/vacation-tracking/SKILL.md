@@ -18,7 +18,7 @@ Say what kind of absence it is:
 - `working: true` when the person keeps working, just not from the office:
   a business trip, a client visit, a conference, remote work from elsewhere.
   Never record that as a vacation.
-- `details` with the short context in Polish, names spelled exactly as the
+- `details` with the short context in the team's internal language, names spelled exactly as the
   person wrote them ("wyjazd do klienta Scape w Sztokholmie", "L4").
 
 ## Correcting an absence

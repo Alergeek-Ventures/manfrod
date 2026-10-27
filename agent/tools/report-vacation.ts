@@ -24,7 +24,7 @@ export default defineManfrodTool({
       .string()
       .optional()
       .describe(
-        "What it is, in Polish, with names spelled exactly as the person wrote them, e.g. 'wyjazd do klienta Scape w Sztokholmie', 'L4', 'urlop w Grecji'.",
+        "What it is, in the team's internal language from [Language], with names spelled exactly as the person wrote them, e.g. 'wyjazd do klienta Scape w Sztokholmie', 'L4', 'urlop w Grecji'.",
       ),
   }),
   async execute({ start_date, end_date, working, details }, ctx) {

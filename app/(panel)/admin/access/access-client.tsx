@@ -36,6 +36,7 @@ import {
   updateVacation,
   type Result,
 } from "./actions.ts";
+import { AgentTab } from "./agent-tab.tsx";
 import { SecretsTab } from "./secrets-tab.tsx";
 import type { Tab } from "./tabs.ts";
 
@@ -811,6 +812,7 @@ export function AccessClient({
           <AlertDescription>{flash.info}</AlertDescription>
         </Alert>
       )}
+      {tab === "agent" && <AgentTab data={data} run={run} pending={pending} />}
       {tab === "channels" && <ChannelsTab data={data} run={run} />}
       {tab === "projects" && <ProjectsTab data={data} run={run} pending={pending} />}
       {tab === "members" && <MembersTab data={data} run={run} currentUserId={currentUserId} />}

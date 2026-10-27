@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { internalLanguage } from "../agent-settings.ts";
 import type { Message, SelfReviewFinding } from "../db/schema.ts";
 import { AGENT_MODEL, FALLBACK_CHAIN, generateText, system, user } from "../llm/index.ts";
 import { CATEGORIES, type Category } from "./rules.ts";
@@ -19,10 +20,10 @@ Verdicts:
 
 If the problem is the same as one of the existing findings, set "match" to that finding's id and leave "finding" null.
 
-Write "title", "problem" and "expected" in English as a generic description of Manfrod's behavior. They end up in a GitHub pull request, so never include names, quotes, Slack IDs, client or business details or anything personal. Write "question" in the language the person used, addressed to them directly, in one or two sentences.
+Write "title", "problem" and "expected" in English as a generic description of Manfrod's behavior. They end up in a GitHub pull request, so never include names, quotes, Slack IDs, client or business details or anything personal. Write "summary" in {{LANGUAGE}}: one or two sentences on the problem for the admins' Slack channel, also without quotes or personal details. Write "question" in the language the person used, addressed to them directly, in one or two sentences.
 
 Respond with only a JSON object:
-{"verdict": "actionable" | "unclear" | "not_actionable", "reason": "<one English sentence>", "match": "<finding id>" | null, "finding": {"title": "<under 80 characters>", "problem": "<what Manfrod does wrong>", "expected": "<what it should do instead>", "category": "prompt" | "skill" | "routine" | "tool", "severity": 1 | 2 | 3} | null, "question": "<question>" | null}
+{"verdict": "actionable" | "unclear" | "not_actionable", "reason": "<one English sentence>", "match": "<finding id>" | null, "finding": {"title": "<under 80 characters>", "problem": "<what Manfrod does wrong>", "expected": "<what it should do instead>", "summary": "<for the admins' channel>", "category": "prompt" | "skill" | "routine" | "tool", "severity": 1 | 2 | 3} | null, "question": "<question>" | null}
 
 Severity: 3 = a wrong or harmful result, 2 = unhelpful or needed a retry, 1 = cosmetic.`;
 
@@ -41,6 +42,7 @@ const triageSchema = z.object({
       title: z.string().min(1).max(120),
       problem: z.string().min(1).max(1000),
       expected: z.string().min(1).max(1000),
+      summary: z.string().max(1000).nullish(),
       category: z.enum(CATEGORIES),
       severity: z.number().int().min(1).max(3),
     })
@@ -53,7 +55,7 @@ export type Triage =
   | {
       verdict: "new";
       reason: string;
-      finding: { title: string; problem: string; expected: string; category: Category; severity: number };
+      finding: { title: string; problem: string; expected: string; summary: string | null; category: Category; severity: number };
     }
   | { verdict: "unclear"; reason: string; question: string }
   | { verdict: "not_actionable"; reason: string };
@@ -121,7 +123,7 @@ export function parseTriage(raw: string, findingIds: string[], answered: boolean
     return { verdict, reason, question: question.trim() };
   }
   if (match && findingIds.includes(match)) return { verdict: "match", reason, findingId: match };
-  if (finding) return { verdict: "new", reason, finding };
+  if (finding) return { verdict: "new", reason, finding: { ...finding, summary: finding.summary?.trim() || null } };
   return null;
 }
 
@@ -143,7 +145,8 @@ export async function triage(input: {
   const existing = input.findings.length > 0 ? input.findings.map(describe).join("\n") : "(none)";
   const parts = [`Existing findings:\n${existing}`, `<conversation>\n${input.transcript}\n</conversation>`];
   if (input.clarification) parts.push(`<clarification>\n${input.clarification}\n</clarification>`);
-  const prompt = input.clarification ? `${TRIAGE_PROMPT}\n\n${ANSWERED_NOTE}` : TRIAGE_PROMPT;
+  const base = TRIAGE_PROMPT.replace("{{LANGUAGE}}", await internalLanguage());
+  const prompt = input.clarification ? `${base}\n\n${ANSWERED_NOTE}` : base;
   const result = await generateText([system(prompt), user(parts.join("\n\n"))], { purpose: "self_review_triage", chain: CHAIN });
   return parseTriage(
     result.text,

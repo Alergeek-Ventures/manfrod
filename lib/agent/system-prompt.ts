@@ -1,4 +1,5 @@
 import { getUser } from "../accounts.ts";
+import { languageInstructions } from "../agent-settings.ts";
 import { healthy } from "../db/index.ts";
 import { getSoulAnchor, type SoulAnchor } from "../memory/nodes.ts";
 import { placeholder, secretNames } from "../secrets.ts";
@@ -61,11 +62,13 @@ export async function buildSystemPrompt(userId: string, sessionKey: string | nul
     ? `${soulContext(anchor)}\n\n${SYSTEM_PROMPT}`
     : `${SYSTEM_PROMPT}${SOUL_BASE_PROMPT}${dm ? SOUL_ONBOARDING_PROMPT : ""}`;
   const secrets = await secretsText();
-  return `${base}\n\n${await currentContext(userId, sessionKey)}${secrets ? `\n\n${secrets}` : ""}`;
+  const language = await languageInstructions(sessionKey?.split(":")[0] ?? null);
+  return `${base}\n\n${await currentContext(userId, sessionKey)}\n\n${language}${secrets ? `\n\n${secrets}` : ""}`;
 }
 
-export async function skillRunnerPrompt(): Promise<string> {
+export async function skillRunnerPrompt(channelId: string | null): Promise<string> {
   const secrets = await secretsText();
+  const language = await languageInstructions(channelId);
   return `You're running autonomously on a schedule — no one is watching this
 conversation live, so don't narrate or ask questions, just act. Follow
 the instructions in the next message using your tools. When you're
@@ -82,6 +85,8 @@ normally.
 [Current Context]
 Now: ${localIsoWithOffset(new Date())} (${weekdayName(localToday())})
 Timezone: ${TIMEZONE}
+
+${language}
 ${secrets ? `\n${secrets}\n` : ""}
 `;
 }

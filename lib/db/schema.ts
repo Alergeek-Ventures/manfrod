@@ -1,6 +1,7 @@
 import {
   account,
   agentSecrets,
+  agentSettings,
   auditEvents,
   channelMappings,
   channelNudges,
@@ -60,6 +61,7 @@ export type ProjectLinearConnection = typeof projectLinearConnections.$inferSele
 export type LinearInstallation = typeof linearInstallations.$inferSelect;
 export type Job = typeof jobs.$inferSelect;
 export type AgentSecret = typeof agentSecrets.$inferSelect;
+export type AgentSetting = typeof agentSettings.$inferSelect;
 export type Account = typeof account.$inferSelect;
 export type AuditEvent = typeof auditEvents.$inferSelect;
 export type MessageFeedback = typeof messageFeedback.$inferSelect;

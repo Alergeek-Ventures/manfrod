@@ -542,6 +542,7 @@ export const selfReviewFindings = pgTable("self_review_findings", {
 	title: text().notNull(),
 	problem: text().notNull(),
 	expected: text().notNull(),
+	summary: text(),
 	category: text().notNull(),
 	severity: integer().default(2).notNull(),
 	status: text().default('open').notNull(),
@@ -619,3 +620,10 @@ export const selfModifyPulls = pgTable("self_modify_pulls", {
 	index().using("btree", table.status.asc().nullsLast().op("text_ops")),
 	check("self_modify_pulls_status", sql`status = ANY (ARRAY['open'::text, 'closed'::text])`),
 ]);
+
+export const agentSettings = pgTable("agent_settings", {
+	key: text().primaryKey().notNull(),
+	value: text().notNull(),
+	updatedByUserId: uuid("updated_by_user_id"),
+	updatedAt: timestamp("updated_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
+});

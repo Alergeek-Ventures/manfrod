@@ -6,6 +6,7 @@ import { headers } from "next/headers";
 import { ADMIN_ROLE } from "@/lib/accounts.ts";
 import { auth } from "@/lib/auth.ts";
 import { db, tables } from "@/lib/db/index.ts";
+import { isLanguageCode, setLanguages } from "@/lib/agent-settings.ts";
 import { setFact } from "@/lib/facts.ts";
 import { cancelJob } from "@/lib/jobs/index.ts";
 import { disconnect as disconnectLinear } from "@/lib/linear/index.ts";
@@ -195,4 +196,11 @@ export async function removeSecret(name: string): Promise<Result> {
   const admin = await requireAdmin();
   await deleteSecret(name, admin.id);
   return done(`Secret ${name} deleted`);
+}
+
+export async function saveLanguages(internal: string, external: string): Promise<Result> {
+  const admin = await requireAdmin();
+  if (!isLanguageCode(internal) || !isLanguageCode(external)) return { ok: false, message: "Error: unknown language" };
+  await setLanguages({ internal, external }, admin.id);
+  return done("Languages saved");
 }
