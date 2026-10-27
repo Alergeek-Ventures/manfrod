@@ -43,3 +43,4 @@ jobs:
           infisical-project-slug: manfrod
           coolify-token: ${{ secrets.COOLIFY_TOKEN }}
           coolify-app-uuid: ${{ vars.COOLIFY_APP_UUID }}
+          print-logs: false
