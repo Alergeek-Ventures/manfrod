@@ -115,7 +115,7 @@ export async function run(nudge: Nudge): Promise<boolean> {
     await recordDelivery(nudge.person.id, nudge.kind, nudge.period, false, decision.reason);
     return false;
   }
-  const sent = await deliverProactive(nudge.person.id, agentPrompt(nudge, decision.message), `nudge_${nudge.kind}`);
+  const sent = await deliverProactive(nudge.person.id, agentPrompt(nudge, decision.message), `nudge_${nudge.kind}`, decision.message);
   if (!sent.ok) return false;
   await recordDelivery(nudge.person.id, nudge.kind, nudge.period, true, decision.reason);
   return true;

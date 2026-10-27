@@ -32,9 +32,10 @@ function fallbackTitle(content: string): string {
   return (content.trim().split("\n", 1)[0] ?? "").slice(0, 99);
 }
 
-export async function threadTitle(content: string): Promise<string> {
+export async function threadTitle(content: string, language?: string): Promise<string> {
+  const prompt = language ? `${THREAD_TITLE_SYSTEM}\nWrite the title in ${language}.` : THREAD_TITLE_SYSTEM;
   try {
-    const title = await generateSimple(PRIMARY_MODEL, [system(THREAD_TITLE_SYSTEM), user(content)], {
+    const title = await generateSimple(PRIMARY_MODEL, [system(prompt), user(content)], {
       purpose: "thread_title",
       timeoutMs: 8_000,
     });

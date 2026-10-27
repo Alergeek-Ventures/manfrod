@@ -1,17 +1,19 @@
 import { getUser, systemUserId } from "../accounts.ts";
 import type { Job } from "../db/schema.ts";
-import { hasActiveSession } from "../firmowid.ts";
+import { currentSession, hasActiveSession } from "../firmowid.ts";
 import { agentRuntime, type HandoffAuth } from "../inngest/runtime.ts";
 import { listOfficeAccessLog } from "../kalafiornia.ts";
 import { logger } from "../log.ts";
 import { builtinProviders, ensureValidToken, getConnection } from "../mcp/index.ts";
 import { getRecurringReminder } from "../memory/reminders.ts";
-import { deliverProactive, startThread, userAuth } from "../proactive.ts";
+import { deliverProactive, proactiveTitle, startThread, userAuth } from "../proactive.ts";
 import { get as getRoutine } from "../routines.ts";
+import { formatLocal } from "../time.ts";
 
 export class JobError extends Error {}
 
 const FIRMOWID = "firmowid";
+const FORGOTTEN_SESSION_MS = 2 * 3_600_000;
 
 export async function executeJob(job: Job): Promise<void> {
   const args = job.args as Record<string, string>;
@@ -21,7 +23,7 @@ export async function executeJob(job: Job): Promise<void> {
     case "skill_trigger":
       return runSkill(args.skill_name, args.user_id ?? null);
     case "firmowid_session_check":
-      return runSkill("firmowid-session-check", args.user_id);
+      return runFirmowidEveningCheck(args.user_id);
     case "firmowid_morning_session_check":
       return runFirmowidMorningCheck(args.user_id, args.date);
     default:
@@ -71,7 +73,7 @@ async function skillRunnerAuth(): Promise<HandoffAuth> {
   };
 }
 
-export async function runSkill(skillName: string, userId: string | null): Promise<void> {
+export async function runSkill(skillName: string, userId: string | null, titleSource?: string): Promise<void> {
   const log = logger("SkillRunner");
   const skill = getRoutine(skillName);
   if (!skill) {
@@ -96,7 +98,7 @@ export async function runSkill(skillName: string, userId: string | null): Promis
     log.error(`SkillRunner: cannot run '${skillName}': no_dm_channel ${userId}`);
     throw new JobError("no_dm_channel");
   }
-  const thread = await startThread(user.slackDmChannelId);
+  const thread = await startThread(user.slackDmChannelId, await proactiveTitle(titleSource ?? `${skill.description}\n\n${skill.body}`));
   if (!thread.ok) {
     log.error(`SkillRunner: failed to start DM thread in ${user.slackDmChannelId}: ${thread.error}`);
     throw new JobError(thread.error);
@@ -112,6 +114,31 @@ export async function runSkill(skillName: string, userId: string | null): Promis
     }),
   );
   log.info(`SkillRunner: '${skillName}' started for ${userId}`);
+}
+
+async function runFirmowidEveningCheck(userId: string) {
+  const log = logger("FirmowidSessionCheckWorker");
+  const connection = await getConnection(userId, FIRMOWID);
+  const provider = builtinProviders().find((candidate) => candidate.id === FIRMOWID);
+  if (!connection || !provider) return;
+  const token = await ensureValidToken(connection);
+  if (!token.ok) {
+    log.debug(`FirmowidSessionCheckWorker: skipping ${userId}: ${token.error}`);
+    return;
+  }
+  const session = await currentSession(provider.mcpUrl, token.value);
+  if (!session.ok) {
+    log.debug(`FirmowidSessionCheckWorker: skipping ${userId}: ${session.error}`);
+    return;
+  }
+  const started = typeof session.value?.start_datetime === "string" ? new Date(session.value.start_datetime) : null;
+  if (!started || Date.now() - started.getTime() <= FORGOTTEN_SESSION_MS) return;
+  const title = typeof session.value?.title === "string" ? session.value.title : "";
+  await runSkill(
+    "firmowid-session-check",
+    userId,
+    `Sesja w Firmowidzie "${title}" trwa od ${formatLocal(started)}, może została zapomniana`,
+  );
 }
 
 async function runFirmowidMorningCheck(userId: string, date: string) {
