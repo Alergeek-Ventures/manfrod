@@ -21,6 +21,7 @@ import {
   localChanges,
   MAX_BYTES,
   MAX_FILES,
+  migrationViolation,
   pathViolation,
   proposal,
   REPO_DIR,
@@ -61,7 +62,7 @@ export default defineManfrodTool({
     const changes = await localChanges(sandbox);
     if (changes.length === 0) return "There are no changes to publish.";
     const problems = changes.flatMap((change) => {
-      const violation = pathViolation(change.path);
+      const violation = pathViolation(change.path) ?? (change.status === "D" ? migrationViolation(change, null) : null);
       if (violation) return [`${change.path}: ${violation}`];
       if (change.status !== "D" && !MODES.has(change.mode)) return [`${change.path}: unsupported file mode ${change.mode}`];
       return [];
@@ -79,8 +80,11 @@ export default defineManfrodTool({
         continue;
       }
       bytes += content.byteLength;
-      const rule = secretRule(new TextDecoder().decode(content));
+      const text = new TextDecoder().decode(content);
+      const rule = secretRule(text);
       if (rule) problems.push(`${change.path}: looks like it contains a secret (${rule})`);
+      const migration = migrationViolation(change, text);
+      if (migration) problems.push(`${change.path}: ${migration}`);
       contents.set(change.path, content);
     }
     if (bytes > MAX_BYTES) problems.push(`${bytes} bytes changed; the limit is ${MAX_BYTES}`);

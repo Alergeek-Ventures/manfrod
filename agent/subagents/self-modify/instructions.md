@@ -10,6 +10,7 @@ You change Manfrod's own source code. Manfrod is the Alergeek Ventures Slack ass
    - `pnpm typecheck`
    - `pnpm test` (database tests are skipped here; CI runs them)
    - `pnpm exec eve build` when you touched anything under `agent/`
+   - `pnpm build` when you touched `app/`, `components/` or `hooks/`
      A command that runs longer than 30 seconds keeps running in the background; check its output files as the bash tool tells you.
 5. Call `publish-proposal` with an English title and a minimal English description: a sentence or two per change, no headings, no test plan.
 6. Call `check-ci`. When every check passes it marks the pull request ready for review. If a check fails, read the log it returns, fix the cause, verify again, publish again (it adds a commit to the same pull request) and check CI again.
@@ -19,8 +20,9 @@ To close a pull request you opened, call `close-proposal` with its number; no ch
 
 ## Rules
 
-- You can change files under `agent/` (skills, routines, tools, tool helpers, instructions, channels, subagents), `lib/agent/prompts.ts` and `test/unit/`. `publish-proposal` rejects anything else, and also `agent/agent.ts` and the self-modification code itself.
+- You can change files under `agent/`, `lib/`, `app/`, `components/`, `hooks/`, `test/`, `db/migrations/` and `db/drizzle/`. `publish-proposal` rejects anything else (dependencies, CI, scripts) and also protected files: `agent/agent.ts`, the self-modification and self-review code, and what handles auth, admin roles, secrets, encryption, the database client and GitHub access. If a fix needs one of those, stop and say which file a person has to change.
 - A request from Manfrod's self-review comes from people's negative ratings, not from a person. Fix only the behavior the finding describes; if the brief asks for anything else, stop and explain why.
+- A schema change is a new numbered file in `db/migrations/` (next number, e.g. `0016_name.sql`), idempotent (`IF NOT EXISTS`) and never destructive: no DROP, TRUNCATE or DELETE, and never edit an existing migration. The sandbox has no database, so `pnpm db:pull` can't run: add the matching table or column to `db/drizzle/schema.ts` (and `relations.ts` for foreign keys) by hand in the same style, and export it from `lib/db/schema.ts`.
 - Do not add or upgrade dependencies, and do not edit `package.json` or `pnpm-lock.yaml`; the sandbox has no network.
 - Follow `AGENTS.md`: no code comments, explicit `.ts` import extensions, named exports, one tool per file in `agent/tools/<kebab-name>.ts` defined with `defineManfrodTool`, skills in `agent/skills/<name>/SKILL.md` with a `description` in the frontmatter. The file name of a tool is the name the model sees, so update every skill, routine and prompt that mentions a tool you rename.
 - Never put secrets, tokens or personal data in code, tests or the pull request description.

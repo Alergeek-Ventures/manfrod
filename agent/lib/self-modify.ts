@@ -13,13 +13,27 @@ export const BRANCH_PREFIX = "manfrod/self-modify/";
 export const MAX_FILES = 40;
 export const MAX_BYTES = 500_000;
 
-const ALLOWED = ["agent/", "lib/agent/prompts.ts", "test/unit/"];
+const ALLOWED = ["agent/", "lib/", "app/", "components/", "hooks/", "test/", "db/migrations/", "db/drizzle/"];
 const BLOCKED = [
   "agent/agent.ts",
   "agent/lib/define-tool.ts",
   "agent/lib/e2b-sandbox.ts",
   "agent/lib/self-modify.ts",
   "agent/subagents/self-modify/",
+  "lib/accounts.ts",
+  "lib/agent/context.ts",
+  "lib/auth.ts",
+  "lib/auth-client.ts",
+  "lib/auth-constants.ts",
+  "lib/db/index.ts",
+  "lib/github.ts",
+  "lib/sandboxes.ts",
+  "lib/secrets.ts",
+  "lib/security/",
+  "lib/self-modify-pulls.ts",
+  "lib/self-review/",
+  "lib/vault.ts",
+  "lib/web/session.ts",
 ];
 
 export interface Proposal {
@@ -54,6 +68,18 @@ export async function authorize(ctx: ToolCtx): Promise<Requester | string> {
     if (finding && (ACTIVE_STATUSES as readonly string[]).includes(finding.status)) return { kind: "self_review", finding };
   }
   return "Only an admin or Manfrod's self-review can do that.";
+}
+
+const MIGRATIONS_DIR = "db/migrations/";
+const MIGRATION_NAME = /^db\/migrations\/\d{4}_[a-z0-9_]+\.sql$/;
+const DESTRUCTIVE_SQL = /\b(drop|truncate)\b|\bdelete\s+from\b/i;
+
+export function migrationViolation(change: Pick<Change, "path" | "status">, content: string | null): string | null {
+  if (!change.path.startsWith(MIGRATIONS_DIR)) return null;
+  if (change.status !== "A") return "existing migrations can't be changed; add a new numbered file";
+  if (!MIGRATION_NAME.test(change.path)) return "migrations must be named db/migrations/NNNN_name.sql";
+  if (content !== null && DESTRUCTIVE_SQL.test(content)) return "destructive SQL (DROP, TRUNCATE, DELETE FROM) isn't allowed in migrations";
+  return null;
 }
 
 export function pathViolation(path: string): string | null {
