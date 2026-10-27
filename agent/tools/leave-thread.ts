@@ -4,7 +4,7 @@ import { defineManfrodTool } from "../lib/define-tool.ts";
 
 export default defineManfrodTool({
   description:
-    "Stop participating in the current channel thread. Call this when someone in the thread asks you to stop replying, to leave them alone, or to butt out — e.g. 'przestań się tu udzielać', 'zostaw nas', 'nie odzywaj się więcej w tym wątku'. You will post a short goodbye and then stay silent in this thread until someone @mentions you again. Do not call this on your own initiative, only when asked.",
+    "Stop participating in the current channel thread. Call this when someone in the thread asks you to stop replying, to leave them alone, or to butt out — e.g. 'przestań się tu udzielać', 'zostaw nas', 'nie odzywaj się więcej w tym wątku', or to only speak when asked or mentioned directly, e.g. 'odzywaj się tylko jak ktoś cię zawoła', 'only reply when someone tags you'. You will post a short goodbye and then stay silent in this thread until someone @mentions you again. Do not call this on your own initiative, only when asked.",
   inputSchema: z.object({}),
   async execute(_args, ctx) {
     const { channel, threadTs, slackUserId } = ctx.msgCtx;
