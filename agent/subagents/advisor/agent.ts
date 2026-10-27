@@ -8,4 +8,5 @@ export default defineAgent({
   defaultTools: false,
   modelContextWindowTokens: CONTEXT_WINDOW_TOKENS,
   model: openrouterProvider().chat(BRAIN_MODEL, { usage: { include: true } }),
+  modelOptions: { promptCache: { anthropic: {} } },
 });

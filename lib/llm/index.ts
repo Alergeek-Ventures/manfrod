@@ -120,11 +120,23 @@ function event(attribution: Attribution, meta: Record<string, unknown>) {
 
 type GenerateResult = Awaited<ReturnType<typeof aiGenerateText>>;
 
+const CACHE_BREAKPOINT = { openrouter: { cacheControl: { type: "ephemeral" } } };
+
+export function withCacheBreakpoints(modelId: string, messages: ModelMessage[]): ModelMessage[] {
+  if (!modelId.startsWith("anthropic/") || messages.length === 0) return messages;
+  const firstSystem = messages.findIndex((message) => message.role === "system");
+  return messages.map((message, index) =>
+    index === firstSystem || index === messages.length - 1
+      ? ({ ...message, providerOptions: { ...message.providerOptions, ...CACHE_BREAKPOINT } } as ModelMessage)
+      : message,
+  );
+}
+
 async function callOnce(entry: ChainEntry, messages: ModelMessage[], options: GenerateOptions): Promise<GenerateResult> {
   const hasTools = options.tools !== undefined && Object.keys(options.tools).length > 0;
   const result = await aiGenerateText({
     model: chatModel(entry.model),
-    messages,
+    messages: withCacheBreakpoints(entry.model, messages),
     allowSystemInMessages: true,
     system: options.system,
     tools: hasTools ? options.tools : undefined,
