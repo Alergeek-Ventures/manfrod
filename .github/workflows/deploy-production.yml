@@ -31,7 +31,7 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           repository: Alergeek-Ventures/av-secret-service
-          ref: 3831a639eac12845c63db50472ed4f9b220cc2eb
+          ref: d1f0dd1864e3b1b5830459787057408b587434f6
           ssh-key: ${{ secrets.AV_SECRET_SERVICE_DEPLOY_KEY }}
           path: .github/actions/av-secret-service
           persist-credentials: false
