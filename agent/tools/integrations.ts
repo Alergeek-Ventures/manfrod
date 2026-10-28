@@ -52,11 +52,12 @@ export default defineDynamic({
           const toolName = remote.name;
           const providerId = remote.providerId;
           const remoteName = remote.remoteName;
+          const destinationHost = remote.host;
           entries[toolName] = defineTool({
             description: remote.description,
             inputSchema: remote.inputSchema as any,
             execute: (input: unknown) =>
-              runWithSecrets({ toolName, userId, sessionKey }, input, (resolved) =>
+              runWithSecrets({ toolName, userId, sessionKey, destinationHost }, input, (resolved) =>
                 callUserMcpTool(userId, providerId, remoteName, resolved),
               ),
           });

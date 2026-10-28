@@ -37,7 +37,6 @@ import {
   type Result,
 } from "./actions.ts";
 import { AgentTab } from "./agent-tab.tsx";
-import { SecretsTab } from "./secrets-tab.tsx";
 import type { Tab } from "./tabs.ts";
 
 export type Run = (action: () => Promise<Result>, onSuccess?: () => void) => void;
@@ -820,7 +819,6 @@ export function AccessClient({
       {tab === "cron" && <CronTab data={data} run={run} />}
       {tab === "reminders" && <RemindersTab data={data} run={run} />}
       {tab === "linear" && <LinearTab data={data} run={run} />}
-      {tab === "secrets" && <SecretsTab secrets={data.secrets} run={run} pending={pending} />}
     </div>
   );
 }

@@ -15,6 +15,7 @@ import {
 import { logger } from "../log.ts";
 import { preselectedLevels, resolveEscalation } from "../memory/classifier.ts";
 import { FEEDBACK_ACTION_ID, recordFeedback, REMOVE_ACTION_ID, removeMessage } from "./feedback.ts";
+import { handleSecretSubmission, openSecretModal, readSubmission, SECRET_ADD_ACTION_ID, SECRET_CALLBACK_ID } from "./secret-modal.ts";
 import { verifySlackSignature } from "./verify.ts";
 
 const log = logger("Slack.EventHandler");
@@ -27,6 +28,7 @@ const OWNED_ACTIONS = new Set([
   PICK_TEAM_ACTION_ID,
   FEEDBACK_ACTION_ID,
   REMOVE_ACTION_ID,
+  SECRET_ADD_ACTION_ID,
   "memory_escalation_save",
   "memory_escalation_cancel",
   "memory_escalation_levels",
@@ -69,6 +71,15 @@ async function handleBlockActions(payload: Record<string, any>) {
       return;
     case OPEN_LINEAR_ACTION_ID:
       return;
+    case SECRET_ADD_ACTION_ID:
+      await openSecretModal(
+        payload.trigger_id,
+        payload.user?.id,
+        action.value ?? "",
+        channelId ?? null,
+        (payload.message?.thread_ts ?? null) as string | null,
+      );
+      return;
   }
   if (!channelId || !botTs) return;
   switch (action.action_id) {
@@ -106,11 +117,23 @@ export function interceptInteractivity(headers: Headers, body: string): Intercep
   }
 
   const ownedSubmission = payload.type === "view_submission" && payload.view?.callback_id === CONNECT_CALLBACK_ID;
+  const secretSubmission = payload.type === "view_submission" && payload.view?.callback_id === SECRET_CALLBACK_ID;
   const ownedAction = payload.type === "block_actions" && OWNED_ACTIONS.has(payload.actions?.[0]?.action_id);
-  if (!ownedSubmission && !ownedAction) return null;
+  if (!ownedSubmission && !secretSubmission && !ownedAction) return null;
 
   if (!verifySlackSignature(headers, body))
     return { response: new Response("invalid signature", { status: 401 }), work: Promise.resolve() };
+
+  if (secretSubmission) {
+    const read = readSubmission(payload);
+    if ("errors" in read) {
+      return { response: Response.json({ response_action: "errors", errors: read.errors }), work: Promise.resolve() };
+    }
+    const work = handleSecretSubmission(payload, read.submission).catch((error) =>
+      log.error(`Slack EventHandler secret submission failed: ${(error as Error).message}`),
+    );
+    return { response: new Response(null, { status: 200 }), work };
+  }
 
   const work = (async () => {
     try {

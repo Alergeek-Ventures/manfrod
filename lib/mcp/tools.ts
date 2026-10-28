@@ -22,6 +22,7 @@ export interface McpToolEntry {
   inputSchema: Record<string, unknown>;
   providerId: string;
   remoteName: string;
+  host: string | null;
 }
 
 export function toolPrefix(provider: Pick<Provider, "id" | "custom">): string {
@@ -57,6 +58,14 @@ async function handleUnauthorized(userId: string, provider: Provider) {
   }
 }
 
+const hostOf = (url: string) => {
+  try {
+    return new URL(url).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+};
+
 export async function listUserMcpTools(userId: string): Promise<McpToolEntry[]> {
   const entries: McpToolEntry[] = [];
   for (const provider of await providersForUser(userId)) {
@@ -82,6 +91,7 @@ export async function listUserMcpTools(userId: string): Promise<McpToolEntry[]> 
         inputSchema: tool.inputSchema ?? { type: "object", properties: {} },
         providerId: provider.id,
         remoteName: tool.name,
+        host: hostOf(provider.mcpUrl),
       });
     }
   }

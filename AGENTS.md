@@ -51,7 +51,7 @@ Manfrod is a Slack AI agent with a memory graph, written in TypeScript on eve (a
 ## Secrets
 
 - Secrets come from Infisical (`scripts/with-env.mjs`); never print, log or commit secret values
-- Agent secrets (`agent_secrets`, `lib/secrets.ts`) reach tools only through `runWithSecrets`, which `defineManfrodTool` applies. Dynamic tools must call it themselves; set `keepSecretPlaceholders: true` on tools that store or publish free text
+- Agent secrets (`agent_secrets`, `lib/secrets.ts`) are personal (owner only) or company (everyone, admins add them), and each is bound to the hosts it may be sent to. They reach tools only through `runWithSecrets`, which `defineManfrodTool` applies: a placeholder is filled in only when the tool declares its destination (`secretHost`, e.g. `http-request`, or the MCP server host) and that host is allowed. Dynamic tools must call it themselves; set `keepSecretPlaceholders: true` on tools that store or publish free text. Values are entered only through the panel's Secrets page or the Slack modal from `request-secret`, never in chat
 
 <!-- BEGIN:nextjs-agent-rules -->
 

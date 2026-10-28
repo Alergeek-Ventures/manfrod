@@ -8,7 +8,7 @@ import { listInstallations } from "../linear/installation.ts";
 import { listAllRecurringReminders } from "../memory/reminders.ts";
 import { listCronRoutines } from "../routines.ts";
 
-const { agentSecrets, channelMappings, facts, projectMemberships, projects: projectsTable, users: usersTable } = tables;
+const { channelMappings, facts, projectMemberships, projects: projectsTable, users: usersTable } = tables;
 const stamp = (value: unknown) => (value instanceof Date ? value.toISOString() : value ? String(value) : null);
 
 export async function loadAccessData() {
@@ -150,19 +150,6 @@ export async function loadAccessData() {
     };
   });
 
-  const secrets = (
-    await db
-      .select({
-        name: agentSecrets.name,
-        description: agentSecrets.description,
-        updated_by: usersTable.name,
-        updated_at: agentSecrets.updatedAt,
-      })
-      .from(agentSecrets)
-      .leftJoin(usersTable, eq(usersTable.id, agentSecrets.updatedByUserId))
-      .orderBy(asc(agentSecrets.name))
-  ).map((row) => ({ ...row, updated_at: stamp(row.updated_at) }));
-
   return {
     projects,
     channels,
@@ -173,7 +160,6 @@ export async function loadAccessData() {
     reminderRows,
     linearConnections,
     linearInstallations,
-    secrets,
     languages: await languageSettings(),
     languageOptions: Object.entries(LANGUAGES).map(([value, label]) => ({ value, label })),
   };

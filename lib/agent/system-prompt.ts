@@ -2,7 +2,7 @@ import { getUser } from "../accounts.ts";
 import { languageInstructions } from "../agent-settings.ts";
 import { healthy } from "../db/index.ts";
 import { getSoulAnchor, type SoulAnchor } from "../memory/nodes.ts";
-import { placeholder, secretNames } from "../secrets.ts";
+import { secretsPrompt } from "../secrets.ts";
 import { localIsoWithOffset, isoWeek, localToday, offsetMinutes, weekdayName, zoneAbbreviation, TIMEZONE } from "../time.ts";
 import { SOUL_BASE_PROMPT, SOUL_ONBOARDING_PROMPT, SYSTEM_PROMPT } from "./prompts.ts";
 
@@ -14,19 +14,6 @@ function soulContext({ soul, linked, more }: SoulAnchor): string {
     sections.push(`[Linked Notes - expanding the entrypoint]\n${lines.join("\n")}\n`);
   }
   return sections.join("\n\n");
-}
-
-export async function secretsText(): Promise<string> {
-  let names: string[];
-  try {
-    names = await secretNames();
-  } catch {
-    return "";
-  }
-  if (names.length === 0) return "";
-  return `[Secrets]
-Admin-managed secrets are available as placeholders: ${names.map(placeholder).join(", ")}.
-Skills and instructions may reference them. Put the placeholder verbatim into tool arguments where the value is needed — it is replaced with the real value only when the tool runs, and tool results show the placeholder again instead of the value. You never see the values: don't guess them, ask people for them, or claim to know them. Tools that save notes, souls or reminders keep placeholders as-is.`;
 }
 
 export const isDmSession = (sessionKey: string | null) => sessionKey?.startsWith("D") ?? false;
@@ -61,13 +48,13 @@ export async function buildSystemPrompt(userId: string, sessionKey: string | nul
   const base = anchor
     ? `${soulContext(anchor)}\n\n${SYSTEM_PROMPT}`
     : `${SYSTEM_PROMPT}${SOUL_BASE_PROMPT}${dm ? SOUL_ONBOARDING_PROMPT : ""}`;
-  const secrets = await secretsText();
+  const secrets = await secretsPrompt(userId);
   const language = await languageInstructions(sessionKey?.split(":")[0] ?? null);
   return `${base}\n\n${await currentContext(userId, sessionKey)}\n\n${language}${secrets ? `\n\n${secrets}` : ""}`;
 }
 
-export async function skillRunnerPrompt(channelId: string | null): Promise<string> {
-  const secrets = await secretsText();
+export async function skillRunnerPrompt(channelId: string | null, userId: string | null): Promise<string> {
+  const secrets = await secretsPrompt(userId);
   const language = await languageInstructions(channelId);
   return `You're running autonomously on a schedule — no one is watching this
 conversation live, so don't narrate or ask questions, just act. Follow
