@@ -20,6 +20,8 @@ import { handled, isEnabled, recordDelivery } from "./store.ts";
 
 const LOOKBACK_HOURS = 72;
 const MIN_AGE_MINUTES = 45;
+const CHANNEL_ANSWER_WINDOW_SECONDS = 3600;
+const CHANNEL_CONTEXT_MESSAGES = 5;
 const MAX_THREADS = 12;
 const COMMITMENT_DAYS = 14;
 const TEXT_CHARS = 500;
@@ -27,7 +29,7 @@ const TAIL_CHARS = 200;
 
 const log = logger("Nudges.Waiting");
 
-const GUIDANCE = `This person just started their workday. Tell them, briefly, about Slack threads where someone is still waiting for their answer or action, and about things they promised to do that are still open and due around now. Skip FYIs, thank-yous, questions already answered by someone else, matters that look closed, and anything older that has clearly gone stale. If nothing genuinely needs them, do not send.`;
+const GUIDANCE = `This person just started their workday. Tell them, briefly, about Slack threads where someone is still waiting for their answer or action, and about things they promised to do that are still open and due around now. Skip FYIs, thank-yous, questions this person or someone else already answered (also in a separate channel message right after), matters that look closed, and anything older that has clearly gone stale. If nothing genuinely needs them, do not send.`;
 
 const FOLLOW_UP = `Gdy odpowie: jeśli chce coś odpisać albo zobaczyć, przeczytaj wątek przez read-slack-thread i pomóż. Jeśli coś jest już załatwione, przyjmij to i nie wracaj do tego.`;
 
@@ -50,13 +52,25 @@ const clip = (text: string, limit: number) => (text.length > limit ? `${text.sli
 
 export function waitingFor(slackUserId: string, threads: Thread[], now: number): WaitingThread[] {
   const mention = `<@${slackUserId}>`;
+  const roots = new Map<string, SlackBody[]>();
+  for (const thread of threads) {
+    if (thread.messages[0]) roots.set(thread.channelId, [...(roots.get(thread.channelId) ?? []), thread.messages[0]]);
+  }
+  const laterInChannel = (channelId: string, ts: string) =>
+    (roots.get(channelId) ?? []).filter((root) => Number(root.ts) > Number(ts)).sort((a, b) => Number(a.ts) - Number(b.ts));
   const found: WaitingThread[] = [];
   for (const thread of threads) {
     thread.messages.forEach((message, index) => {
       if (message.user === slackUserId || message.bot_id || typeof message.text !== "string" || !message.text.includes(mention)) return;
       if (now - Number(message.ts) * 1000 < MIN_AGE_MINUTES * 60_000) return;
-      const after = thread.messages.slice(index + 1);
-      if (after.some((reply) => reply.user === slackUserId)) return;
+      const replies = thread.messages.slice(index + 1);
+      if (replies.some((reply) => reply.user === slackUserId)) return;
+      const channelAfter = index === 0 ? laterInChannel(thread.channelId, message.ts) : [];
+      const answeredInChannel = channelAfter.some(
+        (root) => root.user === slackUserId && Number(root.ts) - Number(message.ts) <= CHANNEL_ANSWER_WINDOW_SECONDS,
+      );
+      if (answeredInChannel) return;
+      const after = [...replies, ...channelAfter.slice(0, CHANNEL_CONTEXT_MESSAGES)];
       found.push({
         channelId: thread.channelId,
         channelName: thread.channelName,
@@ -122,7 +136,7 @@ async function describeThreads(found: WaitingThread[]): Promise<string> {
       [
         `- #${thread.channelName}, ${age}h ago, ${permalink}`,
         `  ${await name(thread.author)}: ${clip(thread.text, TEXT_CHARS)}`,
-        ...(tail.length > 0 ? ["  Later in the thread:", ...tail] : []),
+        ...(tail.length > 0 ? ["  Later in the thread or channel:", ...tail] : []),
       ].join("\n"),
     );
   }
