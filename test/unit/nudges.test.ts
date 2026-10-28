@@ -26,6 +26,18 @@ describe("waitingFor", () => {
     );
     expect(found.map((entry) => entry.text)).toEqual(["<@U1> możesz zerknąć na PR?"]);
   });
+
+  it("treats a channel message from the person right after a root mention as an answer", () => {
+    const found = waitingFor(
+      "U1",
+      [
+        thread([{ user: "U2", ts: ts("2026-10-27T09:03:00Z"), text: "<@U1> to jest zamierzone?" }]),
+        thread([{ user: "U1", ts: ts("2026-10-27T09:04:00Z"), text: "tak, zamierzone" }]),
+      ],
+      Date.parse("2026-10-28T08:00:00Z"),
+    );
+    expect(found).toEqual([]);
+  });
 });
 
 describe("weekLog", () => {
