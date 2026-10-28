@@ -447,9 +447,14 @@ export const agentSecrets = pgTable("agent_secrets", {
 	updatedByUserId: uuid("updated_by_user_id"),
 	insertedAt: timestamp("inserted_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
 	updatedAt: timestamp("updated_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
+	scope: text().default('company').notNull(),
+	ownerUserId: uuid("owner_user_id"),
+	allowedHosts: text("allowed_hosts").array().default(sql`ARRAY[]::text[]`).notNull(),
 }, (table) => [
-	uniqueIndex().using("btree", table.name.asc().nullsLast().op("text_ops")),
+	uniqueIndex("agent_secrets_company_name_index").using("btree", table.name.asc().nullsLast().op("text_ops")).where(sql`(scope = 'company'::text)`),
+	uniqueIndex("agent_secrets_personal_name_index").using("btree", table.ownerUserId.asc().nullsLast().op("uuid_ops"), table.name.asc().nullsLast().op("text_ops")).where(sql`(scope = 'personal'::text)`),
 	check("agent_secrets_name_format", sql`name ~ '^[A-Z][A-Z0-9_]{1,63}$'::text`),
+	check("agent_secrets_scope", sql`((scope = 'company'::text) AND (owner_user_id IS NULL)) OR ((scope = 'personal'::text) AND (owner_user_id IS NOT NULL))`),
 ]);
 
 export const users = pgTable("users", {

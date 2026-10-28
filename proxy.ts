@@ -2,7 +2,7 @@ import { getSessionCookie } from "better-auth/cookies";
 import { NextResponse, type NextRequest } from "next/server";
 import { AUTH_COOKIE_PREFIX } from "@/lib/auth-constants.ts";
 
-const PANEL_PREFIXES = ["/dashboard", "/admin", "/graph", "/retrospection", "/integrations", "/chat"];
+const PANEL_PREFIXES = ["/dashboard", "/admin", "/graph", "/retrospection", "/integrations", "/secrets", "/chat"];
 
 const matches = (pathname: string, prefix: string) => pathname === prefix || pathname.startsWith(`${prefix}/`);
 

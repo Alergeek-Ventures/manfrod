@@ -59,20 +59,25 @@ const ADMIN_GROUPS: NavGroup[] = [
       { title: "Cron skills", url: "/admin/access/cron", icon: <CalendarClockIcon /> },
       { title: "Reminders", url: "/admin/access/reminders", icon: <ClockIcon /> },
       { title: "Linear", url: "/admin/access/linear", icon: <SquareKanbanIcon /> },
-      { title: "Secrets", url: "/admin/access/secrets", icon: <KeyRoundIcon /> },
       { title: "Agent", url: "/admin/access/agent", icon: <LanguagesIcon /> },
     ],
   },
   {
     label: "Account",
-    items: [{ title: "Integrations", url: "/integrations", icon: <PlugIcon /> }],
+    items: [
+      { title: "Integrations", url: "/integrations", icon: <PlugIcon /> },
+      { title: "Secrets", url: "/secrets", icon: <KeyRoundIcon /> },
+    ],
   },
 ];
 
 const USER_GROUPS: NavGroup[] = [
   {
     label: "Account",
-    items: [{ title: "Integrations", url: "/integrations", icon: <PlugIcon /> }],
+    items: [
+      { title: "Integrations", url: "/integrations", icon: <PlugIcon /> },
+      { title: "Secrets", url: "/secrets", icon: <KeyRoundIcon /> },
+    ],
   },
 ];
 

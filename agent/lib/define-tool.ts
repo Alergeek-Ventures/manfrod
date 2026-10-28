@@ -7,6 +7,7 @@ export function defineManfrodTool<S extends z.ZodObject>(definition: {
   description: string;
   inputSchema: S;
   keepSecretPlaceholders?: boolean;
+  secretHost?: (input: z.infer<S>) => string | null;
   label?: ToolLabelDefinition<z.infer<S>, string>;
   execute: (input: z.infer<S>, ctx: ToolCtx, runtime: ToolContext) => Promise<string>;
 }) {
@@ -21,6 +22,7 @@ export function defineManfrodTool<S extends z.ZodObject>(definition: {
         userId: context.userId,
         sessionKey: context.sessionKey,
         keepPlaceholders: definition.keepSecretPlaceholders,
+        destinationHost: definition.secretHost?.(input) ?? null,
       };
       return runWithSecrets(use, input, (resolved) => definition.execute(resolved, context, ctx));
     },

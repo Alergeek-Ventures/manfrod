@@ -14,7 +14,6 @@ import { addMembership, removeMembership } from "@/lib/memory/access.ts";
 import { uninstall as uninstallLinearApp } from "@/lib/linear/installation.ts";
 import { ValidationError } from "@/lib/memory/nodes.ts";
 import { deleteRecurringReminder, getRecurringReminderById, updateRecurringReminder } from "@/lib/memory/reminders.ts";
-import { deleteSecret, SECRET_NAME, setSecret, updateSecretDescription } from "@/lib/secrets.ts";
 import { requireAdmin } from "@/lib/web/session.ts";
 
 export type Result = { ok: boolean; message: string };
@@ -171,31 +170,6 @@ export async function uninstallLinear(id: string): Promise<Result> {
   await requireAdmin();
   if (!(await uninstallLinearApp(id))) return { ok: false, message: "Linear app installation not found" };
   return done("Linear app uninstalled");
-}
-
-export async function saveSecret(name: string, value: string, description: string): Promise<Result> {
-  const admin = await requireAdmin();
-  const normalized = name.trim().toUpperCase();
-  if (!SECRET_NAME.test(normalized)) return { ok: false, message: "Error: name must be UPPER_SNAKE_CASE (A-Z, 0-9, _), 2-64 characters" };
-  if (value === "") return { ok: false, message: "Error: value can't be blank" };
-  try {
-    await setSecret(normalized, value, description.trim() || null, admin.id);
-  } catch (error) {
-    return { ok: false, message: `Error: ${errorText(error)}` };
-  }
-  return done(`Secret ${normalized} saved`);
-}
-
-export async function saveSecretDescription(name: string, description: string): Promise<Result> {
-  const admin = await requireAdmin();
-  await updateSecretDescription(name, description.trim() || null, admin.id);
-  return done(`Description of ${name} updated`);
-}
-
-export async function removeSecret(name: string): Promise<Result> {
-  const admin = await requireAdmin();
-  await deleteSecret(name, admin.id);
-  return done(`Secret ${name} deleted`);
 }
 
 export async function saveLanguages(internal: string, external: string): Promise<Result> {

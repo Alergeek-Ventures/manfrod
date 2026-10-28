@@ -15,6 +15,7 @@ const TITLES: Record<string, string> = {
   "/graph": "Memory graph",
   "/retrospection": "Retrospection",
   "/integrations": "Integrations",
+  "/secrets": "Secrets",
   "/chat": "Chat",
 };
 
@@ -26,7 +27,7 @@ const ACCESS_TABS: Record<string, string> = {
   cron: "Cron skills",
   reminders: "Reminders",
   linear: "Linear",
-  secrets: "Secrets",
+  agent: "Agent",
 };
 
 function Title() {

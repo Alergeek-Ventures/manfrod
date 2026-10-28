@@ -34,6 +34,8 @@ describe("pathViolation", () => {
       "lib/self-review/rules.ts",
       "lib/db/index.ts",
       "lib/self-review/index.ts",
+      "agent/lib/http.ts",
+      "agent/tools/http-request.ts",
     ]) {
       expect(pathViolation(path)).toBe("protected path");
     }

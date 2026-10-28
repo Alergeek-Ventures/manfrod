@@ -7,7 +7,7 @@ export default defineDynamic({
     "turn.started": async (_event, ctx) => {
       const tool = toolCtx(ctx);
       if (isBackgroundKind(tool.kind)) {
-        return defineInstructions({ content: await skillRunnerPrompt(tool.msgCtx.channel) });
+        return defineInstructions({ content: await skillRunnerPrompt(tool.msgCtx.channel, tool.userId) });
       }
       return defineInstructions({ content: await buildSystemPrompt(tool.userId, tool.sessionKey, tool.readableLevels) });
     },
