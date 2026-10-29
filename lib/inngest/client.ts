@@ -9,6 +9,7 @@ export const EVENTS = {
   bufferPushed: "manfrod/memory.buffer.pushed",
   proactiveRequested: "manfrod/proactive.requested",
   absenceRecorded: "manfrod/absence.recorded",
+  capabilityApproved: "manfrod/capability.approved",
 } as const;
 
 export interface JobScheduledData {

@@ -632,3 +632,75 @@ export const agentSettings = pgTable("agent_settings", {
 	updatedByUserId: uuid("updated_by_user_id"),
 	updatedAt: timestamp("updated_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
 });
+
+export const agentTasks = pgTable("agent_tasks", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	ownerUserId: uuid("owner_user_id").notNull(),
+	title: text().notNull(),
+	goal: text().notNull(),
+	successCriteria: text("success_criteria").notNull(),
+	plan: text(),
+	channelId: text("channel_id").notNull(),
+	threadTs: text("thread_ts").notNull(),
+	readableLevels: text("readable_levels").array().notNull(),
+	writeAccess: text("write_access").array().notNull(),
+	status: text().default('active').notNull(),
+	checkEveryMinutes: integer("check_every_minutes").notNull(),
+	nextCheckAt: timestamp("next_check_at", { mode: 'date' }),
+	deadline: timestamp({ mode: 'date' }),
+	checks: integer().default(0).notNull(),
+	jobId: bigint("job_id", { mode: "number" }),
+	outcome: text(),
+	insertedAt: timestamp("inserted_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
+	updatedAt: timestamp("updated_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
+	closedAt: timestamp("closed_at", { mode: 'date' }),
+}, (table) => [
+	index("agent_tasks_status_index").using("btree", table.status.asc().nullsLast().op("text_ops")),
+	index("agent_tasks_thread_index").using("btree", table.channelId.asc().nullsLast().op("text_ops"), table.threadTs.asc().nullsLast().op("text_ops")),
+	check("agent_tasks_status", sql`status = ANY (ARRAY['active'::text, 'blocked'::text, 'done'::text, 'cancelled'::text, 'failed'::text])`),
+]);
+
+export const agentTaskUpdates = pgTable("agent_task_updates", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	taskId: uuid("task_id").notNull(),
+	content: text().notNull(),
+	insertedAt: timestamp("inserted_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
+}, (table) => [
+	index("agent_task_updates_task_index").using("btree", table.taskId.asc().nullsLast().op("uuid_ops"), table.insertedAt.asc().nullsLast().op("timestamp_ops")),
+]);
+
+export const sentDms = pgTable("sent_dms", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	taskId: uuid("task_id"),
+	senderUserId: uuid("sender_user_id"),
+	recipientUserId: uuid("recipient_user_id").notNull(),
+	channelId: text("channel_id").notNull(),
+	messageTs: text("message_ts").notNull(),
+	text: text().notNull(),
+	insertedAt: timestamp("inserted_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
+}, (table) => [
+	index("sent_dms_channel_index").using("btree", table.channelId.asc().nullsLast().op("text_ops"), table.insertedAt.asc().nullsLast().op("timestamp_ops")),
+	index("sent_dms_task_index").using("btree", table.taskId.asc().nullsLast().op("uuid_ops")),
+]);
+
+export const capabilityRequests = pgTable("capability_requests", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	taskId: uuid("task_id"),
+	requestedByUserId: uuid("requested_by_user_id").notNull(),
+	title: text().notNull(),
+	description: text().notNull(),
+	reason: text().notNull(),
+	channelId: text("channel_id").notNull(),
+	threadTs: text("thread_ts").notNull(),
+	messageTs: text("message_ts"),
+	status: text().default('pending').notNull(),
+	decidedByUserId: uuid("decided_by_user_id"),
+	decidedAt: timestamp("decided_at", { mode: 'date' }),
+	pullNumber: integer("pull_number"),
+	pullUrl: text("pull_url"),
+	insertedAt: timestamp("inserted_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
+	updatedAt: timestamp("updated_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
+}, (table) => [
+	index("capability_requests_status_index").using("btree", table.status.asc().nullsLast().op("text_ops")),
+	check("capability_requests_status", sql`status = ANY (ARRAY['pending'::text, 'approved'::text, 'rejected'::text, 'merged'::text, 'closed'::text])`),
+]);

@@ -21,6 +21,7 @@ import { runAbsenceFollowUp } from "../nudges/absence.ts";
 import { runProjectSummaries } from "../nudges/projects.ts";
 import { runWorkStartNudges } from "../nudges/waiting.ts";
 import { runWeeklyWrapUps } from "../nudges/weekly.ts";
+import { startCapabilityBuild, syncCapabilityRequests } from "../tasks/capabilities.ts";
 import {
   EVENTS,
   inngest,
@@ -100,6 +101,15 @@ const absenceFollowUp = inngest.createFunction(
     }),
 );
 
+const capabilityBuild = inngest.createFunction(
+  { id: "capability-build", triggers: [{ event: EVENTS.capabilityApproved }], retries: 1, idempotency: "event.data.requestId" },
+  async ({ event, step }) =>
+    step.run("start", async () => {
+      const { requestId } = event.data as { requestId: string };
+      return { requestId, started: await startCapabilityBuild(requestId) };
+    }),
+);
+
 const extractSessionFn = inngest.createFunction(
   {
     id: "extract-session",
@@ -166,6 +176,7 @@ const allFunctions = [
   runJob,
   proactiveSend,
   absenceFollowUp,
+  capabilityBuild,
   extractSessionFn,
   flushBuffer,
   cronFunction("retrospection", "5 */3 * * *", async () => {
@@ -189,6 +200,7 @@ const allFunctions = [
   cronFunction("nudges-weekly", "*/30 12-17 * * 5", async () => ({ sent: await runWeeklyWrapUps() })),
   cronFunction("nudges-project-summaries", "0 15 * * 5", async () => ({ posted: await runProjectSummaries() })),
   cronFunction("self-modify-cleanup", "20 * * * *", () => cleanUpClosedPulls()),
+  cronFunction("capability-sync", "*/10 * * * *", () => syncCapabilityRequests()),
   cronFunction("gitleaks-refresh", "0 3 * * *", () => refreshGitleaks()),
   cronFunction("self-review", "30 3 * * *", () => selfReviewNightly()),
   cronFunction("self-review-outreach", "30 9 * * 1-5", () => selfReviewMorning()),

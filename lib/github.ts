@@ -80,6 +80,34 @@ export async function branchSha(branch: string): Promise<string | null> {
   return ref?.object.sha ?? null;
 }
 
+export interface CommitSummary {
+  sha: string;
+  message: string;
+  date: string;
+  url: string;
+  files: string[];
+}
+
+export async function commitsSince(since: Date, branch: string, limit = 20): Promise<CommitSummary[]> {
+  const list =
+    (await repo<{ sha: string; html_url: string; commit: { message: string; committer: { date: string } | null } }[]>(
+      "GET",
+      `/commits?sha=${encodeURIComponent(branch)}&since=${since.toISOString()}&per_page=${limit}`,
+    )) ?? [];
+  const commits: CommitSummary[] = [];
+  for (const item of list) {
+    const detail = await repo<{ files?: { filename: string }[] }>("GET", `/commits/${item.sha}`);
+    commits.push({
+      sha: item.sha,
+      message: item.commit.message,
+      date: item.commit.committer?.date ?? "",
+      url: item.html_url,
+      files: (detail?.files ?? []).map((file) => file.filename),
+    });
+  }
+  return commits;
+}
+
 export async function commitTree(sha: string): Promise<string> {
   return (await required<{ tree: { sha: string } }>("GET", `/git/commits/${sha}`)).tree.sha;
 }

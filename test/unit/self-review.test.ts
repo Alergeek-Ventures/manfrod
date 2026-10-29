@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Message } from "../../lib/db/schema.ts";
 import { feedbackSince, freeSlots, hasEnoughEvidence, NEW_SYSTEM_SINCE } from "../../lib/self-review/rules.ts";
-import { formatTranscript, parseRanking, parseTriage } from "../../lib/self-review/triage.ts";
+import { formatTranscript, parseFixed, parseRanking, parseTriage } from "../../lib/self-review/triage.ts";
 
 const message = (role: "user" | "assistant", content: string, at: number, userId = "rater"): Message =>
   ({ role, content, userId, receivedAt: new Date(at * 1000) }) as Message;
@@ -71,6 +71,32 @@ describe("parseRanking", () => {
   it("keeps only candidate ids, up to the limit", () => {
     expect(parseRanking('["b", "x", "a", "b"]', ["a", "b", "c"], 2)).toEqual(["b", "a"]);
     expect(parseRanking("nonsense", ["a", "b", "c"], 2)).toEqual(["a", "b"]);
+  });
+});
+
+describe("parseFixed", () => {
+  const commits = [
+    {
+      sha: "abc1234def",
+      message: "fix(prompts): answer in the thread",
+      date: "2026-10-28T10:00:00Z",
+      url: "u1",
+      files: ["lib/agent/prompts.ts"],
+    },
+    { sha: "fff9999aaa", message: "chore: deps", date: "2026-10-28T11:00:00Z", url: "u2", files: ["package.json"] },
+  ];
+
+  it("returns the fixing commit, also from a short sha", () => {
+    expect(parseFixed(JSON.stringify({ fixed: true, commit: "abc1234", reason: "r" }), commits)).toEqual({
+      commit: commits[0],
+      reason: "r",
+    });
+  });
+
+  it("ignores negative answers, unknown commits and garbage", () => {
+    expect(parseFixed(JSON.stringify({ fixed: false, commit: null, reason: "r" }), commits)).toBeNull();
+    expect(parseFixed(JSON.stringify({ fixed: true, commit: "0000000", reason: "r" }), commits)).toBeNull();
+    expect(parseFixed("nope", commits)).toBeNull();
   });
 });
 

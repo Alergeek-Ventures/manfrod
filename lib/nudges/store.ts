@@ -8,6 +8,7 @@ export const NUDGE_KINDS = {
   waiting: "na początek dnia pracy: wątki, w których ktoś czeka na odpowiedź, i rzeczy, które ta osoba obiecała zrobić",
   absence: "po zgłoszeniu urlopu: propozycje typu wniosek w Firmowidzie, zwolnienie biurek, info na kanałach projektów",
   weekly: "piątkowe podsumowanie tygodnia (godziny w Firmowidzie) i zapowiedź następnego",
+  requests: "wiadomości prywatne w imieniu innych osób albo w sprawie zadań, które ktoś zlecił Manfrodowi (np. zbieranie odpowiedzi)",
 } as const;
 
 export type NudgeKind = keyof typeof NUDGE_KINDS;

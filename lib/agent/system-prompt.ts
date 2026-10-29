@@ -3,6 +3,7 @@ import { languageInstructions } from "../agent-settings.ts";
 import { healthy } from "../db/index.ts";
 import { getSoulAnchor, type SoulAnchor } from "../memory/nodes.ts";
 import { secretsPrompt } from "../secrets.ts";
+import { tasksPrompt } from "../tasks/index.ts";
 import { localIsoWithOffset, isoWeek, localToday, offsetMinutes, weekdayName, zoneAbbreviation, TIMEZONE } from "../time.ts";
 import { SOUL_BASE_PROMPT, SOUL_ONBOARDING_PROMPT, SYSTEM_PROMPT } from "./prompts.ts";
 
@@ -50,7 +51,8 @@ export async function buildSystemPrompt(userId: string, sessionKey: string | nul
     : `${SYSTEM_PROMPT}${SOUL_BASE_PROMPT}${dm ? SOUL_ONBOARDING_PROMPT : ""}`;
   const secrets = await secretsPrompt(userId);
   const language = await languageInstructions(sessionKey?.split(":")[0] ?? null);
-  return `${base}\n\n${await currentContext(userId, sessionKey)}\n\n${language}${secrets ? `\n\n${secrets}` : ""}`;
+  const tasks = await tasksPrompt(sessionKey);
+  return `${base}\n\n${await currentContext(userId, sessionKey)}\n\n${language}${secrets ? `\n\n${secrets}` : ""}${tasks ? `\n\n${tasks}` : ""}`;
 }
 
 export async function skillRunnerPrompt(channelId: string | null, userId: string | null): Promise<string> {

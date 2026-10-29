@@ -2,7 +2,10 @@ import {
   account,
   agentSecrets,
   agentSettings,
+  agentTasks,
+  agentTaskUpdates,
   auditEvents,
+  capabilityRequests,
   channelMappings,
   channelNudges,
   conversations,
@@ -28,6 +31,7 @@ import {
   selfModifyPulls,
   selfReviewCases,
   selfReviewFindings,
+  sentDms,
   users,
 } from "../../db/drizzle/schema.ts";
 
@@ -71,3 +75,7 @@ export type SelfModifyPull = typeof selfModifyPulls.$inferSelect;
 export type NudgeDelivery = typeof nudgeDeliveries.$inferSelect;
 export type NudgePreference = typeof nudgePreferences.$inferSelect;
 export type ChannelNudge = typeof channelNudges.$inferSelect;
+export type AgentTask = typeof agentTasks.$inferSelect;
+export type AgentTaskUpdate = typeof agentTaskUpdates.$inferSelect;
+export type SentDm = typeof sentDms.$inferSelect;
+export type CapabilityRequest = typeof capabilityRequests.$inferSelect;

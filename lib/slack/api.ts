@@ -113,6 +113,21 @@ export async function fetchUserInfo(slackUserId: string): Promise<{ name: string
   return { name: displayName(user), email: user.profile?.email ?? null };
 }
 
+export async function deactivatedSlackIds(): Promise<Set<string>> {
+  const ids = await cached("users:deactivated", async () => {
+    const deleted: string[] = [];
+    let cursor = "";
+    do {
+      const result = await get("users.list", { limit: 200, ...(cursor ? { cursor } : {}) });
+      if (!result.ok) return null;
+      for (const member of (result.body.members ?? []) as SlackBody[]) if (member.deleted) deleted.push(member.id);
+      cursor = result.body.response_metadata?.next_cursor ?? "";
+    } while (cursor);
+    return deleted;
+  });
+  return new Set(ids ?? []);
+}
+
 export async function getChannelInfo(channel: string): Promise<SlackBody | null> {
   return cached(`channel:${channel}`, async () => {
     const result = await get("conversations.info", { channel });
