@@ -9,6 +9,8 @@ export const QUESTION_TTL_DAYS = 5;
 export const FEEDBACK_WINDOW_DAYS = 30;
 export const NEW_SYSTEM_SINCE = new Date("2026-10-25T09:19:00Z");
 export const MAX_EVIDENCE_LINKS = 8;
+export const BAD_RATING = "bad";
+export const INFERRED_RATING = "inferred_bad";
 
 export type Category = (typeof CATEGORIES)[number];
 
