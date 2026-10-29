@@ -704,3 +704,13 @@ export const capabilityRequests = pgTable("capability_requests", {
 	index("capability_requests_status_index").using("btree", table.status.asc().nullsLast().op("text_ops")),
 	check("capability_requests_status", sql`status = ANY (ARRAY['pending'::text, 'approved'::text, 'rejected'::text, 'merged'::text, 'closed'::text])`),
 ]);
+
+export const selfReviewSessions = pgTable("self_review_sessions", {
+	sessionKey: text("session_key").primaryKey().notNull(),
+	judgedUntil: timestamp("judged_until", { mode: 'date' }).notNull(),
+	verdict: text().notNull(),
+	insertedAt: timestamp("inserted_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
+	updatedAt: timestamp("updated_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
+}, (table) => [
+	check("self_review_sessions_verdict", sql`verdict = ANY (ARRAY['satisfied'::text, 'unsatisfied'::text, 'unclear'::text, 'skipped'::text])`),
+]);

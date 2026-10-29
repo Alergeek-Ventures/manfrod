@@ -2,7 +2,7 @@ import { and, asc, eq, gte, inArray, isNull, lt, ne, sql } from "drizzle-orm";
 import { isAdmin, systemUserId } from "../accounts.ts";
 import { db, tables } from "../db/index.ts";
 import type { MessageFeedback, SelfReviewCase, SelfReviewFinding, User } from "../db/schema.ts";
-import { ACTIVE_STATUSES, SELF_REVIEW_SLACK_ID, type Category, type Rater } from "./rules.ts";
+import { ACTIVE_STATUSES, BAD_RATING, INFERRED_RATING, SELF_REVIEW_SLACK_ID, type Category, type Rater } from "./rules.ts";
 
 const { messageFeedback, selfReviewCases, selfReviewFindings, users } = tables;
 
@@ -35,7 +35,7 @@ export async function unreviewedFeedback(limit: number, excludeChannelId: string
     .leftJoin(selfReviewCases, eq(selfReviewCases.feedbackId, messageFeedback.id))
     .where(
       and(
-        eq(messageFeedback.rating, "bad"),
+        inArray(messageFeedback.rating, [BAD_RATING, INFERRED_RATING]),
         isNull(selfReviewCases.id),
         gte(messageFeedback.insertedAt, since),
         excludeChannelId ? ne(messageFeedback.slackChannelId, excludeChannelId) : undefined,
@@ -88,7 +88,7 @@ export async function linkedCases(findingIds: string[]): Promise<CaseWithFeedbac
 }
 
 export function ratersOf(cases: CaseWithFeedback[]): Rater[] {
-  return cases.map((row) => ({ slackUserId: row.feedback.slackUserId, admin: isAdmin(row.user) }));
+  return cases.map((row) => ({ slackUserId: row.feedback.slackUserId, admin: row.feedback.rating === BAD_RATING && isAdmin(row.user) }));
 }
 
 export async function createFinding(attrs: NewFinding): Promise<SelfReviewFinding> {

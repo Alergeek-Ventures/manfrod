@@ -11,6 +11,7 @@ import {
   feedbackSince,
   freeSlots,
   hasEnoughEvidence,
+  INFERRED_RATING,
   MAX_EVIDENCE_LINKS,
   QUESTION_TTL_DAYS,
   SELF_REVIEW_KIND,
@@ -35,6 +36,7 @@ import {
   updateCase,
   type CaseWithFeedback,
 } from "./store.ts";
+import { reviewSatisfaction } from "./satisfaction.ts";
 import { alreadyFixed, describeCommits, formatTranscript, rank, slackTsToDate, triage, type Triage } from "./triage.ts";
 
 const log = logger("SelfReview");
@@ -89,7 +91,11 @@ async function reviewNew(findings: SelfReviewFinding[]): Promise<number> {
         await insertCase(feedback.id, { status: "not_actionable", reason: "The conversation is not stored." });
         continue;
       }
-      const verdict = await triage({ transcript, clarification: null, findings });
+      const triaged = await triage({ transcript, clarification: null, findings });
+      const verdict: Triage | null =
+        triaged?.verdict === "unclear" && feedback.rating === INFERRED_RATING
+          ? { verdict: "not_actionable", reason: triaged.reason }
+          : triaged;
       await insertCase(
         feedback.id,
         verdict ? await apply(verdict, findings) : { status: "not_actionable", reason: "The triage response could not be parsed." },
@@ -265,13 +271,14 @@ async function startWork(): Promise<number> {
   return started;
 }
 
-export async function runNightly(): Promise<{ reviewed: number; started: number }> {
+export async function runNightly(): Promise<{ judged: number; unsatisfied: number; reviewed: number; started: number }> {
   await syncPulls();
+  const { judged, unsatisfied } = await reviewSatisfaction(config.selfReviewChannelId ?? null);
   const findings = await findingsWithStatus(["open", "in_progress", "proposed"]);
   const reviewed = (await reviewNew(findings)) + (await reviewAnswered(findings));
   const started = await startWork();
   log.info(`SelfReview: reviewed ${reviewed} rating(s), started work on ${started} finding(s)`);
-  return { reviewed, started };
+  return { judged, unsatisfied, reviewed, started };
 }
 
 function followUpPrompt(finding: SelfReviewFinding, mentions: string): string {
@@ -287,6 +294,7 @@ async function notifyFixed(): Promise<number> {
   for (const finding of await mergedUnnotified()) {
     const threads = new Map<string, CaseWithFeedback[]>();
     for (const row of await linkedCases([finding.id])) {
+      if (row.feedback.rating === INFERRED_RATING) continue;
       const key = row.feedback.sessionKey;
       if (key) threads.set(key, [...(threads.get(key) ?? []), row]);
     }

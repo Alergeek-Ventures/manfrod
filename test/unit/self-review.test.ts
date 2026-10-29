@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Message } from "../../lib/db/schema.ts";
 import { feedbackSince, freeSlots, hasEnoughEvidence, NEW_SYSTEM_SINCE } from "../../lib/self-review/rules.ts";
+import { humanReplied, judgeInput } from "../../lib/self-review/satisfaction.ts";
 import { formatTranscript, parseFixed, parseRanking, parseTriage } from "../../lib/self-review/triage.ts";
 
 const message = (role: "user" | "assistant", content: string, at: number, userId = "rater"): Message =>
@@ -115,5 +116,25 @@ describe("formatTranscript", () => {
     expect(transcript).toBe(
       "Person who rated: Book a desk\n\nManfrod [THIS REPLY WAS RATED UNHELPFUL]: Booked desk 4\n\nOther person: Wrong day\n\nManfrod: Fixed",
     );
+  });
+});
+
+describe("satisfaction review", () => {
+  it("only judges conversations where a person wrote after Manfrod", () => {
+    expect(humanReplied([{ role: "user" }, { role: "assistant" }])).toBe(false);
+    expect(humanReplied([{ role: "user" }, { role: "assistant" }, { role: "user" }])).toBe(true);
+    expect(humanReplied([{ role: "assistant" }])).toBe(false);
+  });
+
+  it("labels people and marks Manfrod's replies to choose from", () => {
+    const history = [
+      message("user", "Book a desk", 100, "u1"),
+      message("assistant", "Booked desk 4", 110),
+      message("user", "Wrong day", 120, "u2"),
+      message("user", "Still wrong", 130, "u1"),
+    ];
+    const input = judgeInput(history);
+    expect(input.transcript).toBe("Person 1: Book a desk\n\nManfrod [r1]: Booked desk 4\n\nPerson 2: Wrong day\n\nPerson 1: Still wrong");
+    expect(input.replies.map((reply) => reply.key)).toEqual(["r1"]);
   });
 });
