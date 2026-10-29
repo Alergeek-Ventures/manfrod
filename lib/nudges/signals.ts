@@ -6,12 +6,16 @@ import { overlappingAbsences } from "../facts.ts";
 import { hasActiveSession } from "../firmowid.ts";
 import { ensureValidToken as googleToken, listEvents, type CalendarEvent } from "../google.ts";
 import { builtinProviders, ensureValidToken, getConnection } from "../mcp/index.ts";
+import { deactivatedSlackIds } from "../slack/api.ts";
 import { zonedToUtc } from "../time.ts";
 
 const { messages } = tables;
 
 export async function nudgeablePeople(): Promise<User[]> {
-  return (await listUsers()).filter((user) => !isSystemUser(user) && !user.banned && user.slackDmChannelId);
+  const deactivated = await deactivatedSlackIds();
+  return (await listUsers()).filter(
+    (user) => !isSystemUser(user) && !user.banned && user.slackDmChannelId && !deactivated.has(user.slackId),
+  );
 }
 
 export async function firmowidAccess(userId: string): Promise<{ mcpUrl: string; token: string } | null> {

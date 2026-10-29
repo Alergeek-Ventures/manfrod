@@ -4,7 +4,7 @@ import { isEmptyReply } from "../agent/system-prompt.ts";
 import { planTitle, threadTitle } from "../agent/titles.ts";
 import { logger } from "../log.ts";
 import { isUntitledProactiveThread, markProactiveThreadTitled } from "../proactive.ts";
-import { isBackgroundKind, toolCtx, type ToolCtx } from "../agent/context.ts";
+import { isBackgroundKind, TASK_KIND, toolCtx, type ToolCtx } from "../agent/context.ts";
 import { deleteMessage, post, setStatus, setTitle, type SlackBody } from "./api.ts";
 import { feedbackBlock, feedbackChunk } from "./feedback.ts";
 import { fromMarkdown, toBlocks } from "./mrkdwn.ts";
@@ -110,7 +110,7 @@ async function deliverFinal(where: Where, rawContent: string) {
   const skill = isBackgroundKind(where.tool.kind);
   const stream = where.threadTs ? getStream(where.channel, where.threadTs) : undefined;
 
-  if (skill && isEmptyReply(content)) {
+  if ((skill || where.tool.kind === TASK_KIND) && isEmptyReply(content)) {
     await stream?.abort();
     if (where.tool.kind === "skill_user" && where.threadTs) await deleteMessage(where.channel, where.threadTs);
     return;

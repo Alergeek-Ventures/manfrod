@@ -6,7 +6,7 @@ import { EVENTS, sendEvent, type JobScheduledData } from "../inngest/client.ts";
 
 const { jobs } = tables;
 
-export type JobKind = "trigger" | "skill_trigger" | "firmowid_session_check" | "firmowid_morning_session_check";
+export type JobKind = "trigger" | "skill_trigger" | "firmowid_session_check" | "firmowid_morning_session_check" | "task_check";
 
 export interface EnqueueOptions {
   scheduledAt?: Date;
@@ -31,6 +31,8 @@ export function jobLabel(kind: string, args: Record<string, unknown>, personName
       return `firmowid evening check${who}`;
     case "firmowid_morning_session_check":
       return `firmowid morning check${who}`;
+    case "task_check":
+      return `task: ${String(args.title ?? args.task_id)}`;
     default:
       return `${kind}${who}`;
   }

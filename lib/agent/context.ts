@@ -13,6 +13,8 @@ export interface ToolCtx {
   kind: string;
   sessionKey: string | null;
   findingId: string | null;
+  taskId: string | null;
+  capabilityRequestId: string | null;
 }
 
 type Attributes = Readonly<Record<string, string | readonly string[]>>;
@@ -55,10 +57,14 @@ export function toolCtxFromAuth(auth: AuthLike | null): ToolCtx {
     kind: str(attributes, "kind") ?? "slack",
     sessionKey: channel && threadTs ? `${channel}:${threadTs}` : null,
     findingId: str(attributes, "selfReviewFindingId"),
+    taskId: str(attributes, "taskId"),
+    capabilityRequestId: str(attributes, "capabilityRequestId"),
   };
 }
 
 export const isBackgroundKind = (kind: string) => ["skill_channel", "skill_user", "self_review"].includes(kind);
+
+export const TASK_KIND = "task";
 
 export function toolCtx(ctx: SessionLike): ToolCtx {
   return toolCtxFromAuth(ctx.session.auth.current ?? ctx.session.auth.initiator);

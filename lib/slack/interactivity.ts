@@ -13,6 +13,7 @@ import {
   startInstall,
 } from "../linear/status.ts";
 import { logger } from "../log.ts";
+import { CAPABILITY_APPROVE_ACTION_ID, CAPABILITY_REJECT_ACTION_ID, handleCapabilityDecision } from "../tasks/capabilities.ts";
 import { preselectedLevels, resolveEscalation } from "../memory/classifier.ts";
 import { FEEDBACK_ACTION_ID, recordFeedback, REMOVE_ACTION_ID, removeMessage } from "./feedback.ts";
 import { handleSecretSubmission, openSecretModal, readSubmission, SECRET_ADD_ACTION_ID, SECRET_CALLBACK_ID } from "./secret-modal.ts";
@@ -29,6 +30,8 @@ const OWNED_ACTIONS = new Set([
   FEEDBACK_ACTION_ID,
   REMOVE_ACTION_ID,
   SECRET_ADD_ACTION_ID,
+  CAPABILITY_APPROVE_ACTION_ID,
+  CAPABILITY_REJECT_ACTION_ID,
   "memory_escalation_save",
   "memory_escalation_cancel",
   "memory_escalation_levels",
@@ -79,6 +82,10 @@ async function handleBlockActions(payload: Record<string, any>) {
         channelId ?? null,
         (payload.message?.thread_ts ?? null) as string | null,
       );
+      return;
+    case CAPABILITY_APPROVE_ACTION_ID:
+    case CAPABILITY_REJECT_ACTION_ID:
+      await handleCapabilityDecision(payload, action.action_id === CAPABILITY_APPROVE_ACTION_ID);
       return;
   }
   if (!channelId || !botTs) return;

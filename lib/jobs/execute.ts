@@ -8,6 +8,7 @@ import { builtinProviders, ensureValidToken, getConnection } from "../mcp/index.
 import { getRecurringReminder } from "../memory/reminders.ts";
 import { deliverProactive, proactiveTitle, startThread, userAuth } from "../proactive.ts";
 import { get as getRoutine } from "../routines.ts";
+import { runTaskCheck } from "../tasks/run.ts";
 import { formatLocal } from "../time.ts";
 
 export class JobError extends Error {}
@@ -26,6 +27,8 @@ export async function executeJob(job: Job): Promise<void> {
       return runFirmowidEveningCheck(args.user_id);
     case "firmowid_morning_session_check":
       return runFirmowidMorningCheck(args.user_id, args.date);
+    case "task_check":
+      return runTaskCheck(args.task_id);
     default:
       throw new JobError(`unknown job kind ${job.kind}`);
   }

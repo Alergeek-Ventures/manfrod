@@ -22,6 +22,7 @@ const BLOCKED = [
   "agent/lib/self-modify.ts",
   "agent/subagents/self-modify/",
   "agent/tools/http-request.ts",
+  "agent/tools/request-capability.ts",
   "agent/tools/request-secret.ts",
   "lib/accounts.ts",
   "lib/agent/context.ts",
@@ -36,6 +37,7 @@ const BLOCKED = [
   "lib/self-modify-pulls.ts",
   "lib/self-review/",
   "lib/slack/secret-modal.ts",
+  "lib/tasks/capabilities.ts",
   "lib/vault.ts",
   "lib/web/session.ts",
 ];

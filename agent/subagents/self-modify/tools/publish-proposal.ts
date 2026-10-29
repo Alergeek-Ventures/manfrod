@@ -13,6 +13,7 @@ import {
 import { matches as secretRule } from "../../../../lib/security/gitleaks.ts";
 import { recordPull } from "../../../../lib/self-modify-pulls.ts";
 import { MAX_OPEN_PULLS } from "../../../../lib/self-review/rules.ts";
+import { attachCapabilityPull } from "../../../../lib/tasks/capabilities.ts";
 import { attachPull, countActive } from "../../../../lib/self-review/store.ts";
 import { defineManfrodTool } from "../../../lib/define-tool.ts";
 import {
@@ -115,6 +116,7 @@ export default defineManfrodTool({
       ({ number: pullNumber, url: pullUrl } = await createDraftPull(branch, TARGET_BRANCH, title, description + footer));
       await recordPull(pullNumber, branch, runtime.session.id);
       if (requester.kind === "self_review") await attachPull(requester.finding.id, pullNumber, pullUrl);
+      if (ctx.capabilityRequestId) await attachCapabilityPull(ctx.capabilityRequestId, pullNumber, pullUrl);
     }
     proposal.update((current) => ({ ...current, branch, headSha: commit, pullNumber, pullUrl }));
 

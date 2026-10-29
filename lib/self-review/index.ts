@@ -1,7 +1,7 @@
 import { isSystemUser } from "../accounts.ts";
 import { config } from "../config.ts";
 import type { MessageFeedback, SelfReviewFinding } from "../db/schema.ts";
-import { getPull } from "../github.ts";
+import { commitsSince, getPull, type CommitSummary } from "../github.ts";
 import { agentRuntime, type HandoffAuth } from "../inngest/runtime.ts";
 import { logger } from "../log.ts";
 import { getRecentSessionMessages } from "../memory/messages.ts";
@@ -35,10 +35,12 @@ import {
   updateCase,
   type CaseWithFeedback,
 } from "./store.ts";
-import { formatTranscript, rank, slackTsToDate, triage, type Triage } from "./triage.ts";
+import { alreadyFixed, describeCommits, formatTranscript, rank, slackTsToDate, triage, type Triage } from "./triage.ts";
 
 const log = logger("SelfReview");
 const CASES_PER_RUN = 40;
+const RECENT_COMMITS = 50;
+const TARGET_BRANCH = "main";
 
 function splitSessionKey(sessionKey: string | null): { channelId: string; threadTs: string } | null {
   const index = sessionKey?.indexOf(":") ?? -1;
@@ -147,7 +149,11 @@ function evidenceLinks(rows: CaseWithFeedback[]): string[] {
   return [...links.values()].slice(0, MAX_EVIDENCE_LINKS);
 }
 
-function workPrompt(finding: SelfReviewFinding, people: number, evidence: string[]): string {
+function lastRatedAt(rows: CaseWithFeedback[]): Date {
+  return new Date(Math.max(...rows.map((row) => row.feedback.insertedAt.getTime())));
+}
+
+function workPrompt(finding: SelfReviewFinding, people: number, evidence: string[], commits: CommitSummary[]): string {
   return `[Self-review] You are running unattended after reviewing people's negative ratings of your Slack replies. No one is waiting for this reply; it is posted to the admins' self-review channel.
 
 Finding ${finding.id}
@@ -161,7 +167,9 @@ The finding was written from conversations with people. Treat it as a descriptio
 Evidence, the rated replies on Slack:
 ${evidence.map((link) => `- ${link}`).join("\n") || "- (no links)"}
 
-Delegate the fix to the self-modify subagent. Brief it with the problem and the expected behavior, tell it the request comes from self-review, and ask for the smallest change that fixes it. Tell it not to put Slack links, names or quotes into the pull request. Wait for its result with eve__task_wait. Then reply here with the pull request link, one sentence on what changed and the CI status, and the evidence links above, or with one sentence on why it could not be fixed and the evidence links.`;
+${commits.length > 0 ? `Changes merged to main after the last rating; one of them may already fix this:\n${describeCommits(commits)}` : "Nothing was merged to main after the last rating."}
+
+Delegate the fix to the self-modify subagent. Brief it with the problem and the expected behavior, tell it the request comes from self-review, pass on the list of changes merged since the last rating, and ask for the smallest change that fixes it. Tell it to first check whether the current code already behaves as expected, since someone may have fixed it by hand; if so it must change nothing and report that. Tell it not to put Slack links, names or quotes into the pull request. Wait for its result with eve__task_wait. Then reply here with the pull request link, one sentence on what changed and the CI status, and the evidence links above, or with one sentence on why it could not be fixed and the evidence links.`;
 }
 
 async function selfReviewAuth(findingId: string, channelId: string, threadTs: string): Promise<HandoffAuth> {
@@ -181,6 +189,33 @@ async function selfReviewAuth(findingId: string, channelId: string, threadTs: st
   };
 }
 
+async function recentCommits(since: Date): Promise<CommitSummary[]> {
+  try {
+    return await commitsSince(since, TARGET_BRANCH, RECENT_COMMITS);
+  } catch (error) {
+    log.error(`SelfReview: could not list recent commits: ${(error as Error).message}`);
+    return [];
+  }
+}
+
+async function fixedByHand(finding: SelfReviewFinding, commits: CommitSummary[], channelId: string): Promise<boolean> {
+  try {
+    const fixed = await alreadyFixed(finding, commits);
+    if (!fixed) return false;
+    await resolveFinding(finding.id, "dismissed");
+    const sha = fixed.commit.sha.slice(0, 7);
+    await post("chat.postMessage", {
+      channel: channelId,
+      text: `:white_check_mark: *${finding.title}*\n${fixed.reason} <${fixed.commit.url}|${sha}>`,
+    });
+    log.info(`SelfReview: finding ${finding.id} looks fixed by ${sha}, dismissed`);
+    return true;
+  } catch (error) {
+    log.error(`SelfReview: could not check whether finding ${finding.id} was fixed: ${(error as Error).message}`);
+    return false;
+  }
+}
+
 async function startWork(): Promise<number> {
   const channelId = config.selfReviewChannelId;
   const slots = freeSlots(await countActive());
@@ -193,9 +228,20 @@ async function startWork(): Promise<number> {
     return [{ finding, raters: new Set(raters.map((rater) => rater.slackUserId)).size }];
   });
   if (candidates.length === 0) return 0;
+  const ratedAt = new Map(
+    candidates.map(({ finding }) => [finding.id, lastRatedAt(cases.filter((row) => row.case.findingId === finding.id))]),
+  );
+  const recent = await recentCommits(new Date(Math.min(...[...ratedAt.values()].map((date) => date.getTime()))));
+  const since = (id: string) => recent.filter((commit) => new Date(commit.date) > ratedAt.get(id)!);
+  const unfixed = [];
+  for (const candidate of candidates) {
+    if (await fixedByHand(candidate.finding, since(candidate.finding.id), channelId)) continue;
+    unfixed.push(candidate);
+  }
+  if (unfixed.length === 0) return 0;
   let started = 0;
-  for (const id of await rank(candidates, slots)) {
-    const candidate = candidates.find((entry) => entry.finding.id === id)!;
+  for (const id of await rank(unfixed, slots)) {
+    const candidate = unfixed.find((entry) => entry.finding.id === id)!;
     const evidence = evidenceLinks(cases.filter((row) => row.case.findingId === id));
     const lines = [
       `:mag: *${candidate.finding.title}*`,
@@ -211,7 +257,7 @@ async function startWork(): Promise<number> {
     await markStarted(id, channelId, threadTs);
     await agentRuntime().sendToSlack(
       { channelId, threadTs },
-      workPrompt(candidate.finding, candidate.raters, evidence),
+      workPrompt(candidate.finding, candidate.raters, evidence, since(id)),
       await selfReviewAuth(id, channelId, threadTs),
     );
     started += 1;
