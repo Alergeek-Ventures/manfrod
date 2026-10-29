@@ -13,8 +13,8 @@ import { BAD_RATING, INFERRED_RATING } from "./rules.ts";
 const { messages, messageFeedback, selfReviewSessions } = tables;
 const log = logger("SelfReview.Satisfaction");
 
-const LOOKBACK_HOURS = 48;
 const QUIET_HOURS = 2;
+const LOOKBACK_HOURS = 24 + QUIET_HOURS;
 const SESSIONS_PER_RUN = 150;
 const MESSAGES_PER_SESSION = 40;
 const REPLY_CHOICES = 8;
