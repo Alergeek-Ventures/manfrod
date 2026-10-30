@@ -31,18 +31,43 @@ are stored on the reminder itself.
   day-of-week`). "codziennie o 8" → `0 8 * * *`. "w poniedziałki o 9" →
   `0 9 * * 1`. Resolve relative/vague timing against `[Current Context]`
   before writing the expression.
-- `instructions` — write this as if leaving a note for your future self:
-  what to check, what tools to use, what to send and to whom/which channel.
-  Cron-fired turns run in a new thread in the owner's DM, so your reply
-  only reaches them. If the result should reach anyone else, say explicitly
-  where and how: `post-slack-message` for a channel (e.g. "post the summary
-  in channel C0123456"), `send-dm` for one person. If it needs replies
-  collected over the following days, say so: post first, then `create-task`
-  with the `channel` and `thread_ts` of that post, so the checks follow that
-  thread and the wrap-up lands there.
+- `instructions` — the prompt your future self gets each time it fires; see
+  "Writing the instructions" below.
 - `timezone` — omit unless the user names one; defaults to Europe/Warsaw.
 
 Confirm briefly with the schedule in human terms ("OK, codziennie o 8:00").
+
+## Writing the instructions
+
+Each run starts from nothing but these instructions, in a new thread in the
+owner's DM, weeks after this conversation. Write them so that run can act
+without guessing:
+
+- **Self-contained.** Who asked and why, channel IDs, people with their
+  Slack IDs and what applies to each of them. Freeze only what the user
+  decided; anything that can change (who is on the team, who picked what)
+  should be looked up at run time with search-notes or list-team-members,
+  and say so.
+- **Steps with the tools named**, in order. Your reply in that run only
+  reaches the owner's DM, so say where results go: `post-slack-message` for
+  a channel, `send-dm` for one person, or the owner's DM. Say what the owner
+  should get, e.g. one line with a link to the post.
+- **Follow-up over days is a task.** When the run asks people for something
+  and has to chase answers, post first, then `create-task` with the
+  `channel` and `thread_ts` of that post, a success criterion, the first
+  check, and a deadline after which it posts the summary there and closes.
+  Never `schedule-followup-check` or `set-reminder` for this: they fire in
+  the owner's DM, not in the thread.
+- **One run, one task.** If each run starts a task, first check
+  `list-tasks` and close the previous run's task if it is still open, so
+  they don't pile up.
+- **Nothing private.** The instructions are shown in the admin panel and
+  the run may post publicly, so leave out pay, health, personal remarks and
+  anything said privately that the task doesn't need.
+
+Before creating one that posts in channels or messages other people, tell
+the user in two or three lines what it will send, where, and how it follows
+up, so they can correct it.
 
 ## Listing / checking
 

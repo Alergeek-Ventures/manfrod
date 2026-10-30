@@ -17,7 +17,7 @@ export default defineManfrodTool({
     instructions: z
       .string()
       .describe(
-        "Full instructions for what you should do each time this fires — written as if telling yourself what to do. This becomes the prompt for that future turn.",
+        "Full instructions for each run, written for a future you that knows nothing else: who asked and why, channel and people IDs, the steps with the tools to use, where the results go (the run's own reply only reaches the owner's DM). Follow-up over days goes into create-task in the thread of the post. No private details. Load the recurring-tasks skill for the full checklist.",
       ),
     timezone: z.string().optional().describe("IANA timezone (default: 'Europe/Warsaw'). Examples: 'UTC', 'America/New_York'"),
   }),
