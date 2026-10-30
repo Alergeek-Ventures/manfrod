@@ -53,12 +53,17 @@ export async function meetings(userId: string, from: string, toExclusive: string
   if (!token.ok) return null;
   const events = await listEvents(token.value, zonedToUtc(from, "00:00:00"), zonedToUtc(toExclusive, "00:00:00"));
   if (!events.ok) return null;
-  return events.value.filter((event) => !event.all_day && event.attendees.length > 1);
+  return events.value.filter((event) => !event.all_day && event.attendees.length > 0);
+}
+
+function attendeeNames(event: CalendarEvent, shown = 3): string {
+  const names = event.attendees.map((attendee) => attendee.name ?? attendee.email?.split("@")[0] ?? "?");
+  return `${names.slice(0, shown).join(", ")}${names.length > shown ? ` and ${names.length - shown} more` : ""}`;
 }
 
 export function describeMeetings(events: CalendarEvent[], limit = 12): string {
   return events
     .slice(0, limit)
-    .map((event) => `- ${event.start}: ${event.summary} (${event.attendees.length} osób)`)
+    .map((event) => `- ${event.start}: ${event.summary} (with ${attendeeNames(event)})`)
     .join("\n");
 }

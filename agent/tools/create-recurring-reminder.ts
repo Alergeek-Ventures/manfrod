@@ -6,7 +6,7 @@ import { defineManfrodTool } from "../lib/define-tool.ts";
 export default defineManfrodTool({
   keepSecretPlaceholders: true,
   description:
-    "Set up a task that runs itself on a recurring schedule, e.g. 'every day at 8 send me X' or 'every Monday check Y'. When it fires, the instructions become a full agent turn (same tools as a live chat), not just a text reminder.",
+    "Set up a job that runs itself on a calendar schedule with no end, e.g. 'every day at 8 send me X' or 'every Friday ask the team for Y'. When it fires, the instructions become a full agent turn (same tools as a live chat), not just a text reminder. Each run starts fresh. For something that should stop once a goal is reached, e.g. checking daily until someone answers, use create-task instead.",
   inputSchema: z.object({
     name: z.string().describe("Unique identifier for the reminder (e.g., 'morning_brief', 'weekly_review')"),
     cron: z
@@ -17,7 +17,7 @@ export default defineManfrodTool({
     instructions: z
       .string()
       .describe(
-        "Full instructions for what you should do each time this fires — written as if telling yourself what to do. This becomes the prompt for that future turn.",
+        "Full instructions for each run, written for a future you that knows nothing else: who asked and why, channel and people IDs, the steps with the tools to use, where the results go (the run's own reply only reaches the owner's DM). Follow-up over days goes into create-task in the thread of the post. No private details. Load the recurring-jobs skill for the full checklist.",
       ),
     timezone: z.string().optional().describe("IANA timezone (default: 'Europe/Warsaw'). Examples: 'UTC', 'America/New_York'"),
   }),
