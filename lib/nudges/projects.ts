@@ -1,8 +1,8 @@
 import { and, eq, isNotNull, isNull } from "drizzle-orm";
 import { db, tables } from "../db/index.ts";
 import { describePeriod, upcomingPeriods } from "../holidays.ts";
-import { listIssues } from "../linear/calls.ts";
-import { getConnection } from "../linear/index.ts";
+import { teamActivity } from "../linear/calls.ts";
+import type { TeamActivity } from "../linear/client.ts";
 import { logger } from "../log.ts";
 import { resolveForRead } from "../memory/access.ts";
 import { listNodesByDate } from "../memory/nodes.ts";
@@ -18,10 +18,22 @@ const MAX_MESSAGES = 60;
 const MESSAGE_CHARS = 300;
 const NOTE_CHARS = 400;
 const THREAD_REPLIES = 5;
+const LINEAR_LOOKBACK_DAYS = 14;
+const MIN_COMPLETED_ISSUES = 2;
 
 const log = logger("Nudges.Projects");
 
-const GUIDANCE = `It is Friday afternoon. Write this project's weekly summary for its Slack channel: what got done, decisions made, what is in progress or blocked, and what is coming next week. Base it only on the notes, channel messages and Linear issues below, and credit people with <@SLACK_ID> where it helps. Keep it short and easy to scan; a compact list is fine here. Leave out small talk and anything already obsolete. If the week was quiet and there is nothing meaningful to report, do not send.`;
+const GUIDANCE = `It is Friday afternoon. Write this project's weekly summary for its Slack channel, based only on the data below.
+
+What goes in:
+- Only what happened this week: work finished, decisions made, what is in progress or blocked, and what is planned for next week. People often repeat the status of older work; list as done only what you can tell was finished this week.
+- Only this project. Notes and messages about other projects or products end up here too, e.g. a wish about another app posted in this channel; leave them out.
+- The channel messages are the most reliable source. Linear issues are listed only when the team keeps Linear up to date; when one disagrees with what people wrote, trust the messages and leave the issue out, and never list backlog issues nobody worked on.
+- Leave out small talk, gossip, private remarks, access and account chores, and anything already obsolete.
+- Credit people with <@SLACK_ID> where it helps. Refer to a Linear issue by its identifier, e.g. ABC-12; it becomes a link on its own.
+- Don't promise anything for later; nobody will act on this message.
+
+Format, in Markdown: a bold title line naming the week, then short sections, each a bold label on its own line (done, in progress or blocked, next week, decisions when there were any) followed by "- " bullets of one line each. Skip empty sections and keep it under about ten bullets. If the week was quiet and there is nothing meaningful to report, do not send.`;
 
 const clip = (text: string, limit: number) => (text.length > limit ? `${text.slice(0, limit)}…` : text.replaceAll("\n", " "));
 
@@ -33,6 +45,26 @@ async function internalProjectChannels() {
     .where(and(eq(channelMappings.status, "active"), isNotNull(channelMappings.projectId), isNull(channelMappings.clientId)));
   const seen = new Set<string>();
   return rows.filter((row) => !seen.has(row.channelId) && seen.add(row.channelId));
+}
+
+export const linearInUse = (activity: TeamActivity, since: Date) =>
+  activity.issues.filter((issue) => issue.completedAt && new Date(issue.completedAt) >= since).length >= MIN_COMPLETED_ISSUES;
+
+export function describeIssues(activity: TeamActivity, since: Date): string {
+  return activity.issues
+    .filter((issue) => new Date(issue.updatedAt) >= since)
+    .map(
+      (issue) =>
+        `- ${issue.identifier} [${issue.state?.name ?? "?"}] ${issue.title} (${issue.assignee?.name ?? "unassigned"}), updated ${issue.updatedAt.slice(0, 10)}${issue.completedAt ? `, completed ${issue.completedAt.slice(0, 10)}` : ""}`,
+    )
+    .join("\n");
+}
+
+export function linkIssues(text: string, team: Pick<TeamActivity, "key" | "urlKey">): string {
+  const key = team.key.replace(/[^A-Za-z0-9]/g, "");
+  if (!key) return text;
+  const identifier = new RegExp(`(?<![\\w/|-])(${key}-\\d+)(?![\\w-])(?![^<>]*>)`, "g");
+  return text.replace(identifier, (match) => `<https://linear.app/${team.urlKey}/issue/${match}|${match}>`);
 }
 
 async function channelActivity(channelId: string, since: string): Promise<string> {
@@ -70,8 +102,9 @@ export async function runProjectSummaries(today = localToday()): Promise<number>
       const settings = await channelSettings(channel.channelId);
       if (!settings.summaries || settings.lastSummaryPeriod === period) continue;
       const levels = await resolveForRead("", channel.channelId);
+      const weekStart = zonedToUtc(monday, "00:00:00");
       const notes = await listNodesByDate(levels, {
-        since: zonedToUtc(monday, "00:00:00"),
+        since: weekStart,
         projectId: channel.projectId,
         limit: MAX_NOTES,
         order: "asc",
@@ -81,14 +114,16 @@ export async function runProjectSummaries(today = localToday()): Promise<number>
         await markSummarized(channel.channelId, period);
         continue;
       }
-      const linear = (await getConnection(channel.projectId)) ? await listIssues(channel.projectId!, 30) : "";
+      const lookback = new Date(Date.now() - LINEAR_LOOKBACK_DAYS * 86_400_000);
+      const linear = await teamActivity(channel.projectId!, lookback);
+      const issues = linear && linearInUse(linear, lookback) ? describeIssues(linear, weekStart) : "";
       const context = [
         `Project: ${channel.project}`,
         notes.length > 0
           ? `Notes from your memory this week:\n${notes.map((node) => `- ${node.insertedAt.toISOString().slice(0, 10)}: ${clip(node.content, NOTE_CHARS)}`).join("\n")}`
           : "",
         activity ? `Channel messages this week:\n${activity}` : "",
-        linear ? `Linear issues of the project:\n${linear}` : "",
+        issues ? `Linear issues updated this week:\n${issues}` : "",
         nextWeek,
       ]
         .filter(Boolean)
@@ -100,7 +135,8 @@ export async function runProjectSummaries(today = localToday()): Promise<number>
         context,
       });
       if (decision?.send) {
-        const sent = await post("chat.postMessage", { channel: channel.channelId, text: fromMarkdown(decision.message) });
+        const text = fromMarkdown(decision.message);
+        const sent = await post("chat.postMessage", { channel: channel.channelId, text: linear ? linkIssues(text, linear) : text });
         if (!sent.ok) {
           log.warn(`Nudges.Projects: could not post to ${channel.channelId}: ${sent.error}`);
           continue;

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseDecision } from "../../lib/nudges/compose.ts";
+import { linkIssues } from "../../lib/nudges/projects.ts";
 import { waitingFor } from "../../lib/nudges/waiting.ts";
 import { weekLog } from "../../lib/nudges/weekly.ts";
 
@@ -65,5 +66,17 @@ describe("parseDecision", () => {
     expect(parseDecision('{"send": true, "reason": "r", "message": null}')).toEqual({ send: false, reason: "r" });
     expect(parseDecision('{"send": false, "reason": "r"}')).toEqual({ send: false, reason: "r" });
     expect(parseDecision("nope")).toBeNull();
+  });
+});
+
+describe("linkIssues", () => {
+  const team = { key: "BLA", urlKey: "blaise" };
+
+  it("links bare identifiers of the team and leaves existing links alone", () => {
+    expect(linkIssues("w toku (BLA-164), potem BLA-16 i ABC-1", team)).toBe(
+      "w toku (<https://linear.app/blaise/issue/BLA-164|BLA-164>), potem <https://linear.app/blaise/issue/BLA-16|BLA-16> i ABC-1",
+    );
+    const linked = "<https://linear.app/blaise/issue/BLA-164/spaces|BLA-164>";
+    expect(linkIssues(linked, team)).toBe(linked);
   });
 });

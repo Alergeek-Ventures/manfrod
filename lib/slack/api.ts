@@ -312,12 +312,15 @@ export async function resolveChannel(id: string | null | undefined): Promise<{ o
   return found ? { ok: true, id: found.id } : { ok: false, error: "not_found" };
 }
 
-let identity: { botId: string; userId: string; teamId: string } | null = null;
+let identity: { botId: string; userId: string; teamId: string; url: string } | null = null;
 
-export async function botIdentity(): Promise<{ botId: string; userId: string; teamId: string } | null> {
+export async function botIdentity(): Promise<{ botId: string; userId: string; teamId: string; url: string } | null> {
   if (identity) return identity;
   const result = await get("auth.test");
   if (!result.ok) return null;
-  identity = { botId: result.body.bot_id, userId: result.body.user_id, teamId: result.body.team_id };
+  identity = { botId: result.body.bot_id, userId: result.body.user_id, teamId: result.body.team_id, url: result.body.url };
   return identity;
 }
+
+export const archiveLink = (workspaceUrl: string, channel: string, ts: string) =>
+  `${workspaceUrl.replace(/\/$/, "")}/archives/${channel}/p${ts.replace(".", "")}`;

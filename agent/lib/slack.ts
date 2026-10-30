@@ -1,5 +1,5 @@
 import { containsSecret } from "../../lib/security/secrets.ts";
-import { downloadFile, fetchUserName, getFileInfo, resolveChannel, type SlackBody } from "../../lib/slack/api.ts";
+import { channelMembers, downloadFile, fetchUserName, getFileInfo, resolveChannel, type SlackBody } from "../../lib/slack/api.ts";
 import { formatLocal, slackTsToDate } from "../../lib/time.ts";
 import { type MsgCtx } from "../../lib/../lib/agent/context.ts";
 
@@ -58,6 +58,10 @@ export async function formatMessages(messages: SlackBody[]): Promise<string> {
 }
 
 export const errorText = (error: string) => `:${error}`;
+
+export async function isChannelMember(channelId: string, slackUserId: string): Promise<boolean> {
+  return ((await channelMembers(channelId)) ?? []).includes(slackUserId);
+}
 
 export async function readCanvas(fileId: string): Promise<string> {
   const info = await getFileInfo(fileId);

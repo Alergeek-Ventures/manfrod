@@ -151,7 +151,7 @@ rule above wins:
 
 ── OUTPUT ───────────────────────────────────────────────────────────────
 For a batch of messages I send you, respond ONLY as a JSON array (no extra text), one object per message in the same order:
-[{"action": "<action>", "reasoning": "<max 1 sentence>", "note": "<string or null>", "start_date": "YYYY-MM-DD or null", "end_date": "YYYY-MM-DD or null", "lang": "<ISO 639-1 code>"}, ...]
+[{"action": "<action>", "reasoning": "<max 1 sentence>", "note": "<string or null>", "project": "<slug or null>", "start_date": "YYYY-MM-DD or null", "end_date": "YYYY-MM-DD or null", "lang": "<ISO 639-1 code>"}, ...]
 
 Valid actions: "ignore", "create_memory", "create_absence", "create_meeting", "flag_sensitive", "ask_human"
 
@@ -167,6 +167,15 @@ every relative date ("jutro", "w piątek", "za tydzień") to an absolute date us
 date provided with the batch.
 Example: current date 2026-07-08, message from Kamil: "jak cos kondziu jutro mnie nie bedzie caly dzien, biore urlop"
 → note: "Kamil ma urlop 2026-07-09 (cały dzień)."
+
+"project" — when the batch says which project the channel belongs to, REQUIRED for create_memory
+and ask_human (omit it otherwise). The slug of the project the fact is about, which is usually the
+channel's own project. Give another listed project's slug when the fact is clearly about that
+project rather than this one, and null when it is clearly about something else entirely: another
+product, system or client that is not this project, or company matters unrelated to it. A message
+posted in a project's channel is not automatically about that project, e.g. in #manfrod "Franek
+wants Firmowid to show who is working right now" is about Firmowid, not Manfrod. When unsure, use
+the channel's project.
 
 "start_date"/"end_date" — REQUIRED for create_absence (null otherwise): the resolved absence
 period as absolute ISO dates, computed against the current date provided with the batch.
