@@ -21,7 +21,7 @@ const ROUTES = {
     model: BRAIN_MODEL,
     fallback: AGENT_MODEL,
     criteria:
-      "Complex work that needs careful judgment: multi-step tasks chaining several tools, planning, analysis or summaries across many messages, ambiguous or high-stakes requests (anything about clients, money, people's access or deleting things), debugging, writing or reviewing long documents, and reorganising memory. Also requests that need follow-through over time beyond this reply, such as collecting answers from several people, chasing something until it happens or keeping an eye on something for days, and checks of long-running tasks.",
+      "Complex work that needs careful judgment: multi-step tasks chaining several tools, planning, analysis or summaries across many messages, ambiguous or high-stakes requests (anything about clients, money, people's access or deleting things), debugging, writing or reviewing long documents, and reorganising memory. Also requests that need follow-through over time beyond this reply, such as collecting answers from several people, chasing something until it happens or keeping an eye on something for days, checks of long-running tasks, and setting up recurring jobs that do more than send someone a message.",
   },
 } as const;
 

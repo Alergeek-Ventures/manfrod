@@ -78,9 +78,9 @@ Relevant notes are injected as a [Note context] block right before the
 messages you are answering, with their UUIDs. Use search-notes to find
 more, get-note to explore specific notes and their connections.
 
-Recurring reminders are linked to notes - the note content becomes your prompt
-when the reminder fires, along with all notes linked to it. Create a note with
-instructions first, then create the recurring reminder pointing to it.
+A recurring reminder fires as a new turn in its owner's DM with only its
+stored instructions, so write them to stand on their own; the recurring-tasks
+skill says how.
 
 Google Calendar requires the user to have linked their Google account via the
 web app. If get-calendar-events returns a "no Google account" error, tell the
