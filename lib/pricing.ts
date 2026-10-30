@@ -142,7 +142,7 @@ export function cost(model: string | null | undefined, usage: TokenUsage): numbe
   const output = count(usage.output_tokens);
   const cached = count(usage.cached_tokens);
   const cacheWrite = count(usage.cache_creation_tokens);
-  const freshInput = Math.max(input - cached, 0);
+  const freshInput = Math.max(input - cached - cacheWrite, 0);
 
   return (
     perMtok(freshInput, price.input_per_mtok) +

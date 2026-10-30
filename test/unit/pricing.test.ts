@@ -18,6 +18,14 @@ describe("cost", () => {
     expect(cost(GPT, usage)).toBeLessThan(uncachedCost(GPT, usage));
   });
 
+  it("charges cache-write tokens once, at the cache-write rate", () => {
+    expect(cost(HAIKU, { input_tokens: 1_000_000, cache_creation_tokens: 1_000_000 })).toBeCloseTo(0.125, 6);
+    expect(cost(HAIKU, { input_tokens: 1_000_000, cached_tokens: 600_000, cache_creation_tokens: 400_000 })).toBeCloseTo(
+      0.6 * 0.01 + 0.4 * 0.125,
+      6,
+    );
+  });
+
   it("charges the higher cache-write rate only above the threshold", () => {
     expect(cost(GPT, { cache_creation_tokens: 100_000 })).toBeCloseTo(0.1 * 0.125, 6);
     expect(cost(GPT, { cache_creation_tokens: 300_000 })).toBeCloseTo(0.3 * 0.25, 6);
