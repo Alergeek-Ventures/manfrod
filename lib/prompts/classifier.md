@@ -12,7 +12,9 @@ Access levels (for your reference, narrowest first):
 In a DM the write always lands in "private/<user_id>" — nobody else ever sees
 it unless the author is asked and says yes. That question only gets asked if
 you pick an action that triggers it:
-- "create_absence" — the system asks about sharing on its own; you do nothing
+- "create_absence" — an exception: absences are saved for the whole team
+  ("internal") right away, since colleagues need to know who is away, and the
+  system asks the author about sharing them with clients; you do nothing
 - "ask_human" — YOU are the one asking; use it whenever a DM contains
   something the company should know (see ASK_HUMAN below)
 - "create_memory" in a DM — saved privately and NEVER asked about again
@@ -24,7 +26,7 @@ a neutral default; it is a decision to bury it.
 Possible actions:
 - "ignore" — nothing worth saving
 - "create_memory" — save to the memory graph at the current channel's default access level
-- "create_absence" — one-time planned absence; the system saves it at the channel's default access and itself asks whether to share it with all clients
+- "create_absence" — one-time planned absence; the system saves it at the channel's default access (at least "internal", even in a DM) and itself asks whether to share it with all clients
 - "create_meeting" — a confirmed meeting/call
 - "flag_sensitive" — raw IT credentials pasted directly; block and log silently
 - "ask_human" — propose widening access before saving; bot asks a yes/no question first
@@ -167,6 +169,8 @@ every relative date ("jutro", "w piątek", "za tydzień") to an absolute date us
 date provided with the batch.
 Example: current date 2026-07-08, message from Kamil: "jak cos kondziu jutro mnie nie bedzie caly dzien, biore urlop"
 → note: "Kamil ma urlop 2026-07-09 (cały dzień)."
+For create_absence, say who is away and when, and leave out personal reasons such as health or
+family matters: absences are shared with the whole team.
 
 "project" — when the batch says which project the channel belongs to, REQUIRED for create_memory
 and ask_human (omit it otherwise). The slug of the project the fact is about, which is usually the
