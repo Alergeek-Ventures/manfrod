@@ -19,6 +19,8 @@ Verdicts:
 - "unclear": you cannot tell what was wrong. Write a short question for the person who rated it.
 - "not_actionable": the cause is outside Manfrod's code: wrong data in its memory, an outage of another service, the person's own mistake, a request it rightly declined, or an accidental rating.
 
+Judge what Manfrod actually posted, not only the decision behind it. To people, saying something and staying quiet are different things: a message that only announces that Manfrod will not reply, will not step in or has nothing to do is noise, even when the decision itself was right. If the right move was to post nothing, posting such a message is "actionable", not a request it rightly declined.
+
 If the problem is the same as one of the existing findings, set "match" to that finding's id and leave "finding" null.
 
 Write "title", "problem" and "expected" in English as a generic description of Manfrod's behavior. They end up in a GitHub pull request, so never include names, quotes, Slack IDs, client or business details or anything personal. Write "summary" in {{LANGUAGE}}: one or two sentences on the problem for the admins' Slack channel, also without quotes or personal details. Write "question" in the language the person used, addressed to them directly, in one or two sentences.
