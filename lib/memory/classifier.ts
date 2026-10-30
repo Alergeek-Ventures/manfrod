@@ -221,7 +221,9 @@ async function createMemory(result: Result, message: BufferedMessage, batch: Bat
   await createNode(userId, writeAccess, { content: note, embedding, projectId: noteProjectId(batch.projects, batch.projectId, result) });
 }
 
-async function createAbsence(result: Result, message: BufferedMessage, batch: Batch, writeAccess: string[]) {
+async function createAbsence(result: Result, message: BufferedMessage, batch: Batch, messageAccess: string[]) {
+  const fromDm = isPrivate(messageAccess);
+  const writeAccess = fromDm ? ["internal"] : messageAccess;
   const text = message.text ?? "";
   const userName = message.user_name ?? message.user ?? "unknown";
   const userId = authorId(batch, message);
@@ -240,7 +242,7 @@ async function createAbsence(result: Result, message: BufferedMessage, batch: Ba
   }
 
   const key = `absence:${userId ?? userName}:${startDate}`;
-  await setFact(key, `${startDate}..${endDate} — ${absenceDescription(note, text)}`, writeAccess, userId);
+  await setFact(key, `${startDate}..${endDate} — ${fromDm ? note : absenceDescription(note, text)}`, writeAccess, userId);
   if (!userId) return;
 
   const node = await createAbsenceNode(userId, writeAccess, note, batch);
