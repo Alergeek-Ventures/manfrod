@@ -101,6 +101,33 @@ export async function listIssues(authorization: string, teamId: string, limit = 
   return result.ok ? { ok: true, value: result.value.issues.nodes } : result;
 }
 
+export interface ActivityIssue {
+  identifier: string;
+  title: string;
+  state: { name: string } | null;
+  assignee: { name: string } | null;
+  url: string;
+  updatedAt: string;
+  completedAt: string | null;
+}
+
+export interface TeamActivity {
+  key: string;
+  urlKey: string;
+  issues: ActivityIssue[];
+}
+
+export async function teamActivity(authorization: string, teamId: string, since: Date, limit = 50): Promise<LResult<TeamActivity>> {
+  const result = await query(
+    authorization,
+    `query($teamId: String!, $limit: Int!) { team(id: $teamId) { key organization { urlKey } issues(filter: { updatedAt: { gte: "${since.toISOString()}" } }, first: $limit, orderBy: updatedAt) { nodes { ${ISSUE_FIELDS} updatedAt completedAt } } } }`,
+    { teamId, limit },
+  );
+  if (!result.ok) return result;
+  const { team } = result.value;
+  return { ok: true, value: { key: team.key, urlKey: team.organization.urlKey, issues: team.issues.nodes } };
+}
+
 export async function getIssue(authorization: string, teamId: string, identifier: string): Promise<LResult<any | null>> {
   const number = Number.parseInt(identifier.split("-").at(-1) ?? "", 10);
   if (Number.isNaN(number)) return { ok: true, value: null };

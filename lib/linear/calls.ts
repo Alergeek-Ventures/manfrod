@@ -52,6 +52,15 @@ export const listIssues = (projectId: string, limit?: number) =>
     return result.ok ? formatIssues(result.value) : `Nie udało się pobrać issues z Linear: ${result.error}`;
   });
 
+export async function teamActivity(projectId: string, since: Date): Promise<client.TeamActivity | null> {
+  const connection = await getConnection(projectId);
+  if (!connection?.linearTeamId) return null;
+  const auth = await authorization(connection);
+  if (!auth.ok) return null;
+  const result = await client.teamActivity(auth.value, connection.linearTeamId, since);
+  return result.ok ? result.value : null;
+}
+
 export const getIssue = (projectId: string, identifier: string) =>
   withConnection(projectId, async (auth, teamId) => {
     const result = await client.getIssue(auth, teamId, identifier);

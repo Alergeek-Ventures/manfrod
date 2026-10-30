@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import type { BufferedMessage, Node } from "../db/schema.ts";
+import type { BufferedMessage, Node, Project } from "../db/schema.ts";
 import { getUserBySlackId } from "../accounts.ts";
 import { EVENTS, sendEvent } from "../inngest/client.ts";
 import { broadcast } from "../events/index.ts";
@@ -14,6 +14,7 @@ import { embedQuery } from "../voyage.ts";
 import { clientIdForProject, ensureMembership, getActiveMapping, isPrivate, privateLevel } from "./access.ts";
 import { detect, ensureMapping } from "./channel-detector.ts";
 import { createLink, createNode, deleteLinkAs, deleteNodeAs, escalateNoteAccess } from "./nodes.ts";
+import { listProjects } from "./projects.ts";
 import {
   deleteConfirmation,
   getConfirmation,
@@ -42,6 +43,7 @@ interface Batch {
   kind: string;
   writeAccess: string[];
   projectId: string | null;
+  projects: Project[];
   clientId: string | null;
   userIds: Map<string, string>;
 }
@@ -61,6 +63,7 @@ export async function classifyBatch(messages: BufferedMessage[], channelId: stri
     kind: resolveKind(channelId, channelName, writeAccess),
     writeAccess,
     projectId,
+    projects: projectId ? await listProjects() : [],
     clientId: mapping?.clientId ?? (projectId ? await clientIdForProject(projectId) : null),
     userIds,
   });
@@ -101,11 +104,26 @@ async function jevActions(messages: BufferedMessage[], kind: string, today: stri
   );
 }
 
-async function llmResults(messages: BufferedMessage[], kind: string, today: string): Promise<Result[]> {
+export function projectContext(projects: Pick<Project, "id" | "slug" | "name">[], projectId: string | null): string {
+  const own = projects.find((project) => project.id === projectId);
+  if (!own) return "";
+  const others = projects.filter((project) => project.id !== own.id).map((project) => `"${project.slug}" (${project.name})`);
+  return `This channel belongs to project "${own.slug}" (${own.name}). Other projects: ${others.join(", ") || "none"}.\n`;
+}
+
+export function noteProjectId(projects: Pick<Project, "id" | "slug" | "name">[], projectId: string | null, result: Result): string | null {
+  if (!projectId || !("project" in result)) return projectId;
+  const wanted = typeof result.project === "string" ? result.project.trim().toLowerCase() : "";
+  if (wanted === "") return null;
+  return projects.find((project) => project.slug.toLowerCase() === wanted || project.name.toLowerCase() === wanted)?.id ?? null;
+}
+
+async function llmResults(messages: BufferedMessage[], batch: Batch, today: string): Promise<Result[]> {
   if (messages.length === 0) return [];
-  const formatted = messages.map((message, index) => `Message ${index}:\n${formatMessage(message, kind)}`).join("\n---\n");
+  const formatted = messages.map((message, index) => `Message ${index}:\n${formatMessage(message, batch.kind)}`).join("\n---\n");
   const userMessage =
     `Current date: ${today} (${weekdayName(today)}).\n` +
+    projectContext(batch.projects, batch.projectId) +
     `Classify each of the following ${messages.length} message(s). ` +
     `Return a JSON array with exactly ${messages.length} objects in the same order.\n\n` +
     formatted;
@@ -132,7 +150,7 @@ async function doClassifyBatch(messages: BufferedMessage[], batch: Batch) {
   const forLlm = messages.map((_, index) => index).filter((index) => settled[index] === null);
   const llm = await llmResults(
     forLlm.map((index) => messages[index]),
-    kind,
+    batch,
     today,
   );
   if (forLlm.length > 0) log.info(`Classifier [${channelId}] ${messages.length - forLlm.length}/${messages.length} settled by Jev`);
@@ -200,7 +218,7 @@ async function createMemory(result: Result, message: BufferedMessage, batch: Bat
     log.error(`Classifier embed error: ${(error as Error).message}`);
     return;
   }
-  await createNode(userId, writeAccess, { content: note, embedding, projectId: batch.projectId });
+  await createNode(userId, writeAccess, { content: note, embedding, projectId: noteProjectId(batch.projects, batch.projectId, result) });
 }
 
 async function createAbsence(result: Result, message: BufferedMessage, batch: Batch, writeAccess: string[]) {
@@ -247,7 +265,11 @@ async function askHuman(result: Result, message: BufferedMessage, batch: Batch, 
   }
   try {
     const embedding = await embedQuery(note);
-    const node = await createNode(userId, writeAccess, { content: note, embedding, projectId: batch.projectId });
+    const node = await createNode(userId, writeAccess, {
+      content: note,
+      embedding,
+      projectId: noteProjectId(batch.projects, batch.projectId, result),
+    });
     await postEscalationQuestion(batch.channelId, message, node, proposal, writeAccess, lang(result), null);
   } catch (error) {
     log.info(`Classifier ask_human skipped for ${batch.channelId}: ${(error as Error).message}`);

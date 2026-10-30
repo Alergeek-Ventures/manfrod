@@ -14,9 +14,11 @@ import {
   HistoryIcon,
   KeyRoundIcon,
   LanguagesIcon,
+  ListChecksIcon,
   NetworkIcon,
   PalmtreeIcon,
   PlugIcon,
+  SearchCheckIcon,
   SquareKanbanIcon,
   UsersIcon,
 } from "lucide-react";
@@ -47,6 +49,13 @@ const ADMIN_GROUPS: NavGroup[] = [
     items: [
       { title: "Graph", url: "/graph", icon: <NetworkIcon /> },
       { title: "Retrospection", url: "/retrospection", icon: <HistoryIcon /> },
+    ],
+  },
+  {
+    label: "Agent work",
+    items: [
+      { title: "Tasks", url: "/admin/tasks", icon: <ListChecksIcon /> },
+      { title: "Self-review", url: "/admin/self-review", icon: <SearchCheckIcon /> },
     ],
   },
   {

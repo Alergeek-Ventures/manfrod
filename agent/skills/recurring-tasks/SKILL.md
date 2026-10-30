@@ -33,9 +33,13 @@ are stored on the reminder itself.
   before writing the expression.
 - `instructions` — write this as if leaving a note for your future self:
   what to check, what tools to use, what to send and to whom/which channel.
-  Cron-fired turns have no live message to reply to, so if the result should
-  reach someone, say explicitly where (e.g. "send the summary to channel
-  C0123456").
+  Cron-fired turns run in a new thread in the owner's DM, so your reply
+  only reaches them. If the result should reach anyone else, say explicitly
+  where and how: `post-slack-message` for a channel (e.g. "post the summary
+  in channel C0123456"), `send-dm` for one person. If it needs replies
+  collected over the following days, say so: post first, then `create-task`
+  with the `channel` and `thread_ts` of that post, so the checks follow that
+  thread and the wrap-up lands there.
 - `timezone` — omit unless the user names one; defaults to Europe/Warsaw.
 
 Confirm briefly with the schedule in human terms ("OK, codziennie o 8:00").

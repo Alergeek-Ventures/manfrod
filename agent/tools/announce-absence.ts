@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { getUser } from "../../lib/accounts.ts";
-import { channelMembers, post, resolveChannel } from "../../lib/slack/api.ts";
+import { post, resolveChannel } from "../../lib/slack/api.ts";
+import { isChannelMember } from "../lib/slack.ts";
 import { defineManfrodTool } from "../lib/define-tool.ts";
 
 export default defineManfrodTool({
@@ -18,6 +19,8 @@ export default defineManfrodTool({
   async execute({ channels, text }, ctx) {
     const person = await getUser(ctx.userId);
     if (!person) return "Nie wiem, kim jesteś, więc nic nie wysłałem.";
+    if (!text.includes(`<@${person.slackId}>`))
+      return `Nic nie wysłałem: notka o nieobecności musi oznaczać tę osobę jako <@${person.slackId}>. Inne wiadomości na kanał wysyłaj przez post-slack-message.`;
     const results: string[] = [];
     for (const channel of channels) {
       const resolved = await resolveChannel(channel);
@@ -25,7 +28,7 @@ export default defineManfrodTool({
         results.push(`${channel}: nie znalazłem kanału`);
         continue;
       }
-      if (!((await channelMembers(resolved.id)) ?? []).includes(person.slackId)) {
+      if (!(await isChannelMember(resolved.id, person.slackId))) {
         results.push(`${channel}: nie jesteś na tym kanale, pominąłem`);
         continue;
       }
