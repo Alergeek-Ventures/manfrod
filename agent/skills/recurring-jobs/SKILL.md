@@ -1,9 +1,9 @@
 ---
-name: recurring-tasks
-description: Set up, list, change, or cancel tasks that repeat on a schedule ("every day at 8 do X", "every Monday check Y", "stop doing that daily thing"). Use whenever the user wants something done automatically and repeatedly at a time/day, not just once.
+name: recurring-jobs
+description: Set up, list, change, or cancel jobs that repeat on a calendar schedule with no end ("every day at 8 send me X", "every Friday ask the team for Y", "stop doing that daily thing"). Use whenever the user wants something done automatically at fixed times, not once and not until some goal is reached.
 ---
 
-# Recurring tasks
+# Recurring jobs
 
 These are user-owned cron jobs (`create-recurring-reminder` /
 `list-recurring-reminders` / `update-recurring-reminder` /
@@ -17,10 +17,17 @@ If the user wants a single one-off nudge at a specific moment instead
 ("przypomnij mi jutro o 10 o spotkaniu") → that's `set-reminder`
 / `list-reminders` / `cancel-reminder`, not this.
 
+A recurring job never ends on its own and each run knows nothing about the
+previous ones. Something that should stop once a goal is reached ("check
+every day until the client answers", "chase everyone until they reply") is a
+long-running task (`create-task`), not this. Both together are common: a job
+that every Friday asks a channel for something and starts a task to collect
+the answers.
+
 ## Setting one up
 
-User says "codziennie o 8 rób X", "w każdy poniedziałek sprawdź Y", "raz w
-tygodniu przygotuj Z" → call `create-recurring-reminder` directly, in the
+User says "codziennie o 8 rób X", "w każdy poniedziałek przygotuj Y", "raz w
+tygodniu zbierz Z" → call `create-recurring-reminder` directly, in the
 same turn. You do NOT need to call `create-note` first — the instructions
 are stored on the reminder itself.
 
