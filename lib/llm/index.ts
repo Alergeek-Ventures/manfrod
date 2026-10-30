@@ -8,7 +8,7 @@ export const PRIMARY_MODEL = "openai/gpt-5.6-luna";
 export const FAST_MODEL = "anthropic/claude-haiku-5.5";
 export const BRAIN_MODEL = "anthropic/claude-opus-5.5";
 export const AGENT_MODEL = "anthropic/claude-sonnet-5.5";
-export const MEMORY_MODEL = AGENT_MODEL;
+export const MEMORY_MODEL = PRIMARY_MODEL;
 
 interface ChainEntry {
   provider: "openrouter";
@@ -21,7 +21,10 @@ export const FALLBACK_CHAIN: ChainEntry[] = [
   { provider: "openrouter", model: FAST_MODEL, tier: "paid" },
 ];
 
-export const MEMORY_CHAIN: ChainEntry[] = [{ provider: "openrouter", model: MEMORY_MODEL, tier: "paid" }, ...FALLBACK_CHAIN];
+export const MEMORY_CHAIN: ChainEntry[] = [
+  { provider: "openrouter", model: MEMORY_MODEL, tier: "paid" },
+  ...FALLBACK_CHAIN.filter((entry) => entry.model !== MEMORY_MODEL),
+];
 
 const TIMEOUT_MS = 180_000;
 const MAX_RETRIES = 3;
@@ -122,14 +125,21 @@ type GenerateResult = Awaited<ReturnType<typeof aiGenerateText>>;
 
 const CACHE_BREAKPOINT = { openrouter: { cacheControl: { type: "ephemeral" } } };
 
+function withBreakpoint(message: ModelMessage): ModelMessage {
+  if (message.role !== "tool") return { ...message, providerOptions: { ...message.providerOptions, ...CACHE_BREAKPOINT } } as ModelMessage;
+  const last = message.content.findLastIndex((part) => part.type === "tool-result");
+  return {
+    ...message,
+    content: message.content.map((part, index) =>
+      index === last && part.type === "tool-result" ? { ...part, providerOptions: { ...part.providerOptions, ...CACHE_BREAKPOINT } } : part,
+    ),
+  };
+}
+
 export function withCacheBreakpoints(modelId: string, messages: ModelMessage[]): ModelMessage[] {
   if (!modelId.startsWith("anthropic/") || messages.length === 0) return messages;
   const firstSystem = messages.findIndex((message) => message.role === "system");
-  return messages.map((message, index) =>
-    index === firstSystem || index === messages.length - 1
-      ? ({ ...message, providerOptions: { ...message.providerOptions, ...CACHE_BREAKPOINT } } as ModelMessage)
-      : message,
-  );
+  return messages.map((message, index) => (index === firstSystem || index === messages.length - 1 ? withBreakpoint(message) : message));
 }
 
 async function callOnce(entry: ChainEntry, messages: ModelMessage[], options: GenerateOptions): Promise<GenerateResult> {

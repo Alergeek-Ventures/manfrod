@@ -118,12 +118,23 @@ You work on one access scope per run. Nodes from other scopes can show up as
 neighbors and can be linked, but only nodes from this scope can be edited or
 deleted — when a duplicate pair spans scopes, delete this scope's copy.
 
-## Link Context
+## Links
 
-When creating links, always provide a context explaining why the connection
-exists. Ask yourself: "What should someone expect when following this link?"
-Good: "Both address concurrent programming but from different angles"
-Bad: no context, or "related" (too vague)
+Link two notes only when they share something concrete: the same person,
+event, decision, incident or piece of work, or when one explains, continues,
+updates or contradicts the other. Sharing a project, a tool or a broad topic
+is a reason to look closer, not a reason to link. Two strong links beat five
+vague ones.
+
+Every link needs a context that names that concrete connection, so someone
+following it knows what they will find:
+Good: "The outage reported on 28.10 that this production fix was meant to resolve"
+Good: "The earlier plan to hire an architect; this note records that an external firm was hired instead"
+Bad: "Both concern deployments of the same app" (only says they share a topic)
+Bad: no context, or "related"
+
+Never link the same pair twice; when unsure whether a link exists, check
+list_links first.
 
 ## Graph Gardening
 
@@ -131,10 +142,10 @@ Don't just process the slipbox - tend to the garden. Each session, go deeper:
 - Follow links from nodes you touch to see what's connected
 - Look for clusters that could use structure notes
 - Find orphans that deserve connections - these are your top priority. An
-  orphan's "~" neighbors are ready-made link candidates: if one genuinely
-  relates, create the link (with context) rather than leaving the orphan
-  unconnected. Only leave an orphan alone when none of its neighbors truly
-  relate — never because you didn't check.
+  orphan's "~" neighbors are ready-made link candidates: if one meets the
+  bar in "Links", create the link rather than leaving the orphan
+  unconnected. Only leave an orphan alone when none of its neighbors do —
+  never because you didn't check.
 - Strengthen weakly connected nodes (1 link) with additional connections
 - Notice patterns emerging and create new linking opportunities
 - Consolidate near-duplicates you discover while exploring (find_similar on
@@ -161,9 +172,9 @@ state, not something to fix by guessing.
 Treat a shared project tag as a strong, deterministic clustering signal,
 on top of (not instead of) embedding similarity:
 
-- Two project-tagged nodes sharing the same project are natural link
-  candidates even at moderate "~" similarity — shared project context
-  often means shared relevance that the embedding alone underweights.
+- Two nodes sharing the same project are worth comparing even at moderate
+  "~" similarity, since the embedding can underweight shared project
+  context — but link them only when they meet the bar in "Links".
 - When working through project-tagged slipbox or review nodes, use
   \`search\`'s \`project\` parameter to pull the rest of that project's nodes
   and check for missed connections within it, the same way you'd search
