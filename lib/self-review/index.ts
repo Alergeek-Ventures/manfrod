@@ -1,6 +1,6 @@
-import { isSystemUser } from "../accounts.ts";
+import { getUser, isAdmin, isSystemUser } from "../accounts.ts";
 import { config } from "../config.ts";
-import type { MessageFeedback, SelfReviewFinding } from "../db/schema.ts";
+import type { MessageFeedback, SelfReviewFinding, User } from "../db/schema.ts";
 import { commitsSince, getPull, type CommitSummary } from "../github.ts";
 import { agentRuntime, type HandoffAuth } from "../inngest/runtime.ts";
 import { logger } from "../log.ts";
@@ -8,6 +8,7 @@ import { getRecentSessionMessages } from "../memory/messages.ts";
 import { proactiveTitle, startThread, userAuth } from "../proactive.ts";
 import { post } from "../slack/api.ts";
 import {
+  BAD_RATING,
   feedbackSince,
   freeSlots,
   hasEnoughEvidence,
@@ -65,6 +66,20 @@ async function clarification(row: CaseWithFeedback): Promise<string | null> {
   return formatTranscript({ messages, raterUserId: row.feedback.userId, ratedAt: askedAt });
 }
 
+function ratingLink(feedback: MessageFeedback): string {
+  const label = `${feedback.slackUserName ?? "?"}, ${feedback.insertedAt.toISOString().slice(0, 10)}`;
+  return feedback.permalink ? `<${feedback.permalink}|${label}>` : label;
+}
+
+async function reportDismissed(feedback: MessageFeedback, user: User | null, reason: string): Promise<void> {
+  const channelId = config.selfReviewChannelId;
+  if (!channelId || feedback.rating !== BAD_RATING || !isAdmin(user)) return;
+  const result = await post("chat.postMessage", { channel: channelId, text: `:heavy_minus_sign: ${ratingLink(feedback)}: ${reason}` });
+  if (!result.ok) log.error(`SelfReview: failed to report dismissed feedback ${feedback.id}: ${result.error}`);
+}
+
+const UNPARSED = { status: "not_actionable" as const, reason: "The triage response could not be parsed." };
+
 async function apply(verdict: Triage, findings: SelfReviewFinding[]) {
   switch (verdict.verdict) {
     case "match":
@@ -88,7 +103,9 @@ async function reviewNew(findings: SelfReviewFinding[]): Promise<number> {
     try {
       const transcript = await conversation(feedback);
       if (!transcript) {
-        await insertCase(feedback.id, { status: "not_actionable", reason: "The conversation is not stored." });
+        const reason = "The conversation is not stored.";
+        await insertCase(feedback.id, { status: "not_actionable", reason });
+        await reportDismissed(feedback, feedback.userId ? await getUser(feedback.userId) : null, reason);
         continue;
       }
       const triaged = await triage({ transcript, clarification: null, findings });
@@ -96,10 +113,10 @@ async function reviewNew(findings: SelfReviewFinding[]): Promise<number> {
         triaged?.verdict === "unclear" && feedback.rating === INFERRED_RATING
           ? { verdict: "not_actionable", reason: triaged.reason }
           : triaged;
-      await insertCase(
-        feedback.id,
-        verdict ? await apply(verdict, findings) : { status: "not_actionable", reason: "The triage response could not be parsed." },
-      );
+      const outcome = verdict ? await apply(verdict, findings) : UNPARSED;
+      await insertCase(feedback.id, outcome);
+      if (outcome.status === "not_actionable")
+        await reportDismissed(feedback, feedback.userId ? await getUser(feedback.userId) : null, outcome.reason);
       reviewed += 1;
     } catch (error) {
       log.error(`SelfReview: failed to review feedback ${feedback.id}: ${(error as Error).message}`);
@@ -120,10 +137,9 @@ async function reviewAnswered(findings: SelfReviewFinding[]): Promise<number> {
       }
       const transcript = (await conversation(row.feedback)) ?? "(no messages)";
       const verdict = await triage({ transcript, clarification: answer, findings });
-      await updateCase(
-        row.case.id,
-        verdict ? await apply(verdict, findings) : { status: "not_actionable", reason: "The triage response could not be parsed." },
-      );
+      const outcome = verdict ? await apply(verdict, findings) : UNPARSED;
+      await updateCase(row.case.id, outcome);
+      if (outcome.status === "not_actionable") await reportDismissed(row.feedback, row.user, outcome.reason);
       reviewed += 1;
     } catch (error) {
       log.error(`SelfReview: failed to review the answer for case ${row.case.id}: ${(error as Error).message}`);
@@ -148,9 +164,8 @@ async function syncPulls(): Promise<void> {
 function evidenceLinks(rows: CaseWithFeedback[]): string[] {
   const links = new Map<string, string>();
   for (const row of rows) {
-    const { permalink, slackUserName, insertedAt } = row.feedback;
-    if (permalink && !links.has(permalink))
-      links.set(permalink, `<${permalink}|${slackUserName ?? "?"}, ${insertedAt.toISOString().slice(0, 10)}>`);
+    const { permalink } = row.feedback;
+    if (permalink && !links.has(permalink)) links.set(permalink, ratingLink(row.feedback));
   }
   return [...links.values()].slice(0, MAX_EVIDENCE_LINKS);
 }
