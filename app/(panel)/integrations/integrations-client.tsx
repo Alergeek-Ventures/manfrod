@@ -1,19 +1,21 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { CalendarIcon, PlusIcon } from "lucide-react";
+import { CalendarIcon, PlusIcon, SlidersHorizontalIcon } from "lucide-react";
 import { toast } from "sonner";
 import { ConfirmAction } from "@/components/confirm-action";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Field, FieldContent, FieldDescription, FieldGroup, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { authClient } from "@/lib/auth-client";
 import type { CalendarStatus } from "@/lib/google.ts";
+import type { ChannelAudience } from "@/lib/memory/access.ts";
 import {
   addCustomProvider,
   disconnectProvider,
@@ -21,6 +23,7 @@ import {
   kalafiorniaSendPin,
   kalafiorniaVerifyPin,
   removeCustomProvider,
+  updateCustomProviderAvailability,
   type ActionResult,
 } from "./actions.ts";
 
@@ -30,7 +33,31 @@ interface ProviderView {
   mock: boolean;
   logoUrl: string | null;
   custom: boolean;
+  availability: ChannelAudience[];
 }
+
+const AUDIENCES: { value: ChannelAudience; label: string; short: string; description: string }[] = [
+  { value: "dm", label: "Direct messages", short: "DMs", description: "Your DMs with Manfrod." },
+  {
+    value: "internal",
+    label: "Internal channels",
+    short: "Internal",
+    description: "The team's own channels, including internal project channels.",
+  },
+  {
+    value: "external",
+    label: "Client channels",
+    short: "Client",
+    description: "Channels shared with a client. The client sees whatever Manfrod posts there.",
+  },
+];
+
+const DEFAULT_AVAILABILITY: ChannelAudience[] = ["dm", "internal"];
+
+const availabilitySummary = (availability: ChannelAudience[]) =>
+  AUDIENCES.filter((audience) => availability.includes(audience.value))
+    .map((audience) => audience.short)
+    .join(" · ");
 
 type Run = (action: () => Promise<ActionResult>, onSuccess?: () => void) => void;
 
@@ -51,16 +78,96 @@ function StatusBadge({ status, mock }: { status: string | undefined; mock: boole
   return <Badge variant="outline">Not connected</Badge>;
 }
 
+function AvailabilityField({
+  idPrefix,
+  value,
+  onChange,
+}: {
+  idPrefix: string;
+  value: ChannelAudience[];
+  onChange: (value: ChannelAudience[]) => void;
+}) {
+  return (
+    <FieldSet>
+      <FieldLegend variant="label">Available in</FieldLegend>
+      <FieldDescription>
+        Manfrod uses this server only where you write to it. Everyone in the conversation sees replies built from its data.
+      </FieldDescription>
+      <FieldGroup data-slot="checkbox-group">
+        {AUDIENCES.map((audience) => (
+          <Field key={audience.value} orientation="horizontal">
+            <Checkbox
+              id={`${idPrefix}-${audience.value}`}
+              checked={value.includes(audience.value)}
+              onCheckedChange={(checked) =>
+                onChange(checked ? [...value, audience.value] : value.filter((current) => current !== audience.value))
+              }
+            />
+            <FieldContent>
+              <FieldLabel htmlFor={`${idPrefix}-${audience.value}`}>{audience.label}</FieldLabel>
+              <FieldDescription>{audience.description}</FieldDescription>
+            </FieldContent>
+          </Field>
+        ))}
+      </FieldGroup>
+    </FieldSet>
+  );
+}
+
+function AvailabilityDialog({ provider, run, pending }: { provider: ProviderView; run: Run; pending: boolean }) {
+  const [open, setOpen] = useState(false);
+  const [availability, setAvailability] = useState(provider.availability);
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (next) setAvailability(provider.availability);
+        setOpen(next);
+      }}
+    >
+      <DialogTrigger render={<Button size="icon-sm" variant="ghost" aria-label="Availability" title="Availability" />}>
+        <SlidersHorizontalIcon />
+      </DialogTrigger>
+      <DialogContent>
+        <form
+          className="flex flex-col gap-6"
+          onSubmit={(event) => {
+            event.preventDefault();
+            run(
+              () => updateCustomProviderAvailability(provider.id, availability),
+              () => setOpen(false),
+            );
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>{provider.name} availability</DialogTitle>
+            <DialogDescription>Choose where Manfrod can use this server for you.</DialogDescription>
+          </DialogHeader>
+          <AvailabilityField idPrefix={`mcp-${provider.id}`} value={availability} onChange={setAvailability} />
+          <DialogFooter>
+            <Button type="submit" disabled={pending || availability.length === 0}>
+              {pending && <Spinner data-icon="inline-start" />}
+              Save
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function ProviderCard({
   provider,
   status,
   deletable,
   run,
+  pending,
 }: {
   provider: ProviderView;
   status: string | undefined;
   deletable: boolean;
   run: Run;
+  pending: boolean;
 }) {
   const active = status === "connected" || status === "expired";
   return (
@@ -69,7 +176,9 @@ function ProviderCard({
         <ProviderLogo provider={provider} />
         <div className="flex min-w-0 flex-col gap-1">
           <CardTitle className="truncate">{provider.name}</CardTitle>
-          <CardDescription className="truncate">{provider.custom ? "Custom MCP server" : "MCP server"}</CardDescription>
+          <CardDescription className="truncate">
+            {provider.custom ? availabilitySummary(provider.availability) || "Not available anywhere" : "MCP server"}
+          </CardDescription>
         </div>
         <CardAction className="ml-auto shrink-0">
           <StatusBadge status={status} mock={provider.mock} />
@@ -95,7 +204,8 @@ function ProviderCard({
             />
           )}
           {deletable && (
-            <div className="ml-auto">
+            <div className="ml-auto flex gap-1">
+              <AvailabilityDialog provider={provider} run={run} pending={pending} />
               <ConfirmAction
                 label="Remove"
                 title={`Remove ${provider.name}?`}
@@ -116,6 +226,7 @@ function AddProviderDialog({ run, pending }: { run: Run; pending: boolean }) {
   const [url, setUrl] = useState("");
   const [name, setName] = useState("");
   const [scope, setScope] = useState("");
+  const [availability, setAvailability] = useState(DEFAULT_AVAILABILITY);
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger render={<Button variant="outline" className="h-full min-h-24 border-dashed" />}>
@@ -128,12 +239,13 @@ function AddProviderDialog({ run, pending }: { run: Run; pending: boolean }) {
           onSubmit={(event) => {
             event.preventDefault();
             run(
-              () => addCustomProvider(url, name, scope),
+              () => addCustomProvider(url, name, scope, availability),
               () => {
                 setOpen(false);
                 setUrl("");
                 setName("");
                 setScope("");
+                setAvailability(DEFAULT_AVAILABILITY);
               },
             );
           }}
@@ -165,9 +277,10 @@ function AddProviderDialog({ run, pending }: { run: Run; pending: boolean }) {
               <Input id="mcp-scope" placeholder="e.g. mcp read write" value={scope} onChange={(event) => setScope(event.target.value)} />
               <FieldDescription>Optional — only if the server requires specific scopes.</FieldDescription>
             </Field>
+            <AvailabilityField idPrefix="mcp-new" value={availability} onChange={setAvailability} />
           </FieldGroup>
           <DialogFooter>
-            <Button type="submit" disabled={pending || url === ""}>
+            <Button type="submit" disabled={pending || url === "" || availability.length === 0}>
               {pending && <Spinner data-icon="inline-start" />}
               Add
             </Button>
@@ -380,7 +493,14 @@ export function IntegrationsClient({
         <SectionTitle title="MCP · Built-in" />
         <div className="grid grid-cols-1 gap-4 @xl/main:grid-cols-2 @4xl/main:grid-cols-3">
           {builtin.map((provider) => (
-            <ProviderCard key={provider.id} provider={provider} status={connections[provider.id]} deletable={false} run={run} />
+            <ProviderCard
+              key={provider.id}
+              provider={provider}
+              status={connections[provider.id]}
+              deletable={false}
+              run={run}
+              pending={pending}
+            />
           ))}
         </div>
       </section>
@@ -388,7 +508,7 @@ export function IntegrationsClient({
         <SectionTitle title="MCP · Custom" description="Add any MCP server by URL." />
         <div className="grid grid-cols-1 gap-4 @xl/main:grid-cols-2 @4xl/main:grid-cols-3">
           {custom.map((provider) => (
-            <ProviderCard key={provider.id} provider={provider} status={connections[provider.id]} deletable run={run} />
+            <ProviderCard key={provider.id} provider={provider} status={connections[provider.id]} deletable run={run} pending={pending} />
           ))}
           <AddProviderDialog run={run} pending={pending} />
         </div>

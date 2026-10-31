@@ -1,6 +1,7 @@
 import { defineDynamic, defineTool } from "eve/tools";
 import { z } from "zod";
 import { callUserMcpTool, listUserMcpTools } from "../../lib/mcp/tools.ts";
+import { channelAudience } from "../../lib/memory/access.ts";
 import { getConnection } from "../../lib/linear/index.ts";
 import { runWithSecrets } from "../../lib/secrets.ts";
 import {
@@ -48,7 +49,7 @@ export default defineDynamic({
       const entries: Record<string, any> = {};
 
       if (userId) {
-        for (const remote of await listUserMcpTools(userId)) {
+        for (const remote of await listUserMcpTools(userId, await channelAudience(msgCtx.channel))) {
           const toolName = remote.name;
           const providerId = remote.providerId;
           const remoteName = remote.remoteName;

@@ -1,6 +1,6 @@
 import { inArray } from "drizzle-orm";
 import { db, tables } from "./db/index.ts";
-import { getActiveMapping } from "./memory/access.ts";
+import { channelAudience } from "./memory/access.ts";
 
 const { agentSettings } = tables;
 const CACHE_MS = 60_000;
@@ -55,8 +55,7 @@ export async function setLanguages(languages: Record<Audience, LanguageCode>, us
 
 export async function channelLanguage(channelId: string | null): Promise<{ audience: Audience; name: string }> {
   const languages = await languageSettings();
-  const external = channelId !== null && !channelId.startsWith("D") && Boolean((await getActiveMapping(channelId))?.clientId);
-  const audience: Audience = external ? "external" : "internal";
+  const audience: Audience = (await channelAudience(channelId)) === "external" ? "external" : "internal";
   return { audience, name: LANGUAGES[languages[audience]] };
 }
 

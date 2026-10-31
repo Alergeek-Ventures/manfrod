@@ -164,6 +164,7 @@ export const mcpCustomProviders = pgTable("mcp_custom_providers", {
 	insertedAt: timestamp("inserted_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
 	updatedAt: timestamp("updated_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
 	scope: text(),
+	availability: text().array().default(sql`ARRAY['dm'::text, 'internal'::text, 'external'::text]`).notNull(),
 }, (table) => [
 	index().using("btree", table.userId.asc().nullsLast().op("uuid_ops")),
 ]);
