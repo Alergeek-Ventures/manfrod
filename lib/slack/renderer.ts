@@ -10,7 +10,7 @@ import { feedbackBlock, feedbackChunk } from "./feedback.ts";
 import { fromMarkdown, toBlocks } from "./mrkdwn.ts";
 import { lastUserContent } from "./routing.ts";
 import { TtlMap, shared } from "./state.ts";
-import { ensureStream, getStream, type Recipient } from "./stream.ts";
+import { ensureStream, getStream, isSilentReply, type Recipient } from "./stream.ts";
 
 const log = logger("Slack.ActivityHandler");
 const PROVISIONAL_PLAN_TITLE = "Pracuję nad tym";
@@ -113,6 +113,11 @@ async function deliverFinal(where: Where, rawContent: string) {
   if ((skill || where.tool.kind === TASK_KIND) && isEmptyReply(content)) {
     await stream?.abort();
     if (where.tool.kind === "skill_user" && where.threadTs) await deleteMessage(where.channel, where.threadTs);
+    return;
+  }
+
+  if (isSilentReply(content)) {
+    await stream?.discard();
     return;
   }
 
