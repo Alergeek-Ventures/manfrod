@@ -17,6 +17,7 @@ export const nodes = pgTable("nodes", {
 	userId: uuid("user_id").notNull(),
 	access: varchar({ length: 255 }).array().default(sql`ARRAY['internal']::varchar[]`).notNull(),
 	projectId: uuid("project_id"),
+	timeCheckedAt: timestamp("time_checked_at", { mode: 'date' }),
 }, (table) => [
 	index("nodes_access_gin_idx").using("gin", table.access.asc().nullsLast().op("array_ops")),
 	index("nodes_bm25_idx").using("bm25", table.id.asc().nullsLast().op("anyelement_bm25_ops"), table.content.asc().nullsLast().op("anyelement_bm25_ops"), table.userId.asc().nullsLast().op("anyelement_bm25_ops"), table.access.asc().nullsLast().op("anyelement_bm25_ops")).with({key_field: "id"}),

@@ -3,6 +3,7 @@ import { experimental_decide as decide, type ModelMessage } from "ai";
 import { config } from "../config.ts";
 import { AGENT_MODEL, BRAIN_MODEL, openrouterProvider } from "../llm/index.ts";
 import { logger } from "../log.ts";
+import { TIME_NOTE_HEADER } from "./prompts.ts";
 
 const log = logger("ModelRouter");
 
@@ -53,7 +54,7 @@ function transcript(messages: readonly ModelMessage[]): string {
   return messages
     .filter((message) => message.role === "user" || message.role === "assistant")
     .map((message) => ({ role: message.role, content: text(message) }))
-    .filter((message) => message.content !== "")
+    .filter((message) => message.content !== "" && !message.content.startsWith(TIME_NOTE_HEADER))
     .slice(-TRANSCRIPT_MESSAGES)
     .map((message) => `${message.role === "user" ? "User" : "Manfrod"}: ${message.content.slice(-MESSAGE_LIMIT)}`)
     .join("\n");

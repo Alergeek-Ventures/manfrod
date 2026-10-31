@@ -34,6 +34,7 @@ import {
   listProcessedAccessBuckets,
   listSlipboxAccessBuckets,
   markProcessedAccessible,
+  markTimeChecked,
   projectNames,
   soulNodeIds,
   updateNodeAccessible,
@@ -45,6 +46,7 @@ const { nodes, links } = tables;
 const log = logger("Retrospector");
 
 const TIME_BOUND_BUDGET = 40;
+const GRAPH_REVIEW_BUDGET = 40;
 const ABSENCE_GRACE_DAYS = 7;
 const NEIGHBOR_LIMIT = 3;
 const NEIGHBOR_MAX_DISTANCE = 0.5;
@@ -240,7 +242,6 @@ type Kind = "slipbox_drain" | "graph_review";
 
 export interface ProcessOptions {
   batchSize?: number;
-  reviewBudget?: number;
   maxBatches?: number;
 }
 
@@ -270,7 +271,7 @@ export async function processAllBuckets(opts: ProcessOptions = {}): Promise<void
 export async function reviewProcessedGraph(opts: { reviewBudget?: number } = {}): Promise<void> {
   await mergeExactDuplicates();
   await prunePastAbsences();
-  const budget = opts.reviewBudget ?? 100;
+  const budget = opts.reviewBudget ?? GRAPH_REVIEW_BUDGET;
   const buckets = await listProcessedAccessBuckets();
   if (buckets.length === 0) {
     log.debug("Retrospector: no processed nodes in any access bucket");
@@ -299,7 +300,18 @@ export async function reviewProcessedGraph(opts: { reviewBudget?: number } = {})
     const reviewSample = healthy ? [] : await buildReviewSample(bucket, budget);
     if (reviewSample.length === 0 && timeBound.length === 0) continue;
     const stopWhenHealthy = timeBound.length === 0 ? () => graphHealthy(bucket) : undefined;
-    await runAgent(userId, bucketReadableLevels(bucket), bucket, [], reviewSample, "graph_review", timeBound, runBudget, stopWhenHealthy);
+    const reviewed = await runAgent(
+      userId,
+      bucketReadableLevels(bucket),
+      bucket,
+      [],
+      reviewSample,
+      "graph_review",
+      timeBound,
+      runBudget,
+      stopWhenHealthy,
+    );
+    if (reviewed) await markTimeChecked(timeBound.map((node) => node.id));
   }
 }
 
@@ -400,7 +412,6 @@ async function processBucket(
   budget: RunBudget,
 ): Promise<void> {
   const batchSize = opts.batchSize ?? 20;
-  const reviewBudget = opts.reviewBudget ?? 25;
   const maxBatches = opts.maxBatches ?? 5;
 
   for (let batchNo = 1; ; batchNo += 1) {
@@ -417,9 +428,8 @@ async function processBucket(
     }
     log.info(`Retrospector: batch ${batchNo}/${maxBatches} — ${slipbox.length} slipbox nodes for bucket ${JSON.stringify(writeAccess)}`);
 
-    const reviewSample = await buildReviewSample(writeAccess, reviewBudget);
     const batchIds = slipbox.map((node) => node.id);
-    if (!(await runAgent(userId, readableLevels, writeAccess, slipbox, reviewSample, "slipbox_drain", [], budget))) return;
+    if (!(await runAgent(userId, readableLevels, writeAccess, slipbox, [], "slipbox_drain", [], budget))) return;
     if ((await unprocessedCount(batchIds)) >= batchIds.length) {
       log.warn(`Retrospector: batch ${batchNo} made no slipbox progress for bucket ${JSON.stringify(writeAccess)}, stopping`);
       return;
