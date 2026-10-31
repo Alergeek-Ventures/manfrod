@@ -167,7 +167,8 @@ export type NodeUpdate = Partial<Pick<Node, "content" | "embedding" | "projectId
 
 async function applyUpdate(node: Node, attrs: NodeUpdate, eventUserId: string | null): Promise<Node> {
   validateNode(attrs.content, attrs.access);
-  const [updated] = await db.update(nodes).set(attrs).where(eq(nodes.id, node.id)).returning();
+  const changes = attrs.content === undefined ? attrs : { ...attrs, timeCheckedAt: null };
+  const [updated] = await db.update(nodes).set(changes).where(eq(nodes.id, node.id)).returning();
   emit("memory_node_updated", {
     userId: eventUserId,
     source: "memory",
@@ -336,8 +337,11 @@ export async function getRandomNodesByAccess(access: string[], limit = 10): Prom
 
 const TIME_BOUND_PATTERN = String.raw`\d{4}-\d{2}-\d{2}|\m\d{1,2}[./]\d{1,2}\M|\m(jutr\w*|pojutrze|dzisiaj|dziś|wczoraj|tomorrow|today|yesterday|urlop\w*|wolne\w*|spotkani\w*|deadline\w*|termin(ie|u|y|ów|em)?|poniedział\w*|wtor\w*|środ(a|y|ę|ą|zie)|czwart\w*|piąt\w*|sobot\w*|niedziel\w*|stycz\w*|lut(y|ego|ym)|marz(ec|cu)|marc[au]|kwie\w*|maj[au]?|czerw(iec|ca|cu)|lip(iec|ca|cu)|sierp\w*|wrze[sś]\w*|październik\w*|listopad\w*|grud\w*|january|february|april|june|july|august|september|october|november|december|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\M`;
 
+const TIME_RECHECK_DAYS = 7;
+
 export async function getTimeBoundNodesByAccess(access: string[], opts: { limit?: number; minAgeDays?: number } = {}): Promise<Node[]> {
   const cutoff = new Date(Date.now() - (opts.minAgeDays ?? 1) * 86_400_000);
+  const recheckAfter = new Date(Date.now() - TIME_RECHECK_DAYS * 86_400_000);
   const souls = db.select({ id: users.soulNodeId }).from(users).where(isNotNull(users.soulNodeId));
   return db
     .select()
@@ -349,10 +353,16 @@ export async function getTimeBoundNodesByAccess(access: string[], opts: { limit?
         lt(nodes.insertedAt, cutoff),
         sql`${nodes.content} ~* ${TIME_BOUND_PATTERN}`,
         notInArray(nodes.id, souls),
+        or(isNull(nodes.timeCheckedAt), lt(nodes.timeCheckedAt, recheckAfter)),
       ),
     )
-    .orderBy(sql`RANDOM()`)
+    .orderBy(sql`${nodes.timeCheckedAt} NULLS FIRST`, sql`RANDOM()`)
     .limit(opts.limit ?? 40);
+}
+
+export async function markTimeChecked(nodeIds: string[]): Promise<void> {
+  if (nodeIds.length === 0) return;
+  await db.update(nodes).set({ timeCheckedAt: nowSeconds() }).where(inArray(nodes.id, nodeIds));
 }
 
 export interface GraphStats {

@@ -1,4 +1,6 @@
-export const SYSTEM_PROMPT = `Current date, time, and timezone are provided in the [Current Context] section.
+export const TIME_NOTE_HEADER = "[Current Time]";
+
+export const SYSTEM_PROMPT = `Current date, time, and timezone are provided in the latest [Current Time] note.
 Use them for scheduling reminders and interpreting relative time references like
 "tomorrow", "next Monday", etc. All reminder times should be in UTC (ISO8601).
 

@@ -5,7 +5,7 @@ import { getSoulAnchor, type SoulAnchor } from "../memory/nodes.ts";
 import { secretsPrompt } from "../secrets.ts";
 import { tasksPrompt } from "../tasks/index.ts";
 import { localIsoWithOffset, isoWeek, localToday, offsetMinutes, weekdayName, zoneAbbreviation, TIMEZONE } from "../time.ts";
-import { SOUL_BASE_PROMPT, SOUL_ONBOARDING_PROMPT, SYSTEM_PROMPT } from "./prompts.ts";
+import { SOUL_BASE_PROMPT, SOUL_ONBOARDING_PROMPT, SYSTEM_PROMPT, TIME_NOTE_HEADER } from "./prompts.ts";
 
 function soulContext({ soul, linked, more }: SoulAnchor): string {
   const sections = [`[Soul - Entrypoint to your notes graph]\n${soul.content}\n`];
@@ -28,6 +28,8 @@ Week: ${isoWeek(today)} of ${today.slice(0, 4)}
 Timezone: ${TIMEZONE} (${zoneAbbreviation(now)}, UTC${offset >= 0 ? "+" : "-"}${Math.abs(offset)})`;
 }
 
+export const timeNote = () => `${TIME_NOTE_HEADER}\n${nowLine()}`;
+
 async function currentContext(userId: string, sessionKey: string | null): Promise<string> {
   let userLine = "";
   if (sessionKey && !isDmSession(sessionKey)) {
@@ -39,7 +41,7 @@ async function currentContext(userId: string, sessionKey: string | null): Promis
     const user = await getUser(userId);
     if (user?.name) userLine = `\nUser: ${user.name}`;
   }
-  return `[Current Context]\n${nowLine()}${userLine}`.trim();
+  return userLine === "" ? "" : `[Current Context]${userLine}`;
 }
 
 export async function buildSystemPrompt(userId: string, sessionKey: string | null, readableLevels: string[]): Promise<string> {
@@ -52,7 +54,8 @@ export async function buildSystemPrompt(userId: string, sessionKey: string | nul
   const secrets = await secretsPrompt(userId);
   const language = await languageInstructions(sessionKey?.split(":")[0] ?? null);
   const tasks = await tasksPrompt(sessionKey);
-  return `${base}\n\n${await currentContext(userId, sessionKey)}\n\n${language}${secrets ? `\n\n${secrets}` : ""}${tasks ? `\n\n${tasks}` : ""}`;
+  const context = await currentContext(userId, sessionKey);
+  return `${base}\n\n${context ? `${context}\n\n` : ""}${language}${secrets ? `\n\n${secrets}` : ""}${tasks ? `\n\n${tasks}` : ""}`;
 }
 
 export async function skillRunnerPrompt(channelId: string | null, userId: string | null): Promise<string> {
@@ -60,7 +63,7 @@ export async function skillRunnerPrompt(channelId: string | null, userId: string
   const language = await languageInstructions(channelId);
   return `You're running autonomously on a schedule — no one is watching this
 conversation live, so don't narrate or ask questions, just act. Follow
-the instructions in the next message using your tools. When you're
+the instructions in the latest message using your tools. When you're
 done, reply with a short confirmation (1 sentence) — it gets posted to
 the target Slack channel exactly like a normal reply.
 
@@ -69,10 +72,6 @@ case (e.g. "if X, don't report anything"), call no-reply instead of
 replying, so nothing is posted to Slack. Only use it when the
 instructions actually call for staying silent; otherwise reply
 normally.
-
-[Current Context]
-Now: ${localIsoWithOffset(new Date())} (${weekdayName(localToday())})
-Timezone: ${TIMEZONE}
 
 ${language}
 ${secrets ? `\n${secrets}\n` : ""}
