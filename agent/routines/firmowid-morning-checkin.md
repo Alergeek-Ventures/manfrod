@@ -18,8 +18,8 @@ don't need to re-check either of those.
    office and asking what they're working on right now, so you can start a
    session for them. Write it in whatever language this user's own
    notes/context are in — same as any normal DM to them.
-2. Reply with exactly `EMPTY` for this turn (nothing more to do until they
-   answer — don't call `firmowid__start_session` yet).
+2. That message is your whole reply for this turn (nothing more to do until
+   they answer — don't call `firmowid__start_session` yet).
 
 ## When they reply
 

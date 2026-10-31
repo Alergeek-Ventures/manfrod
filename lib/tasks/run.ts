@@ -55,7 +55,7 @@ ${dms}
 4. If you cannot move forward because you lack a tool, an integration or access, call request-capability with this task id instead of giving up or pretending.
 5. ${ending}
 
-Reply here only with what people in this thread should read now. If there is nothing worth posting, reply with exactly EMPTY.`;
+Reply here only with what people in this thread should read now. If there is nothing worth posting, call no-reply.`;
 }
 
 async function contactsOf(task: AgentTask): Promise<Contact[]> {

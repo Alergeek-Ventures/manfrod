@@ -67,7 +67,7 @@ describe("checkPrompt", () => {
     expect(prompt).toContain("Konrad <@U2>");
     expect(prompt).toContain("no reply yet");
     expect(prompt).toContain("next_check_in_minutes");
-    expect(prompt).toContain("EMPTY");
+    expect(prompt).toContain("no-reply");
   });
 
   it("tells the last check to close the task", () => {

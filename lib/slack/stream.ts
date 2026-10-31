@@ -7,15 +7,6 @@ const log = logger("Slack.StreamSession");
 const FLUSH_INTERVAL_MS = 700;
 const IDLE_TIMEOUT_MS = 3 * 60 * 1000;
 const TASK_FIELD_LIMIT = 256;
-export const SILENT_REPLY = "EMPTY";
-
-export function isSilentReply(content: string): boolean {
-  return content.trim() === SILENT_REPLY;
-}
-
-function couldBeSilentReply(text: string): boolean {
-  return SILENT_REPLY.startsWith(text.trim());
-}
 
 export interface Recipient {
   userId: string;
@@ -59,7 +50,6 @@ class StreamSession {
   private flushTimer: NodeJS.Timeout | null = null;
   private idleTimer: NodeJS.Timeout | null = null;
   private turnText = "";
-  private heldText = "";
   planTitle: string | null = null;
   private tasks = new Map<string, Task>();
   private queue: Promise<unknown> = Promise.resolve();
@@ -145,20 +135,9 @@ class StreamSession {
 
   text(text: string) {
     this.turnText += text;
+    this.enqueue({ type: "markdown_text", text });
     this.touch();
-    if (couldBeSilentReply(this.turnText)) {
-      this.heldText += text;
-      return;
-    }
-    this.enqueue({ type: "markdown_text", text: this.heldText + text });
-    this.heldText = "";
     this.maybeFlush();
-  }
-
-  private releaseHeldText() {
-    if (this.heldText === "") return;
-    this.enqueue({ type: "markdown_text", text: this.heldText });
-    this.heldText = "";
   }
 
   plan(title: string) {
@@ -179,7 +158,6 @@ class StreamSession {
       ...previous,
       ...Object.fromEntries(Object.entries(task).filter(([, value]) => value !== null && value !== undefined)),
     } as Task;
-    this.releaseHeldText();
     this.turnText = "";
     this.tasks.set(merged.id, merged);
     this.enqueue(taskChunk(merged));
@@ -204,7 +182,6 @@ class StreamSession {
         this.dispose();
         return "not_streaming";
       }
-      this.releaseHeldText();
       const tail = remainingText(this.turnText, content);
       const chunks = [
         ...this.pending,
@@ -242,7 +219,6 @@ class StreamSession {
       if (this.closed) return;
       const ts = this.ts;
       this.pending = [];
-      this.heldText = "";
       this.dispose();
       if (ts === null) return;
       await stopStream(this.channel, ts);

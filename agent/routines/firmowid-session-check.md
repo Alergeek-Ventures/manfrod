@@ -11,9 +11,9 @@ will actually read, so write it as a normal message to them, not a status
 report about the check you just ran.
 
 1. Call `firmowid__get_current_session`.
-2. If there's no active session, reply with exactly `EMPTY`.
+2. If there's no active session, call `no-reply`.
 3. If there is an active session, compute how long it's been running (now - start_datetime).
-4. If it's been running 2 hours or less, reply `EMPTY` (still plausibly a real, ongoing work session).
+4. If it's been running 2 hours or less, call `no-reply` (still plausibly a real, ongoing work session).
 5. If it's been running more than 2 hours, write the user a DM: mention since when the session has been running, that it looks like it might have been forgotten, and offer to end it (`stop_current_session`) and/or edit it (`edit_session`) to the correct end time if they tell you when they actually stopped working. Write it in whatever language this user's own notes/context are in — same as any normal DM to them.
 
 ## When they reply
