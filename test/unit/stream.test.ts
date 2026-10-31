@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { remainingText } from "../../lib/slack/stream.ts";
+import { isSilentReply, remainingText } from "../../lib/slack/stream.ts";
 
 describe("remainingText", () => {
   it("appends nothing when the stream already showed the whole answer", () => {
@@ -25,5 +25,17 @@ describe("remainingText", () => {
     expect(remainingText("Sprawdzam kalendarz", "Sorry, I encountered an error: :timeout")).toBe(
       "\n\nSorry, I encountered an error: :timeout",
     );
+  });
+});
+
+describe("isSilentReply", () => {
+  it("recognizes the bare sentinel", () => {
+    expect(isSilentReply("EMPTY")).toBe(true);
+    expect(isSilentReply("  EMPTY\n")).toBe(true);
+  });
+
+  it("keeps real replies that mention the word", () => {
+    expect(isSilentReply("the EMPTY column is fine")).toBe(false);
+    expect(isSilentReply("")).toBe(false);
   });
 });
