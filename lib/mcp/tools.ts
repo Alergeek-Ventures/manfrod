@@ -1,5 +1,6 @@
 import { config } from "../config.ts";
 import { logger } from "../log.ts";
+import type { ChannelAudience } from "../memory/access.ts";
 import { deliverProactive, sendProactive } from "../proactive.ts";
 import { callTool, formatResult } from "./client.ts";
 import {
@@ -66,10 +67,10 @@ const hostOf = (url: string) => {
   }
 };
 
-export async function listUserMcpTools(userId: string): Promise<McpToolEntry[]> {
+export async function listUserMcpTools(userId: string, audience: ChannelAudience): Promise<McpToolEntry[]> {
   const entries: McpToolEntry[] = [];
   for (const provider of await providersForUser(userId)) {
-    if (provider.mock) continue;
+    if (provider.mock || !provider.availability.includes(audience)) continue;
     const connection = await getConnection(userId, provider.id);
     if (!connection || connection.status === "disconnected") continue;
     const token = await ensureValidToken(connection);

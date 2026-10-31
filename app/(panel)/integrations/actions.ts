@@ -2,21 +2,43 @@
 
 import { revalidatePath } from "next/cache";
 import { disconnect as disconnectKalafiornia, loginWithPin, requestPin } from "@/lib/kalafiornia.ts";
-import { createCustomProvider, deleteCustomProvider, disconnect } from "@/lib/mcp/index.ts";
+import { createCustomProvider, deleteCustomProvider, disconnect, setCustomProviderAvailability } from "@/lib/mcp/index.ts";
+import { isChannelAudience, type ChannelAudience } from "@/lib/memory/access.ts";
 import { requireUser } from "@/lib/web/session.ts";
 
 export type ActionResult = { ok: boolean; message: string };
 
-export async function addCustomProvider(url: string, name: string, scope: string): Promise<ActionResult> {
+function validAvailability(availability: string[]): ChannelAudience[] | null {
+  const valid = availability.filter(isChannelAudience);
+  return valid.length > 0 && valid.length === availability.length ? [...new Set(valid)] : null;
+}
+
+export async function addCustomProvider(url: string, name: string, scope: string, availability: string[]): Promise<ActionResult> {
   const user = await requireUser();
   if (url.trim() === "") return { ok: false, message: "MCP server URL is required" };
+  const audiences = validAvailability(availability);
+  if (!audiences) return { ok: false, message: "Pick at least one place where Manfrod can use this server" };
   try {
-    await createCustomProvider(user.id, url.trim(), name.trim() || null, scope.trim() || null);
+    await createCustomProvider(user.id, {
+      url: url.trim(),
+      name: name.trim() || null,
+      scope: scope.trim() || null,
+      availability: audiences,
+    });
   } catch (error) {
     return { ok: false, message: `Could not add server: ${(error as Error).message}` };
   }
   revalidatePath("/integrations");
   return { ok: true, message: "Custom MCP server added" };
+}
+
+export async function updateCustomProviderAvailability(id: string, availability: string[]): Promise<ActionResult> {
+  const user = await requireUser();
+  const audiences = validAvailability(availability);
+  if (!audiences) return { ok: false, message: "Pick at least one place where Manfrod can use this server" };
+  if (!(await setCustomProviderAvailability(user.id, id, audiences))) return { ok: false, message: "MCP server not found" };
+  revalidatePath("/integrations");
+  return { ok: true, message: "Availability saved" };
 }
 
 export async function removeCustomProvider(id: string): Promise<ActionResult> {

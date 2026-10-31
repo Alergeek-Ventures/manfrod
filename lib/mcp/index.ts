@@ -3,6 +3,7 @@ import { and, asc, eq, inArray } from "drizzle-orm";
 import { db, tables } from "../db/index.ts";
 import type { McpConnection, McpOauthClient } from "../db/schema.ts";
 import { logger } from "../log.ts";
+import { CHANNEL_AUDIENCES, isChannelAudience, type ChannelAudience } from "../memory/access.ts";
 import { discoverLogo, discoverName, listTools, type McpResult, type RemoteTool } from "./client.ts";
 
 const { mcpConnections, mcpCustomProviders, mcpOauthClients } = tables;
@@ -16,6 +17,7 @@ export interface Provider {
   logoUrl: string | null;
   custom: boolean;
   scope: string | null;
+  availability: ChannelAudience[];
 }
 
 export function builtinProviders(): Provider[] {
@@ -28,6 +30,7 @@ export function builtinProviders(): Provider[] {
       logoUrl: null,
       custom: false,
       scope: "mcp",
+      availability: [...CHANNEL_AUDIENCES],
     },
   ];
 }
@@ -48,6 +51,7 @@ export async function providersForUser(userId: string): Promise<Provider[]> {
       logoUrl: provider.logoUrl,
       custom: true,
       scope: provider.scope,
+      availability: provider.availability.filter(isChannelAudience),
     })),
   ];
 }
@@ -56,12 +60,19 @@ export async function getProviderForUser(userId: string, id: string): Promise<Pr
   return (await providersForUser(userId)).find((provider) => provider.id === id) ?? null;
 }
 
-export async function createCustomProvider(userId: string, url: string, name: string | null = null, scope: string | null = null) {
+export interface CustomProviderInput {
+  url: string;
+  name?: string | null;
+  scope?: string | null;
+  availability?: ChannelAudience[];
+}
+
+export async function createCustomProvider(userId: string, { url, name = null, scope = null, availability }: CustomProviderInput) {
   if (!/^https?:\/\//.test(url)) throw new Error("url: must be a valid http(s) URL");
   const presentName = name && name !== "" ? name : null;
   const [provider] = await db
     .insert(mcpCustomProviders)
-    .values({ userId, url, name: presentName, scope: scope && scope !== "" ? scope : null })
+    .values({ userId, url, name: presentName, scope: scope && scope !== "" ? scope : null, availability })
     .returning();
   const [discoveredName, logoUrl] = await Promise.all([discoverName(url), discoverLogo(url)]);
   const updates: Record<string, string> = {};
@@ -71,6 +82,15 @@ export async function createCustomProvider(userId: string, url: string, name: st
   if (Object.keys(updates).length === 0) return provider;
   const [updated] = await db.update(mcpCustomProviders).set(updates).where(eq(mcpCustomProviders.id, provider.id)).returning();
   return updated;
+}
+
+export async function setCustomProviderAvailability(userId: string, id: string, availability: ChannelAudience[]): Promise<boolean> {
+  const updated = await db
+    .update(mcpCustomProviders)
+    .set({ availability, updatedAt: new Date() })
+    .where(and(eq(mcpCustomProviders.userId, userId), eq(mcpCustomProviders.id, id)))
+    .returning({ id: mcpCustomProviders.id });
+  return updated.length > 0;
 }
 
 export async function deleteCustomProvider(userId: string, id: string): Promise<boolean> {

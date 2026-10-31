@@ -40,6 +40,16 @@ export async function getActiveMapping(channelId: string | null | undefined): Pr
   return row ? { ...row.mapping, project: row.project } : null;
 }
 
+export const CHANNEL_AUDIENCES = ["dm", "internal", "external"] as const;
+export type ChannelAudience = (typeof CHANNEL_AUDIENCES)[number];
+
+export const isChannelAudience = (value: unknown): value is ChannelAudience => CHANNEL_AUDIENCES.includes(value as ChannelAudience);
+
+export async function channelAudience(channelId: string | null): Promise<ChannelAudience> {
+  if (!channelId || channelId.startsWith("D")) return "dm";
+  return (await getActiveMapping(channelId))?.clientId ? "external" : "internal";
+}
+
 export async function resolveForWrite(slackChannelId: string, authorUserId: string | null = null): Promise<string[]> {
   if (slackChannelId.startsWith("D")) {
     return authorUserId ? [privateLevel(authorUserId)] : ["internal"];
