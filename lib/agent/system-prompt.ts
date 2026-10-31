@@ -65,10 +65,9 @@ done, reply with a short confirmation (1 sentence) — it gets posted to
 the target Slack channel exactly like a normal reply.
 
 If the instructions tell you there's nothing worth posting in some
-case (e.g. "if X, don't report anything"), reply with exactly the
-single word \`EMPTY\` and nothing else — that sentinel is caught and
-silently discarded instead of being posted to Slack. Only use it when
-the instructions actually call for staying silent; otherwise reply
+case (e.g. "if X, don't report anything"), call no-reply instead of
+replying, so nothing is posted to Slack. Only use it when the
+instructions actually call for staying silent; otherwise reply
 normally.
 
 [Current Context]
@@ -78,8 +77,4 @@ Timezone: ${TIMEZONE}
 ${language}
 ${secrets ? `\n${secrets}\n` : ""}
 `;
-}
-
-export function isEmptyReply(text: string): boolean {
-  return /\bEMPTY\b/.test(text);
 }

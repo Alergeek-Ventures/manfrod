@@ -1,24 +1,25 @@
 import { defineSlackRenderer, type SlackEventContext } from "eve/channels/slack";
 import { channelLanguage } from "../agent-settings.ts";
-import { isEmptyReply } from "../agent/system-prompt.ts";
 import { planTitle, threadTitle } from "../agent/titles.ts";
 import { logger } from "../log.ts";
 import { isUntitledProactiveThread, markProactiveThreadTitled } from "../proactive.ts";
-import { isBackgroundKind, TASK_KIND, toolCtx, type ToolCtx } from "../agent/context.ts";
+import { isBackgroundKind, toolCtx, type ToolCtx } from "../agent/context.ts";
 import { deleteMessage, post, setStatus, setTitle, type SlackBody } from "./api.ts";
 import { feedbackBlock, feedbackChunk } from "./feedback.ts";
 import { fromMarkdown, toBlocks } from "./mrkdwn.ts";
 import { lastUserContent } from "./routing.ts";
 import { TtlMap, shared } from "./state.ts";
-import { ensureStream, getStream, isSilentReply, type Recipient } from "./stream.ts";
+import { ensureStream, getStream, type Recipient } from "./stream.ts";
 
 const log = logger("Slack.ActivityHandler");
 const PROVISIONAL_PLAN_TITLE = "Pracuję nad tym";
 const MARKDOWN_BLOCK_LIMIT = 11_900;
 const DETAILS_LIMIT = 120;
+const NO_REPLY_TOOL = "no-reply";
 
 const titled = shared("titledThreads", () => new TtlMap<string, true>(24 * 60 * 60 * 1000));
 const plannedTurns = shared("plannedTurns", () => new TtlMap<string, true>(60 * 60 * 1000));
+const repliedTurns = shared("repliedTurns", () => new TtlMap<string, true>(60 * 60 * 1000));
 
 interface Where {
   channel: string;
@@ -32,6 +33,8 @@ function where(channel: SlackEventContext, ctx: Parameters<typeof toolCtx>[0]): 
   if (!channelId) return null;
   return { channel: channelId, threadTs: channel.state.threadTs ?? tool.msgCtx.threadTs, tool };
 }
+
+const isNoReply = (action: object) => "toolName" in action && action.toolName === NO_REPLY_TOOL;
 
 const humanize = (name: string) => {
   const spaced = name.replaceAll(/[_-]/g, " ");
@@ -110,17 +113,6 @@ async function deliverFinal(where: Where, rawContent: string) {
   const skill = isBackgroundKind(where.tool.kind);
   const stream = where.threadTs ? getStream(where.channel, where.threadTs) : undefined;
 
-  if ((skill || where.tool.kind === TASK_KIND) && isEmptyReply(content)) {
-    await stream?.abort();
-    if (where.tool.kind === "skill_user" && where.threadTs) await deleteMessage(where.channel, where.threadTs);
-    return;
-  }
-
-  if (isSilentReply(content)) {
-    await stream?.discard();
-    return;
-  }
-
   if (where.tool.kind === "skill_channel") {
     await stream?.abort();
     await post("chat.postMessage", { channel: where.channel, text: fromMarkdown(content) });
@@ -169,16 +161,17 @@ export const manfrodRenderer = defineSlackRenderer({
 
     "actions.requested"(event, channel, ctx) {
       const at = where(channel, ctx);
-      if (!at) return;
+      const actions = event.actions.filter((action) => !isNoReply(action));
+      if (!at || actions.length === 0) return;
       const stream = streamFor(at, channel);
       if (!stream) {
-        const [first] = event.actions;
+        const [first] = actions;
         const name = first && "toolName" in first ? first.toolName : "a tool";
         if (at.threadTs) void setStatus(at.channel, at.threadTs, `is using ${name}...`);
         return;
       }
       stream.planDefault(PROVISIONAL_PLAN_TITLE);
-      for (const action of event.actions) {
+      for (const action of actions) {
         const name = "toolName" in action ? action.toolName : action.kind;
         stream.task({
           id: action.callId,
@@ -207,6 +200,7 @@ export const manfrodRenderer = defineSlackRenderer({
       const stream = getStream(at.channel, at.threadTs);
       if (!stream || stream.closed) return;
       const result = event.result;
+      if (isNoReply(result)) return;
       const isError = "isError" in result && result.isError === true;
       stream.task({
         id: result.callId,
@@ -220,7 +214,18 @@ export const manfrodRenderer = defineSlackRenderer({
       if (event.finishReason === "tool-calls") return;
       const at = where(channel, ctx);
       if (!at) return;
+      repliedTurns.set(`${ctx.session.id}:${event.turnId}`, true);
       await deliverFinal(at, event.message ?? "");
+    },
+
+    async "turn.completed"(event, channel, ctx, next) {
+      const at = where(channel, ctx);
+      if (at?.threadTs) {
+        await getStream(at.channel, at.threadTs)?.discard();
+        const replied = repliedTurns.has(`${ctx.session.id}:${event.turnId}`);
+        if (!replied && at.tool.kind === "skill_user") await deleteMessage(at.channel, at.threadTs);
+      }
+      await next();
     },
 
     "session.waiting"() {},

@@ -17,7 +17,7 @@ user to ask questions or wait for. Just do this:
    absence/vacation.
 3. Keep only the ones whose date range (the `start..end` part before the
    ` — `) covers tomorrow's date.
-4. If none cover tomorrow, reply with exactly `EMPTY` — don't post "no one is
+4. If none cover tomorrow, call `no-reply` — don't post "no one is
    off tomorrow" every evening.
 5. Otherwise, for each person covered, call `search-notes` with their full
    name (e.g. "Jan Kowalski") to see if there's any extra context worth a
@@ -37,7 +37,7 @@ user to ask questions or wait for. Just do this:
      won't be in the office ("Jana Kowalskiego nie będzie jutro w biurze")
    - a record or newer note saying the absence was called off ("odwołany",
      "anulowany", "będzie jednak") → the person is in the office; leave them
-     out entirely, and if that leaves nobody, reply with exactly `EMPTY`
+     out entirely, and if that leaves nobody, call `no-reply`
    Copy proper names (clients, companies, places) exactly as they are
    spelled in the record or notes. Never "correct" a name that looks like a
    typo or a more familiar word.
