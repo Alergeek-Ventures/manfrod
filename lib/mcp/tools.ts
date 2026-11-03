@@ -1,17 +1,16 @@
-import { config } from "../config.ts";
+import type { McpConnection } from "../db/schema.ts";
 import { logger } from "../log.ts";
 import type { ChannelAudience } from "../memory/access.ts";
-import { deliverProactive, sendProactive } from "../proactive.ts";
-import { callTool, formatResult } from "./client.ts";
+import { callTool, formatResult, type McpResult } from "./client.ts";
+import { handleTokenFailure } from "./health.ts";
 import {
   cachedTools,
   ensureValidToken,
   getConnection,
   getProviderForUser,
   invalidateTools,
-  markExpired,
-  markNotified,
   providersForUser,
+  refreshToken,
   type Provider,
 } from "./index.ts";
 
@@ -34,29 +33,22 @@ function toolName(prefix: string, remoteName: string): string {
   return `${prefix}__${remoteName.replace(/[^A-Za-z0-9_-]/g, "_")}`.slice(0, 64);
 }
 
-export function expiredConnectionPrompt(providerName: string): string {
-  return `Tell the user that their ${providerName} connection expired and that they can reconnect it at ${config.appUrl}/integrations so you can keep using it. Write only about this, in the user's language, and do not bring up notes, reservations or anything else.`;
-}
-
-async function notifyExpired(userId: string, provider: Provider) {
-  const text = expiredConnectionPrompt(provider.name);
-  try {
-    await deliverProactive(userId, text);
-  } catch {
-    await sendProactive(userId, text);
-  }
-}
-
-async function handleUnauthorized(userId: string, provider: Provider) {
+async function withToken<T>(
+  provider: Provider,
+  connection: McpConnection,
+  run: (token: string) => Promise<McpResult<T>>,
+): Promise<McpResult<T>> {
+  const { userId } = connection;
+  const token = await ensureValidToken(connection);
+  if (!token.ok) return { ok: false, error: await handleTokenFailure(userId, provider, token.error) };
+  const first = await run(token.value);
+  if (first.ok || first.error !== "unauthorized") return first;
   invalidateTools(userId, provider.id);
-  const connection = await getConnection(userId, provider.id);
-  if (!connection) return;
-  const wasConnected = connection.status !== "expired";
-  const updated = await markExpired(connection);
-  if (wasConnected || updated.notifiedExpiredAt === null) {
-    await notifyExpired(userId, provider);
-    await markNotified(updated);
-  }
+  const refreshed = await refreshToken(connection);
+  if (!refreshed.ok) return { ok: false, error: await handleTokenFailure(userId, provider, refreshed.error) };
+  const second = await run(refreshed.value);
+  if (second.ok || second.error !== "unauthorized") return second;
+  return { ok: false, error: await handleTokenFailure(userId, provider, "rejected") };
 }
 
 const hostOf = (url: string) => {
@@ -73,15 +65,9 @@ export async function listUserMcpTools(userId: string, audience: ChannelAudience
     if (provider.mock || !provider.availability.includes(audience)) continue;
     const connection = await getConnection(userId, provider.id);
     if (!connection || connection.status === "disconnected") continue;
-    const token = await ensureValidToken(connection);
-    if (!token.ok) {
-      log.debug(`Tools.Mcp: no valid token for ${provider.id}/${userId}: ${token.error}`);
-      continue;
-    }
-    const remote = await cachedTools(userId, provider, token.value);
+    const remote = await withToken(provider, connection, (token) => cachedTools(userId, provider, token));
     if (!remote.ok) {
-      if (remote.error === "unauthorized") await handleUnauthorized(userId, provider);
-      else log.warn(`Tools.Mcp: failed to list tools for ${provider.id}: ${remote.error}`);
+      log.warn(`Tools.Mcp: failed to list tools for ${provider.id}: ${remote.error}`);
       continue;
     }
     const prefix = toolPrefix(provider);
@@ -104,16 +90,11 @@ export async function callUserMcpTool(userId: string, providerId: string, remote
   if (!provider) return `MCP provider not found: ${providerId}`;
   const connection = await getConnection(userId, providerId);
   if (!connection) return `ERROR: ${provider.name} is not connected.`;
-  const token = await ensureValidToken(connection);
-  if (!token.ok) {
-    await handleUnauthorized(userId, provider);
-    return `ERROR: ${provider.name} connection expired. The user needs to reconnect it at the web app.`;
-  }
-  const result = await callTool(provider.mcpUrl, token.value, remoteName, args ?? {});
+  const result = await withToken(provider, connection, (token) => callTool(provider.mcpUrl, token, remoteName, args ?? {}));
   if (result.ok) return formatResult(result.value);
-  if (result.error === "unauthorized") {
-    await handleUnauthorized(userId, provider);
+  if (result.error === "token_rejected")
     return `ERROR: ${provider.name} connection expired. The user needs to reconnect it at the web app.`;
-  }
+  if (result.error === "token_unavailable")
+    return `ERROR: ${provider.name} sign-in is temporarily unavailable. Try again in a few minutes.`;
   return `${provider.name} MCP call failed: ${result.error}`;
 }

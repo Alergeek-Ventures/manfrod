@@ -10,6 +10,7 @@ export const EVENTS = {
   proactiveRequested: "manfrod/proactive.requested",
   absenceRecorded: "manfrod/absence.recorded",
   capabilityApproved: "manfrod/capability.approved",
+  mcpTokenUnavailable: "manfrod/mcp.token.unavailable",
 } as const;
 
 export interface JobScheduledData {
@@ -36,6 +37,11 @@ export interface AbsenceRecordedData {
   startDate: string;
   endDate: string;
   working: boolean;
+}
+
+export interface McpTokenUnavailableData {
+  userId: string;
+  providerId: string;
 }
 
 export const ROOT_THREAD_KEY = "root";
