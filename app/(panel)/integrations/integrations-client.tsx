@@ -316,7 +316,7 @@ function AddProviderDialog({ run, pending }: { run: Run; pending: boolean }) {
         <PlusIcon data-icon="inline-start" />
         Add MCP server
       </DialogTrigger>
-      <DialogContent>
+      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-3xl">
         <form
           className="flex flex-col gap-6"
           onSubmit={(event) => {
@@ -336,51 +336,60 @@ function AddProviderDialog({ run, pending }: { run: Run; pending: boolean }) {
               Manfrod tries to detect the server&apos;s name and logo — if it can&apos;t, name it yourself.
             </DialogDescription>
           </DialogHeader>
-          <FieldGroup>
-            <Field>
-              <FieldLabel htmlFor="mcp-url">MCP URL</FieldLabel>
-              <Input
-                id="mcp-url"
-                placeholder="https://mcp.example.com/mcp"
-                value={url}
-                onChange={(event) => setUrl(event.target.value)}
-                required
-              />
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="mcp-name">Name</FieldLabel>
-              <Input id="mcp-name" placeholder="e.g. Acme MCP" value={name} onChange={(event) => setName(event.target.value)} />
-              <FieldDescription>Optional — auto-detected if left blank.</FieldDescription>
-            </Field>
-            <Field>
-              <FieldLabel>Authentication</FieldLabel>
-              <ToggleGroup
-                variant="outline"
-                size="sm"
-                value={[auth]}
-                onValueChange={(values) => setAuth((values[0] as "oauth" | "header" | undefined) ?? auth)}
-              >
-                <ToggleGroupItem value="oauth">Sign in (OAuth)</ToggleGroupItem>
-                <ToggleGroupItem value="header">API token</ToggleGroupItem>
-              </ToggleGroup>
-            </Field>
-            {auth === "oauth" ? (
+          <div className="grid gap-6 md:grid-cols-2">
+            <FieldGroup>
               <Field>
-                <FieldLabel htmlFor="mcp-scope">OAuth scope</FieldLabel>
-                <Input id="mcp-scope" placeholder="e.g. mcp read write" value={scope} onChange={(event) => setScope(event.target.value)} />
-                <FieldDescription>Optional — only if the server requires specific scopes.</FieldDescription>
+                <FieldLabel htmlFor="mcp-url">MCP URL</FieldLabel>
+                <Input
+                  id="mcp-url"
+                  placeholder="https://mcp.example.com/mcp"
+                  value={url}
+                  onChange={(event) => setUrl(event.target.value)}
+                  required
+                />
               </Field>
-            ) : (
-              <>
+              <Field>
+                <FieldLabel htmlFor="mcp-name">Name</FieldLabel>
+                <Input id="mcp-name" placeholder="e.g. Acme MCP" value={name} onChange={(event) => setName(event.target.value)} />
+                <FieldDescription>Optional — auto-detected if left blank.</FieldDescription>
+              </Field>
+              <Field>
+                <FieldLabel>Authentication</FieldLabel>
+                <ToggleGroup
+                  variant="outline"
+                  size="sm"
+                  value={[auth]}
+                  onValueChange={(values) => setAuth((values[0] as "oauth" | "header" | undefined) ?? auth)}
+                >
+                  <ToggleGroupItem value="oauth">Sign in (OAuth)</ToggleGroupItem>
+                  <ToggleGroupItem value="header">API token</ToggleGroupItem>
+                </ToggleGroup>
+              </Field>
+              {auth === "oauth" ? (
                 <Field>
-                  <FieldLabel htmlFor="mcp-header">Header</FieldLabel>
-                  <Input id="mcp-header" value={header} onChange={(event) => setHeader(event.target.value)} required />
+                  <FieldLabel htmlFor="mcp-scope">OAuth scope</FieldLabel>
+                  <Input
+                    id="mcp-scope"
+                    placeholder="e.g. mcp read write"
+                    value={scope}
+                    onChange={(event) => setScope(event.target.value)}
+                  />
+                  <FieldDescription>Optional — only if the server requires specific scopes.</FieldDescription>
                 </Field>
-                <TokenField header={header} value={token} onChange={setToken} />
-              </>
-            )}
-            <AvailabilityField idPrefix="mcp-new" value={availability} onChange={setAvailability} />
-          </FieldGroup>
+              ) : (
+                <>
+                  <Field>
+                    <FieldLabel htmlFor="mcp-header">Header</FieldLabel>
+                    <Input id="mcp-header" value={header} onChange={(event) => setHeader(event.target.value)} required />
+                  </Field>
+                  <TokenField header={header} value={token} onChange={setToken} />
+                </>
+              )}
+            </FieldGroup>
+            <FieldGroup>
+              <AvailabilityField idPrefix="mcp-new" value={availability} onChange={setAvailability} />
+            </FieldGroup>
+          </div>
           <DialogFooter>
             <Button
               type="submit"
