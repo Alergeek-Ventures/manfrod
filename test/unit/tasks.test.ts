@@ -10,6 +10,8 @@ const task = (overrides: Partial<AgentTask> = {}): AgentTask =>
     goal: "Every active developer picks an option",
     successCriteria: "All active developers answered",
     plan: null,
+    channelId: "C1",
+    threadTs: "1793693062.078299",
     checks: 1,
     checkEveryMinutes: 120,
     deadline: null,
@@ -62,16 +64,18 @@ describe("checkPrompt", () => {
       updates: [{ content: "Asked in the thread", insertedAt: new Date("2026-10-29T11:22:00Z") }],
       contacts: [{ name: "Konrad", slackId: "U2", at: new Date("2026-10-29T12:00:00Z"), replied: false }],
       final: false,
+      language: "Polish",
     });
     expect(prompt).toContain("Asked in the thread");
     expect(prompt).toContain("Konrad <@U2>");
     expect(prompt).toContain("no reply yet");
     expect(prompt).toContain("next_check_in_minutes");
-    expect(prompt).toContain("no-reply");
+    expect(prompt).toContain(`post-slack-message with channel ${task().channelId} and thread_ts ${task().threadTs}`);
+    expect(prompt).toContain("write it in Polish");
   });
 
   it("tells the last check to close the task", () => {
-    const prompt = checkPrompt({ task: task({ checks: MAX_CHECKS }), owner, updates: [], contacts: [], final: true });
+    const prompt = checkPrompt({ task: task({ checks: MAX_CHECKS }), owner, updates: [], contacts: [], final: true, language: "Polish" });
     expect(prompt).toContain("This is the last check");
     expect(prompt).not.toContain("next_check_in_minutes");
   });

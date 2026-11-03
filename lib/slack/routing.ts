@@ -1,4 +1,5 @@
 import { findOrCreateBySlackId, getUserBySlackId } from "../accounts.ts";
+import { channelLanguage } from "../agent-settings.ts";
 import { decide } from "../agent/response-gate.ts";
 import { activeAuthor } from "../agent/turns.ts";
 import type { User } from "../db/schema.ts";
@@ -10,7 +11,7 @@ import { push as bufferPush } from "../memory/buffer.ts";
 import { ensureMapping } from "../memory/channel-detector.ts";
 import { createMessage, getRecentSessionMessages, lastSessionMessageAt } from "../memory/messages.ts";
 import { userAuth } from "../proactive.ts";
-import { containsSecret, languageHint, secretWarning } from "../security/secrets.ts";
+import { containsSecret, secretWarning } from "../security/secrets.ts";
 import {
   addReaction,
   botIdentity,
@@ -301,7 +302,9 @@ async function recentLanguageContext(channel: string, excludeTs: string): Promis
 }
 
 async function warnAboutSecret(inbound: Inbound) {
-  const text = await secretWarning(await recentLanguageContext(inbound.channel, inbound.ts), languageHint(inbound.text));
+  const language = await channelLanguage(inbound.channel);
+  const personContext = isDm(inbound.channel) ? await recentLanguageContext(inbound.channel, inbound.ts) : null;
+  const text = await secretWarning(language, personContext);
   const body: SlackBody = { channel: inbound.channel, text };
   if (!isDm(inbound.channel)) body.thread_ts = inbound.threadTs ?? inbound.ts;
   await post("chat.postMessage", body);

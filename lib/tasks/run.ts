@@ -1,4 +1,5 @@
 import { getUser } from "../accounts.ts";
+import { channelLanguage } from "../agent-settings.ts";
 import { TASK_KIND } from "../agent/context.ts";
 import type { AgentTask, AgentTaskUpdate, User } from "../db/schema.ts";
 import { agentRuntime } from "../inngest/runtime.ts";
@@ -23,8 +24,10 @@ export function checkPrompt(input: {
   updates: Pick<AgentTaskUpdate, "content" | "insertedAt">[];
   contacts: Contact[];
   final: boolean;
+  language: string;
 }): string {
-  const { task, owner, updates, contacts, final } = input;
+  const { task, owner, updates, contacts, final, language } = input;
+  const postHere = `post-slack-message with channel ${task.channelId} and thread_ts ${task.threadTs}`;
   const progress = updates.map((update) => `- ${formatLocal(update.insertedAt)}: ${update.content}`).join("\n") || "- (nothing yet)";
   const dms =
     contacts.length > 0
@@ -36,7 +39,7 @@ export function checkPrompt(input: {
           .join("\n")}\n`
       : "";
   const ending = final
-    ? `This is the last check: ${task.deadline && task.deadline.getTime() <= Date.now() ? "the deadline has passed" : "the check limit is reached"}. Close the task now with update-task (done if the criterion is met, otherwise failed with what is missing) and post a short summary for ${owner.name ?? "the person who asked"} here.`
+    ? `This is the last check: ${task.deadline && task.deadline.getTime() <= Date.now() ? "the deadline has passed" : "the check limit is reached"}. Close the task now with update-task (done if the criterion is met, otherwise failed with what is missing) and post a short summary for ${owner.name ?? "the person who asked"} in the thread with ${postHere}.`
     : `End with update-task: a one-line progress note, and next_check_in_minutes sized to how fast things are moving (a check every ${task.checkEveryMinutes} minutes is already scheduled if you don't change it).`;
   return `[Task check — not a message from a person] You are running on your own to move a long-running task forward. Nobody asked anything just now.
 
@@ -50,12 +53,12 @@ Progress so far, oldest first:
 ${progress}
 ${dms}
 1. Find out where things stand with your tools (read-slack-thread reads this thread; people's replies there are not shown to you unless they mention you).
-2. If the success criterion is met, or ${owner.name ?? "the person who asked"} said it is done or no longer needed, close it with update-task (status done or cancelled, with the outcome) and post a short summary here.
-3. Otherwise take the next useful step with the tools you have: post here, send-dm to the specific people you are waiting for, or anything else that moves it forward. Don't repeat a nudge you already sent unless enough time has passed, and never contact people whose Slack account is deactivated.
+2. If the success criterion is met, or ${owner.name ?? "the person who asked"} said it is done or no longer needed, close it with update-task (status done or cancelled, with the outcome) and post a short summary in the thread with ${postHere}.
+3. Otherwise take the next useful step with the tools you have: ${postHere}, send-dm to the specific people you are waiting for, or anything else that moves it forward. Don't repeat a nudge you already sent unless enough time has passed, and never contact people whose Slack account is deactivated.
 4. If you cannot move forward because you lack a tool, an integration or access, call request-capability with this task id instead of giving up or pretending.
 5. ${ending}
 
-Reply here only with what people in this thread should read now. If there is nothing worth posting, call no-reply.`;
+Your final reply is never shown to anyone, so don't use it to report what you did or didn't do. The only way to write in the thread is ${postHere}; use it only for something people there should read now, and write it in ${language}.`;
 }
 
 async function contactsOf(task: AgentTask): Promise<Contact[]> {
@@ -84,7 +87,14 @@ export async function runTaskCheck(taskId: string): Promise<void> {
   const task = await markChecked(found);
   const final = isFinalCheck(task);
   if (!final) await scheduleCheck(task, new Date(Date.now() + task.checkEveryMinutes * 60_000));
-  const prompt = checkPrompt({ task, owner, updates: await recentUpdates(task.id), contacts: await contactsOf(task), final });
+  const prompt = checkPrompt({
+    task,
+    owner,
+    updates: await recentUpdates(task.id),
+    contacts: await contactsOf(task),
+    final,
+    language: (await channelLanguage(task.channelId)).name,
+  });
   await agentRuntime().sendToSlack(
     { channelId: task.channelId, threadTs: task.threadTs },
     prompt,

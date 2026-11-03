@@ -53,10 +53,11 @@ export async function setLanguages(languages: Record<Audience, LanguageCode>, us
   cached = null;
 }
 
-export async function channelLanguage(channelId: string | null): Promise<{ audience: Audience; name: string }> {
+export async function channelLanguage(channelId: string | null): Promise<{ audience: Audience; code: LanguageCode; name: string }> {
   const languages = await languageSettings();
   const audience: Audience = (await channelAudience(channelId)) === "external" ? "external" : "internal";
-  return { audience, name: LANGUAGES[languages[audience]] };
+  const code = languages[audience];
+  return { audience, code, name: LANGUAGES[code] };
 }
 
 export async function internalLanguage(): Promise<string> {

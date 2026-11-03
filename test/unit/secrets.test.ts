@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { containsSecret, languageHint } from "../../lib/security/secrets.ts";
+import { containsSecret } from "../../lib/security/secrets.ts";
 
 describe("containsSecret", () => {
   it("flags known-provider secret formats via the gitleaks ruleset", () => {
@@ -51,10 +51,4 @@ describe("containsSecret", () => {
   it("ignores nil input", () => {
     expect(containsSecret(null)).toBe(false);
   });
-});
-
-describe("languageHint", () => {
-  it("detects Polish from diacritics", () => expect(languageHint("cześć, jak się masz?")).toBe("pl"));
-  it("detects Polish from common words", () => expect(languageHint("hej co tam jak leci")).toBe("pl"));
-  it("falls back to English", () => expect(languageHint("hey what's up, how are you doing today")).toBe("en"));
 });
