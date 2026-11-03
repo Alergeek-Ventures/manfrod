@@ -143,6 +143,7 @@ const mcpExpiry = cronFunction("mcp-expiry", "15 * * * *", async () => {
   const all = await listAllConnectionsWithProvider();
   const failing: Record<string, string> = {};
   for (const { connection, provider } of all) {
+    if (provider.authHeader) continue;
     const token = await ensureValidToken(connection);
     if (!token.ok) failing[`${provider.id}/${connection.userId}`] = await handleTokenFailure(connection.userId, provider, token.error);
   }

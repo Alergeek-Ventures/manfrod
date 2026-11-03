@@ -5,18 +5,21 @@ const PROTOCOL_VERSION = "2025-06-18";
 
 export type McpResult<T> = { ok: true; value: T } | { ok: false; error: "unauthorized" | string };
 
+export type McpAuth = string | { header: string; value: string };
+
 export interface RemoteTool {
   name: string;
   description?: string;
   inputSchema?: Record<string, unknown>;
 }
 
-async function rawPost(url: string, accessToken: string | null, sessionId: string | null, body: unknown) {
+async function rawPost(url: string, auth: McpAuth | null, sessionId: string | null, body: unknown) {
   const headers: Record<string, string> = {
     accept: "application/json, text/event-stream",
     "content-type": "application/json",
   };
-  if (accessToken) headers.authorization = `Bearer ${accessToken}`;
+  if (typeof auth === "string") headers.authorization = `Bearer ${auth}`;
+  else if (auth) headers[auth.header.toLowerCase()] = auth.value;
   if (sessionId) headers["mcp-session-id"] = sessionId;
   return fetch(url, { method: "POST", headers, body: JSON.stringify(body), signal: AbortSignal.timeout(15_000) });
 }
@@ -35,10 +38,10 @@ function parseBody(text: string): Record<string, unknown> | null {
   }
 }
 
-async function initialize(url: string, accessToken: string): Promise<McpResult<string | null>> {
+async function initialize(url: string, auth: McpAuth): Promise<McpResult<string | null>> {
   let response: Response;
   try {
-    response = await rawPost(url, accessToken, null, {
+    response = await rawPost(url, auth, null, {
       jsonrpc: "2.0",
       id: 1,
       method: "initialize",
@@ -54,20 +57,20 @@ async function initialize(url: string, accessToken: string): Promise<McpResult<s
   }
   await response.text().catch(() => "");
   const sessionId = response.headers.get("mcp-session-id");
-  void rawPost(url, accessToken, sessionId, { jsonrpc: "2.0", method: "notifications/initialized" }).catch(() => {});
+  void rawPost(url, auth, sessionId, { jsonrpc: "2.0", method: "notifications/initialized" }).catch(() => {});
   return { ok: true, value: sessionId };
 }
 
 async function rpc(
   url: string,
-  accessToken: string,
+  auth: McpAuth,
   sessionId: string | null,
   method: string,
   params: unknown,
 ): Promise<McpResult<Record<string, any>>> {
   let response: Response;
   try {
-    response = await rawPost(url, accessToken, sessionId, { jsonrpc: "2.0", id: 2, method, params });
+    response = await rawPost(url, auth, sessionId, { jsonrpc: "2.0", id: 2, method, params });
   } catch (error) {
     return { ok: false, error: (error as Error).message };
   }
@@ -84,18 +87,18 @@ async function rpc(
   return { ok: false, error: "unparseable_response" };
 }
 
-export async function listTools(url: string, accessToken: string): Promise<McpResult<RemoteTool[]>> {
-  const session = await initialize(url, accessToken);
+export async function listTools(url: string, auth: McpAuth): Promise<McpResult<RemoteTool[]>> {
+  const session = await initialize(url, auth);
   if (!session.ok) return session;
-  const result = await rpc(url, accessToken, session.value, "tools/list", {});
+  const result = await rpc(url, auth, session.value, "tools/list", {});
   if (!result.ok) return result;
   return { ok: true, value: Array.isArray(result.value.tools) ? result.value.tools : [] };
 }
 
-export async function callTool(url: string, accessToken: string, name: string, args: unknown): Promise<McpResult<Record<string, any>>> {
-  const session = await initialize(url, accessToken);
+export async function callTool(url: string, auth: McpAuth, name: string, args: unknown): Promise<McpResult<Record<string, any>>> {
+  const session = await initialize(url, auth);
   if (!session.ok) return session;
-  return rpc(url, accessToken, session.value, "tools/call", { name, arguments: args });
+  return rpc(url, auth, session.value, "tools/call", { name, arguments: args });
 }
 
 export function formatResult(result: Record<string, any>): string {
@@ -107,9 +110,9 @@ export function formatResult(result: Record<string, any>): string {
   return JSON.stringify(result);
 }
 
-export async function discoverName(url: string): Promise<string | null> {
+export async function discoverName(url: string, auth: McpAuth | null = null): Promise<string | null> {
   try {
-    const response = await rawPost(url, null, null, {
+    const response = await rawPost(url, auth, null, {
       jsonrpc: "2.0",
       id: 1,
       method: "initialize",
