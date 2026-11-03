@@ -25,7 +25,7 @@ import {
   kalafiorniaVerifyPin,
   removeCustomProvider,
   saveProviderToken,
-  updateCustomProviderAvailability,
+  updateCustomProviderSettings,
   type ActionResult,
 } from "./actions.ts";
 
@@ -117,18 +117,22 @@ function AvailabilityField({
   );
 }
 
-function AvailabilityDialog({ provider, run, pending }: { provider: ProviderView; run: Run; pending: boolean }) {
+function ProviderSettingsDialog({ provider, run, pending }: { provider: ProviderView; run: Run; pending: boolean }) {
   const [open, setOpen] = useState(false);
+  const [name, setName] = useState(provider.name);
   const [availability, setAvailability] = useState(provider.availability);
   return (
     <Dialog
       open={open}
       onOpenChange={(next) => {
-        if (next) setAvailability(provider.availability);
+        if (next) {
+          setName(provider.name);
+          setAvailability(provider.availability);
+        }
         setOpen(next);
       }}
     >
-      <DialogTrigger render={<Button size="icon-sm" variant="ghost" aria-label="Availability" title="Availability" />}>
+      <DialogTrigger render={<Button size="icon-sm" variant="ghost" aria-label="Settings" title="Settings" />}>
         <SlidersHorizontalIcon />
       </DialogTrigger>
       <DialogContent>
@@ -137,18 +141,24 @@ function AvailabilityDialog({ provider, run, pending }: { provider: ProviderView
           onSubmit={(event) => {
             event.preventDefault();
             run(
-              () => updateCustomProviderAvailability(provider.id, availability),
+              () => updateCustomProviderSettings(provider.id, name, availability),
               () => setOpen(false),
             );
           }}
         >
           <DialogHeader>
-            <DialogTitle>{provider.name} availability</DialogTitle>
-            <DialogDescription>Choose where Manfrod can use this server for you.</DialogDescription>
+            <DialogTitle>{provider.name} settings</DialogTitle>
+            <DialogDescription>Rename the server and choose where Manfrod can use it for you.</DialogDescription>
           </DialogHeader>
-          <AvailabilityField idPrefix={`mcp-${provider.id}`} value={availability} onChange={setAvailability} />
+          <FieldGroup>
+            <Field>
+              <FieldLabel htmlFor={`mcp-${provider.id}-name`}>Name</FieldLabel>
+              <Input id={`mcp-${provider.id}-name`} value={name} onChange={(event) => setName(event.target.value)} required />
+            </Field>
+            <AvailabilityField idPrefix={`mcp-${provider.id}`} value={availability} onChange={setAvailability} />
+          </FieldGroup>
           <DialogFooter>
-            <Button type="submit" disabled={pending || availability.length === 0}>
+            <Button type="submit" disabled={pending || name.trim() === "" || availability.length === 0}>
               {pending && <Spinner data-icon="inline-start" />}
               Save
             </Button>
@@ -276,7 +286,7 @@ function ProviderCard({
           )}
           {deletable && (
             <div className="ml-auto flex gap-1">
-              <AvailabilityDialog provider={provider} run={run} pending={pending} />
+              <ProviderSettingsDialog provider={provider} run={run} pending={pending} />
               <ConfirmAction
                 label="Remove"
                 title={`Remove ${provider.name}?`}
