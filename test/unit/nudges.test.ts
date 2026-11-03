@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseDecision } from "../../lib/nudges/compose.ts";
+import { sessionsOn, slackActivity } from "../../lib/nudges/hours.ts";
 import { linkIssues } from "../../lib/nudges/projects.ts";
 import { waitingFor } from "../../lib/nudges/waiting.ts";
 import { weekLog } from "../../lib/nudges/weekly.ts";
@@ -78,5 +79,49 @@ describe("linkIssues", () => {
     );
     const linked = "<https://linear.app/blaise/issue/BLA-164/spaces|BLA-164>";
     expect(linkIssues(linked, team)).toBe(linked);
+  });
+});
+
+describe("sessionsOn", () => {
+  it("keeps only the given Warsaw day, in order, and marks running sessions", () => {
+    const records = [
+      { start_datetime: "2026-11-03T17:00:00Z", end_datetime: null, title: "pdfs", project: { name: "Saltfish" } },
+      { start_datetime: "2026-11-03T07:30:00Z", end_datetime: "2026-11-03T11:00:00Z", title: "review" },
+      { start_datetime: "2026-11-02T23:30:00Z", end_datetime: "2026-11-03T00:30:00Z", title: "late night" },
+      { start_datetime: "2026-11-02T10:00:00Z", end_datetime: "2026-11-02T12:00:00Z", title: "yesterday" },
+    ];
+    expect(sessionsOn(records, "2026-11-03").map((session) => [session.title, session.project, session.end === null])).toEqual([
+      ["late night", null, false],
+      ["review", null, false],
+      ["pdfs", "Saltfish", true],
+    ]);
+  });
+});
+
+describe("slackActivity", () => {
+  it("counts the person's own messages since the start of the day per channel", () => {
+    const since = new Date("2026-11-03T00:00:00Z");
+    const threads = [
+      {
+        channelId: "C1",
+        channelName: "saltfish",
+        messages: [
+          { user: "U1", ts: ts("2026-11-02T15:00:00Z") },
+          { user: "U1", ts: ts("2026-11-03T09:00:00Z") },
+          { user: "U2", ts: ts("2026-11-03T09:05:00Z") },
+          { user: "U1", ts: ts("2026-11-03T16:00:00Z") },
+        ],
+      },
+      { channelId: "C2", channelName: "random", messages: [{ user: "U1", ts: ts("2026-11-03T12:00:00Z"), subtype: "channel_join" }] },
+    ];
+    expect(slackActivity("U1", threads, since)).toEqual([
+      {
+        channelId: "C1",
+        channelName: "saltfish",
+        count: 2,
+        first: new Date("2026-11-03T09:00:00Z"),
+        last: new Date("2026-11-03T16:00:00Z"),
+      },
+    ]);
   });
 });
