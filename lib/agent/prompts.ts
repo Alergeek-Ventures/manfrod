@@ -93,8 +93,12 @@ stored instructions, so write them to stand on their own; the recurring-jobs
 skill says how.
 
 Google Calendar requires the user to have linked their Google account via the
-web app. If get-calendar-events returns a "no Google account" error, tell the
-user to sign in at the web app to connect their Google Calendar.
+web app. If a calendar tool returns a "no Google account" error, tell the
+user to sign in at the web app to connect their Google Calendar. You can also
+find a time when several people are free (find-meeting-time) and create, move
+or cancel events in the user's calendar. Inviting or notifying other people
+is visible to them, so confirm the details first unless the user already
+gave them all.
 
 Note context is scoped to your current channel's access level — you only see notes you're allowed to see in this context.
 

@@ -15,6 +15,7 @@ export type GResult<T> = { ok: true; value: T } | { ok: false; error: string };
 export type CalendarStatus = "connected" | "expired" | "missing_scope" | "not_connected";
 
 export interface CalendarEvent {
+  id: string;
   summary: string;
   start: string | null;
   end: string | null;
@@ -34,6 +35,7 @@ function normalize(raw: Record<string, any>): CalendarEvent {
   const [start, allDay] = eventTime(raw.start);
   const [end] = eventTime(raw.end);
   return {
+    id: raw.id ?? "",
     summary: raw.summary ?? "(no title)",
     start,
     end,
@@ -75,6 +77,71 @@ export function listEvents(accessToken: string, timeMin: Date, timeMax: Date, ma
     maxResults: String(maxResults),
   });
   return fetchEvents(`${BASE_URL}/calendars/primary/events?${params}`, { authorization: `Bearer ${accessToken}` });
+}
+
+async function calendarRequest(accessToken: string, method: string, path: string, body?: unknown): Promise<GResult<Record<string, any>>> {
+  try {
+    const response = await fetch(`${BASE_URL}${path}`, {
+      method,
+      headers: { authorization: `Bearer ${accessToken}`, ...(body === undefined ? {} : { "content-type": "application/json" }) },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (response.status === 204) return { ok: true, value: {} };
+    const json = (await response.json().catch(() => null)) as Record<string, any> | null;
+    if (response.status === 403 && JSON.stringify(json).includes("insufficient")) return { ok: false, error: "insufficient_scope" };
+    if (response.status === 404 || response.status === 410) return { ok: false, error: "not_found" };
+    if (!response.ok) return { ok: false, error: `{:api_error, ${response.status}, ${JSON.stringify(json)}}` };
+    return { ok: true, value: json ?? {} };
+  } catch (error) {
+    return { ok: false, error: `{:http_error, ${(error as Error).message}}` };
+  }
+}
+
+export interface BusyCalendar {
+  busy: { start: Date; end: Date }[];
+  error: string | null;
+}
+
+export async function freeBusy(
+  accessToken: string,
+  calendars: string[],
+  timeMin: Date,
+  timeMax: Date,
+): Promise<GResult<Map<string, BusyCalendar>>> {
+  const result = await calendarRequest(accessToken, "POST", "/freeBusy", {
+    timeMin: iso(timeMin),
+    timeMax: iso(timeMax),
+    items: calendars.map((id) => ({ id })),
+  });
+  if (!result.ok) return result;
+  const entries = Object.entries((result.value.calendars ?? {}) as Record<string, any>).map(([id, calendar]) => {
+    const busy = ((calendar.busy ?? []) as { start: string; end: string }[]).map((slot) => ({
+      start: new Date(slot.start),
+      end: new Date(slot.end),
+    }));
+    const error = ((calendar.errors ?? []) as { reason?: string }[])[0]?.reason ?? null;
+    return [id, { busy, error }] as const;
+  });
+  return { ok: true, value: new Map(entries) };
+}
+
+const WRITE_QUERY = "sendUpdates=all&conferenceDataVersion=1";
+
+export async function getEvent(accessToken: string, id: string): Promise<GResult<Record<string, any>>> {
+  return calendarRequest(accessToken, "GET", `/calendars/primary/events/${encodeURIComponent(id)}`);
+}
+
+export async function createEvent(accessToken: string, event: Record<string, unknown>): Promise<GResult<Record<string, any>>> {
+  return calendarRequest(accessToken, "POST", `/calendars/primary/events?${WRITE_QUERY}`, event);
+}
+
+export async function updateEvent(accessToken: string, id: string, patch: Record<string, unknown>): Promise<GResult<Record<string, any>>> {
+  return calendarRequest(accessToken, "PATCH", `/calendars/primary/events/${encodeURIComponent(id)}?${WRITE_QUERY}`, patch);
+}
+
+export async function deleteEvent(accessToken: string, id: string): Promise<GResult<Record<string, any>>> {
+  return calendarRequest(accessToken, "DELETE", `/calendars/primary/events/${encodeURIComponent(id)}?sendUpdates=all`);
 }
 
 const PUBLIC_HOLIDAY = /^(Święto państwowe|Public holiday)/i;

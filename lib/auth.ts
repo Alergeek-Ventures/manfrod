@@ -5,7 +5,13 @@ import { admin } from "better-auth/plugins";
 import { config } from "./config.ts";
 import { db } from "./db/index.ts";
 import { account, session, users, verification } from "./db/schema.ts";
-import { ALLOWED_DOMAIN, AUTH_COOKIE_PREFIX, GOOGLE_CALENDAR_SCOPE, GOOGLE_CALLBACK_PATH } from "./auth-constants.ts";
+import {
+  ALLOWED_DOMAIN,
+  AUTH_COOKIE_PREFIX,
+  GOOGLE_CALENDAR_SCOPE,
+  GOOGLE_CALLBACK_PATH,
+  GOOGLE_FREEBUSY_SCOPE,
+} from "./auth-constants.ts";
 
 export const auth = betterAuth({
   baseURL: config.appUrl,
@@ -28,7 +34,7 @@ export const auth = betterAuth({
       hd: ALLOWED_DOMAIN,
       accessType: "offline",
       prompt: "consent",
-      scope: [GOOGLE_CALENDAR_SCOPE],
+      scope: [GOOGLE_CALENDAR_SCOPE, GOOGLE_FREEBUSY_SCOPE],
       disableSignUp: true,
       overrideUserInfoOnSignIn: true,
       redirectURI: `${config.appUrl}${GOOGLE_CALLBACK_PATH}`,
