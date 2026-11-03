@@ -18,6 +18,7 @@ import { runMorning as selfReviewMorning, runNightly as selfReviewNightly } from
 import { scheduleCronSkills, scheduleFirmowidEvening, scheduleFirmowidMorning, scheduleReminders } from "../schedulers.ts";
 import { refresh as refreshGitleaks } from "../security/gitleaks.ts";
 import { runAbsenceFollowUp } from "../nudges/absence.ts";
+import { runEveningHours } from "../nudges/hours.ts";
 import { runProjectSummaries } from "../nudges/projects.ts";
 import { runWorkStartNudges } from "../nudges/waiting.ts";
 import { runWeeklyWrapUps } from "../nudges/weekly.ts";
@@ -211,6 +212,7 @@ const allFunctions = [
   cronFunction("holiday-check", "0 10 * * 1-5", () => runHolidayCheck()),
   cronFunction("nudges-work-start", "*/15 7-12 * * 1-5", async () => ({ sent: await runWorkStartNudges() })),
   cronFunction("nudges-weekly", "*/30 12-17 * * 5", async () => ({ sent: await runWeeklyWrapUps() })),
+  cronFunction("nudges-hours", "0 19 * * 1-5", async () => ({ sent: await runEveningHours() })),
   cronFunction("nudges-project-summaries", "0 15 * * 5", async () => ({ posted: await runProjectSummaries() })),
   cronFunction("self-modify-cleanup", "20 * * * *", () => cleanUpClosedPulls()),
   cronFunction("capability-sync", "*/10 * * * *", () => syncCapabilityRequests()),

@@ -6,7 +6,7 @@ import { overlappingAbsences } from "../facts.ts";
 import { hasActiveSession } from "../firmowid.ts";
 import { ensureValidToken as googleToken, listEvents, type CalendarEvent } from "../google.ts";
 import { builtinProviders, ensureValidToken, getConnection } from "../mcp/index.ts";
-import { deactivatedSlackIds } from "../slack/api.ts";
+import { channelHistory, channelMembers, deactivatedSlackIds, listChannels, listFullThread, type SlackBody } from "../slack/api.ts";
 import { zonedToUtc } from "../time.ts";
 
 const { messages } = tables;
@@ -66,4 +66,44 @@ export function describeMeetings(events: CalendarEvent[], limit = 12): string {
     .slice(0, limit)
     .map((event) => `- ${event.start}: ${event.summary} (with ${attendeeNames(event)})`)
     .join("\n");
+}
+
+export interface SlackThread {
+  channelId: string;
+  channelName: string;
+  messages: SlackBody[];
+}
+
+export class SlackWorkspace {
+  private threads: Promise<SlackThread[]> | null = null;
+  private members = new Map<string, Promise<string[]>>();
+
+  constructor(private readonly oldest: string) {}
+
+  all(): Promise<SlackThread[]> {
+    this.threads ??= this.load();
+    return this.threads;
+  }
+
+  membersOf(channelId: string): Promise<string[]> {
+    if (!this.members.has(channelId))
+      this.members.set(
+        channelId,
+        channelMembers(channelId).then((members) => members ?? []),
+      );
+    return this.members.get(channelId)!;
+  }
+
+  private async load(): Promise<SlackThread[]> {
+    const channels = ((await listChannels({ types: "public_channel,private_channel,mpim" })) ?? []).filter((channel) => channel.is_member);
+    const threads: SlackThread[] = [];
+    for (const channel of channels) {
+      const history = (await channelHistory(channel.id, this.oldest)) ?? [];
+      for (const root of history) {
+        const replies = Number(root.reply_count ?? 0) > 0 ? ((await listFullThread(channel.id, root.ts, 200)) ?? [root]) : [root];
+        threads.push({ channelId: channel.id, channelName: channel.name ?? channel.id, messages: replies });
+      }
+    }
+    return threads;
+  }
 }

@@ -3,19 +3,10 @@ import { listOfficeAccessLog, type AccessEntry } from "../kalafiornia.ts";
 import { logger } from "../log.ts";
 import { resolveForRead } from "../memory/access.ts";
 import { search } from "../memory/search.ts";
-import {
-  channelHistory,
-  channelMembers,
-  fetchUserName,
-  getPermalink,
-  isActive,
-  listChannels,
-  listFullThread,
-  type SlackBody,
-} from "../slack/api.ts";
+import { fetchUserName, getPermalink, isActive, type SlackBody } from "../slack/api.ts";
 import { localToday } from "../time.ts";
 import { run } from "./compose.ts";
-import { firmowidSessionActive, isAbsent, nudgeablePeople, wroteToday } from "./signals.ts";
+import { firmowidSessionActive, isAbsent, nudgeablePeople, SlackWorkspace, wroteToday, type SlackThread } from "./signals.ts";
 import { handled, isEnabled, recordDelivery } from "./store.ts";
 
 const LOOKBACK_HOURS = 72;
@@ -33,12 +24,6 @@ const GUIDANCE = `This person just started their workday. Tell them, briefly, ab
 
 const FOLLOW_UP = `Gdy odpowie: jeśli chce coś odpisać albo zobaczyć, przeczytaj wątek przez read-slack-thread i pomóż. Jeśli coś jest już załatwione, przyjmij to i nie wracaj do tego.`;
 
-interface Thread {
-  channelId: string;
-  channelName: string;
-  messages: SlackBody[];
-}
-
 export interface WaitingThread {
   channelId: string;
   channelName: string;
@@ -50,7 +35,7 @@ export interface WaitingThread {
 
 const clip = (text: string, limit: number) => (text.length > limit ? `${text.slice(0, limit)}…` : text);
 
-export function waitingFor(slackUserId: string, threads: Thread[], now: number): WaitingThread[] {
+export function waitingFor(slackUserId: string, threads: SlackThread[], now: number): WaitingThread[] {
   const mention = `<@${slackUserId}>`;
   const roots = new Map<string, SlackBody[]>();
   for (const thread of threads) {
@@ -82,40 +67,6 @@ export function waitingFor(slackUserId: string, threads: Thread[], now: number):
     });
   }
   return found.sort((a, b) => Number(b.ts) - Number(a.ts)).slice(0, MAX_THREADS);
-}
-
-class Workspace {
-  private threads: Promise<Thread[]> | null = null;
-  private members = new Map<string, Promise<string[]>>();
-
-  constructor(private readonly oldest: string) {}
-
-  all(): Promise<Thread[]> {
-    this.threads ??= this.load();
-    return this.threads;
-  }
-
-  membersOf(channelId: string): Promise<string[]> {
-    if (!this.members.has(channelId))
-      this.members.set(
-        channelId,
-        channelMembers(channelId).then((members) => members ?? []),
-      );
-    return this.members.get(channelId)!;
-  }
-
-  private async load(): Promise<Thread[]> {
-    const channels = ((await listChannels({ types: "public_channel,private_channel,mpim" })) ?? []).filter((channel) => channel.is_member);
-    const threads: Thread[] = [];
-    for (const channel of channels) {
-      const history = (await channelHistory(channel.id, this.oldest)) ?? [];
-      for (const root of history) {
-        const replies = Number(root.reply_count ?? 0) > 0 ? ((await listFullThread(channel.id, root.ts, 200)) ?? [root]) : [root];
-        threads.push({ channelId: channel.id, channelName: channel.name ?? channel.id, messages: replies });
-      }
-    }
-    return threads;
-  }
 }
 
 async function describeThreads(found: WaitingThread[]): Promise<string> {
@@ -166,7 +117,7 @@ async function startedWork(person: User, today: string, office: AccessEntry[]): 
 
 export async function runWorkStartNudges(today = localToday()): Promise<number> {
   const oldest = String(Math.floor((Date.now() - LOOKBACK_HOURS * 3_600_000) / 1000));
-  const workspace = new Workspace(oldest);
+  const workspace = new SlackWorkspace(oldest);
   const office = await listOfficeAccessLog({ since: today });
   const entries = office.ok ? office.value : [];
   let sent = 0;
