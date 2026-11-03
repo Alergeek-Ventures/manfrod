@@ -133,10 +133,14 @@ export async function discoverMissingLogos(providers: Provider[]): Promise<void>
   }
 }
 
-export async function setCustomProviderAvailability(userId: string, id: string, availability: ChannelAudience[]): Promise<boolean> {
+export async function updateCustomProvider(
+  userId: string,
+  id: string,
+  { name, availability }: { name: string; availability: ChannelAudience[] },
+): Promise<boolean> {
   const updated = await db
     .update(mcpCustomProviders)
-    .set({ availability, updatedAt: new Date() })
+    .set({ name, availability, updatedAt: new Date() })
     .where(and(eq(mcpCustomProviders.userId, userId), eq(mcpCustomProviders.id, id)))
     .returning({ id: mcpCustomProviders.id });
   return updated.length > 0;

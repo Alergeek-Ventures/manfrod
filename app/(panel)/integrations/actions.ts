@@ -7,7 +7,7 @@ import {
   deleteCustomProvider,
   disconnect,
   saveHeaderValue,
-  setCustomProviderAvailability,
+  updateCustomProvider,
   type HeaderAuthInput,
 } from "@/lib/mcp/index.ts";
 import { isChannelAudience, type ChannelAudience } from "@/lib/memory/access.ts";
@@ -46,13 +46,16 @@ export async function addCustomProvider(
   return { ok: true, message: "Custom MCP server added" };
 }
 
-export async function updateCustomProviderAvailability(id: string, availability: string[]): Promise<ActionResult> {
+export async function updateCustomProviderSettings(id: string, name: string, availability: string[]): Promise<ActionResult> {
   const user = await requireUser();
+  if (name.trim() === "") return { ok: false, message: "Name is required" };
   const audiences = validAvailability(availability);
   if (!audiences) return { ok: false, message: "Pick at least one place where Manfrod can use this server" };
-  if (!(await setCustomProviderAvailability(user.id, id, audiences))) return { ok: false, message: "MCP server not found" };
+  if (!(await updateCustomProvider(user.id, id, { name: name.trim(), availability: audiences }))) {
+    return { ok: false, message: "MCP server not found" };
+  }
   revalidatePath("/integrations");
-  return { ok: true, message: "Availability saved" };
+  return { ok: true, message: "Settings saved" };
 }
 
 export async function saveProviderToken(id: string, value: string): Promise<ActionResult> {
