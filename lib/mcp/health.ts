@@ -57,7 +57,7 @@ export async function handleTokenFailure(userId: string, provider: Provider, err
 export async function retryToken(userId: string, providerId: string): Promise<"ok" | "gone" | "expired" | "unavailable"> {
   const provider = await getProviderForUser(userId, providerId);
   const connection = await getConnection(userId, providerId);
-  if (!provider || !connection || connection.status === "disconnected") return "gone";
+  if (!provider || provider.authHeader || !connection || connection.status === "disconnected") return "gone";
   const token = await refreshToken(connection);
   if (token.ok) return "ok";
   if (!isTokenRejected(token.error)) {

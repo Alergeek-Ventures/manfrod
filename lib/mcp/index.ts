@@ -4,7 +4,8 @@ import { db, tables } from "../db/index.ts";
 import type { McpConnection, McpOauthClient } from "../db/schema.ts";
 import { logger } from "../log.ts";
 import { CHANNEL_AUDIENCES, isChannelAudience, type ChannelAudience } from "../memory/access.ts";
-import { discoverName, listTools, type McpResult, type RemoteTool } from "./client.ts";
+import { decrypt, encrypt } from "../vault.ts";
+import { discoverName, listTools, type McpAuth, type McpResult, type RemoteTool } from "./client.ts";
 import { discoverLogo } from "./logo.ts";
 
 const { mcpConnections, mcpCustomProviders, mcpOauthClients } = tables;
@@ -18,6 +19,7 @@ export interface Provider {
   logoUrl: string | null;
   custom: boolean;
   scope: string | null;
+  authHeader: string | null;
   availability: ChannelAudience[];
 }
 
@@ -31,6 +33,7 @@ export function builtinProviders(): Provider[] {
       logoUrl: null,
       custom: false,
       scope: "mcp",
+      authHeader: null,
       availability: [...CHANNEL_AUDIENCES],
     },
   ];
@@ -52,6 +55,7 @@ export async function providersForUser(userId: string): Promise<Provider[]> {
       logoUrl: provider.logoUrl,
       custom: true,
       scope: provider.scope,
+      authHeader: provider.authHeader,
       availability: provider.availability.filter(isChannelAudience),
     })),
   ];
@@ -61,21 +65,54 @@ export async function getProviderForUser(userId: string, id: string): Promise<Pr
   return (await providersForUser(userId)).find((provider) => provider.id === id) ?? null;
 }
 
+export interface HeaderAuthInput {
+  header: string;
+  value: string;
+}
+
 export interface CustomProviderInput {
   url: string;
   name?: string | null;
   scope?: string | null;
   availability?: ChannelAudience[];
+  headerAuth?: HeaderAuthInput | null;
 }
 
-export async function createCustomProvider(userId: string, { url, name = null, scope = null, availability }: CustomProviderInput) {
+export function headerAuth({ header, value }: HeaderAuthInput): { header: string; value: string } {
+  const name = header.trim();
+  const trimmed = value.trim();
+  if (!/^[A-Za-z0-9-]+$/.test(name)) throw new Error("header: use a plain header name like Authorization or X-API-Key");
+  if (trimmed === "") throw new Error("value: the token is required");
+  const bare = name.toLowerCase() === "authorization" && !/\s/.test(trimmed);
+  return { header: name, value: bare ? `Bearer ${trimmed}` : trimmed };
+}
+
+async function verifyHeaderAuth(url: string, auth: McpAuth): Promise<void> {
+  const check = await listTools(url, auth);
+  if (!check.ok && check.error === "unauthorized") throw new Error("the server rejected this token");
+}
+
+export async function createCustomProvider(
+  userId: string,
+  { url, name = null, scope = null, availability, headerAuth: header = null }: CustomProviderInput,
+) {
   if (!/^https?:\/\//.test(url)) throw new Error("url: must be a valid http(s) URL");
+  const auth = header ? headerAuth(header) : null;
+  if (auth) await verifyHeaderAuth(url, auth);
   const presentName = name && name !== "" ? name : null;
   const [provider] = await db
     .insert(mcpCustomProviders)
-    .values({ userId, url, name: presentName, scope: scope && scope !== "" ? scope : null, availability })
+    .values({
+      userId,
+      url,
+      name: presentName,
+      scope: auth || !scope ? null : scope,
+      authHeader: auth?.header ?? null,
+      availability,
+    })
     .returning();
-  const [discoveredName, logoUrl] = await Promise.all([discoverName(url), discoverLogo(url)]);
+  if (auth) await storeHeaderValue(userId, provider.id, auth.value);
+  const [discoveredName, logoUrl] = await Promise.all([discoverName(url, auth), discoverLogo(url)]);
   const updates: Record<string, string> = {};
   const resolvedName = presentName ?? discoveredName;
   if (resolvedName) updates.name = resolvedName;
@@ -168,6 +205,28 @@ export async function saveTokens(userId: string, provider: string, attrs: TokenA
     .values({ userId, provider, ...values })
     .returning();
   return created;
+}
+
+async function storeHeaderValue(userId: string, provider: string, value: string): Promise<void> {
+  const values = { status: "connected", headerValue: encrypt(value), notifiedExpiredAt: null };
+  await db
+    .insert(mcpConnections)
+    .values({ userId, provider, ...values })
+    .onConflictDoUpdate({ target: [mcpConnections.userId, mcpConnections.provider], set: { ...values, updatedAt: new Date() } });
+  invalidateTools(userId, provider);
+}
+
+export async function saveHeaderValue(userId: string, providerId: string, value: string): Promise<void> {
+  const provider = await getProviderForUser(userId, providerId);
+  if (!provider?.authHeader) throw new Error("this server does not use a header token");
+  const auth = headerAuth({ header: provider.authHeader, value });
+  await verifyHeaderAuth(provider.mcpUrl, auth);
+  await storeHeaderValue(userId, providerId, auth.value);
+}
+
+export function connectionHeaderAuth(provider: Provider, connection: McpConnection): McpAuth | null {
+  if (!provider.authHeader || !connection.headerValue) return null;
+  return { header: provider.authHeader, value: decrypt(connection.headerValue) };
 }
 
 export async function markExpired(connection: McpConnection): Promise<McpConnection> {
@@ -374,11 +433,11 @@ export async function refresh(provider: string, token: string) {
 const toolCache = new Map<string, { tools: RemoteTool[]; expiresAt: number }>();
 const TOOL_CACHE_TTL_MS = 5 * 60 * 1000;
 
-export async function cachedTools(userId: string, provider: Provider, accessToken: string): Promise<McpResult<RemoteTool[]>> {
+export async function cachedTools(userId: string, provider: Provider, auth: McpAuth): Promise<McpResult<RemoteTool[]>> {
   const key = `${userId}:${provider.id}`;
   const cached = toolCache.get(key);
   if (cached && cached.expiresAt > Date.now()) return { ok: true, value: cached.tools };
-  const result = await listTools(provider.mcpUrl, accessToken);
+  const result = await listTools(provider.mcpUrl, auth);
   if (result.ok) toolCache.set(key, { tools: result.value, expiresAt: Date.now() + TOOL_CACHE_TTL_MS });
   return result;
 }

@@ -2,7 +2,14 @@
 
 import { revalidatePath } from "next/cache";
 import { disconnect as disconnectKalafiornia, loginWithPin, requestPin } from "@/lib/kalafiornia.ts";
-import { createCustomProvider, deleteCustomProvider, disconnect, setCustomProviderAvailability } from "@/lib/mcp/index.ts";
+import {
+  createCustomProvider,
+  deleteCustomProvider,
+  disconnect,
+  saveHeaderValue,
+  setCustomProviderAvailability,
+  type HeaderAuthInput,
+} from "@/lib/mcp/index.ts";
 import { isChannelAudience, type ChannelAudience } from "@/lib/memory/access.ts";
 import { requireUser } from "@/lib/web/session.ts";
 
@@ -13,7 +20,13 @@ function validAvailability(availability: string[]): ChannelAudience[] | null {
   return valid.length > 0 && valid.length === availability.length ? [...new Set(valid)] : null;
 }
 
-export async function addCustomProvider(url: string, name: string, scope: string, availability: string[]): Promise<ActionResult> {
+export async function addCustomProvider(
+  url: string,
+  name: string,
+  scope: string,
+  availability: string[],
+  headerAuth: HeaderAuthInput | null,
+): Promise<ActionResult> {
   const user = await requireUser();
   if (url.trim() === "") return { ok: false, message: "MCP server URL is required" };
   const audiences = validAvailability(availability);
@@ -24,6 +37,7 @@ export async function addCustomProvider(url: string, name: string, scope: string
       name: name.trim() || null,
       scope: scope.trim() || null,
       availability: audiences,
+      headerAuth,
     });
   } catch (error) {
     return { ok: false, message: `Could not add server: ${(error as Error).message}` };
@@ -39,6 +53,17 @@ export async function updateCustomProviderAvailability(id: string, availability:
   if (!(await setCustomProviderAvailability(user.id, id, audiences))) return { ok: false, message: "MCP server not found" };
   revalidatePath("/integrations");
   return { ok: true, message: "Availability saved" };
+}
+
+export async function saveProviderToken(id: string, value: string): Promise<ActionResult> {
+  const user = await requireUser();
+  try {
+    await saveHeaderValue(user.id, id, value);
+  } catch (error) {
+    return { ok: false, message: `Could not save token: ${(error as Error).message}` };
+  }
+  revalidatePath("/integrations");
+  return { ok: true, message: "Token saved" };
 }
 
 export async function removeCustomProvider(id: string): Promise<ActionResult> {

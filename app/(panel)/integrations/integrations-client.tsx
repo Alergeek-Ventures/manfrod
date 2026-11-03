@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Field, FieldContent, FieldDescription, FieldGroup, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { authClient } from "@/lib/auth-client";
 import type { CalendarStatus } from "@/lib/google.ts";
 import type { ChannelAudience } from "@/lib/memory/access.ts";
@@ -23,6 +24,7 @@ import {
   kalafiorniaSendPin,
   kalafiorniaVerifyPin,
   removeCustomProvider,
+  saveProviderToken,
   updateCustomProviderAvailability,
   type ActionResult,
 } from "./actions.ts";
@@ -33,6 +35,7 @@ interface ProviderView {
   mock: boolean;
   logoUrl: string | null;
   custom: boolean;
+  authHeader: string | null;
   availability: ChannelAudience[];
 }
 
@@ -156,6 +159,70 @@ function AvailabilityDialog({ provider, run, pending }: { provider: ProviderView
   );
 }
 
+function TokenField({ header, value, onChange }: { header: string; value: string; onChange: (value: string) => void }) {
+  return (
+    <Field>
+      <FieldLabel htmlFor="mcp-token">Token</FieldLabel>
+      <Input
+        id="mcp-token"
+        type="password"
+        autoComplete="off"
+        placeholder={header.toLowerCase() === "authorization" ? "Bearer …" : "…"}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        required
+      />
+      <FieldDescription>
+        Sent as the {header || "header"} header on every request to this server. For Authorization, a bare token is sent as Bearer
+        &lt;token&gt;. Stored encrypted and never shown again.
+      </FieldDescription>
+    </Field>
+  );
+}
+
+function TokenDialog({ provider, active, run, pending }: { provider: ProviderView; active: boolean; run: Run; pending: boolean }) {
+  const [open, setOpen] = useState(false);
+  const [value, setValue] = useState("");
+  const header = provider.authHeader ?? "";
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        setValue("");
+        setOpen(next);
+      }}
+    >
+      <DialogTrigger render={<Button size="sm" variant={active ? "outline" : "default"} />}>
+        {active ? "Reconnect" : "Connect"}
+      </DialogTrigger>
+      <DialogContent>
+        <form
+          className="flex flex-col gap-6"
+          onSubmit={(event) => {
+            event.preventDefault();
+            run(
+              () => saveProviderToken(provider.id, value),
+              () => setOpen(false),
+            );
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>{provider.name} token</DialogTitle>
+            <DialogDescription>Paste a new token for this server. Manfrod checks it before saving.</DialogDescription>
+          </DialogHeader>
+          <TokenField header={header} value={value} onChange={setValue} />
+          <DialogFooter>
+            <Button type="submit" disabled={pending || value.trim() === ""}>
+              {pending && <Spinner data-icon="inline-start" />}
+              Save
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function ProviderCard({
   provider,
   status,
@@ -186,14 +253,18 @@ function ProviderCard({
       </CardHeader>
       {!provider.mock && (
         <CardFooter className="mt-auto gap-2">
-          <Button
-            size="sm"
-            variant={active ? "outline" : "default"}
-            nativeButton={false}
-            render={<a href={`/mcp/${provider.id}/connect`} />}
-          >
-            {active ? "Reconnect" : "Connect"}
-          </Button>
+          {provider.authHeader ? (
+            <TokenDialog provider={provider} active={active} run={run} pending={pending} />
+          ) : (
+            <Button
+              size="sm"
+              variant={active ? "outline" : "default"}
+              nativeButton={false}
+              render={<a href={`/mcp/${provider.id}/connect`} />}
+            >
+              {active ? "Reconnect" : "Connect"}
+            </Button>
+          )}
           {active && (
             <ConfirmAction
               label="Disconnect"
@@ -226,7 +297,19 @@ function AddProviderDialog({ run, pending }: { run: Run; pending: boolean }) {
   const [url, setUrl] = useState("");
   const [name, setName] = useState("");
   const [scope, setScope] = useState("");
+  const [auth, setAuth] = useState<"oauth" | "header">("oauth");
+  const [header, setHeader] = useState("Authorization");
+  const [token, setToken] = useState("");
   const [availability, setAvailability] = useState(DEFAULT_AVAILABILITY);
+  const reset = () => {
+    setUrl("");
+    setName("");
+    setScope("");
+    setAuth("oauth");
+    setHeader("Authorization");
+    setToken("");
+    setAvailability(DEFAULT_AVAILABILITY);
+  };
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger render={<Button variant="outline" className="h-full min-h-24 border-dashed" />}>
@@ -239,13 +322,10 @@ function AddProviderDialog({ run, pending }: { run: Run; pending: boolean }) {
           onSubmit={(event) => {
             event.preventDefault();
             run(
-              () => addCustomProvider(url, name, scope, availability),
+              () => addCustomProvider(url, name, scope, availability, auth === "header" ? { header, value: token } : null),
               () => {
                 setOpen(false);
-                setUrl("");
-                setName("");
-                setScope("");
-                setAvailability(DEFAULT_AVAILABILITY);
+                reset();
               },
             );
           }}
@@ -273,14 +353,39 @@ function AddProviderDialog({ run, pending }: { run: Run; pending: boolean }) {
               <FieldDescription>Optional — auto-detected if left blank.</FieldDescription>
             </Field>
             <Field>
-              <FieldLabel htmlFor="mcp-scope">OAuth scope</FieldLabel>
-              <Input id="mcp-scope" placeholder="e.g. mcp read write" value={scope} onChange={(event) => setScope(event.target.value)} />
-              <FieldDescription>Optional — only if the server requires specific scopes.</FieldDescription>
+              <FieldLabel>Authentication</FieldLabel>
+              <ToggleGroup
+                variant="outline"
+                size="sm"
+                value={[auth]}
+                onValueChange={(values) => setAuth((values[0] as "oauth" | "header" | undefined) ?? auth)}
+              >
+                <ToggleGroupItem value="oauth">Sign in (OAuth)</ToggleGroupItem>
+                <ToggleGroupItem value="header">API token</ToggleGroupItem>
+              </ToggleGroup>
             </Field>
+            {auth === "oauth" ? (
+              <Field>
+                <FieldLabel htmlFor="mcp-scope">OAuth scope</FieldLabel>
+                <Input id="mcp-scope" placeholder="e.g. mcp read write" value={scope} onChange={(event) => setScope(event.target.value)} />
+                <FieldDescription>Optional — only if the server requires specific scopes.</FieldDescription>
+              </Field>
+            ) : (
+              <>
+                <Field>
+                  <FieldLabel htmlFor="mcp-header">Header</FieldLabel>
+                  <Input id="mcp-header" value={header} onChange={(event) => setHeader(event.target.value)} required />
+                </Field>
+                <TokenField header={header} value={token} onChange={setToken} />
+              </>
+            )}
             <AvailabilityField idPrefix="mcp-new" value={availability} onChange={setAvailability} />
           </FieldGroup>
           <DialogFooter>
-            <Button type="submit" disabled={pending || url === "" || availability.length === 0}>
+            <Button
+              type="submit"
+              disabled={pending || url === "" || availability.length === 0 || (auth === "header" && (header === "" || token.trim() === ""))}
+            >
               {pending && <Spinner data-icon="inline-start" />}
               Add
             </Button>
