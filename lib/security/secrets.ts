@@ -1,3 +1,4 @@
+import type { LanguageCode } from "../agent-settings.ts";
 import { PRIMARY_MODEL, generateSimple, system, user } from "../llm/index.ts";
 import { logger } from "../log.ts";
 import { matches } from "./gitleaks.ts";
@@ -12,19 +13,6 @@ export function containsSecret(text: string | null | undefined): boolean {
   if (typeof text !== "string") return false;
   const withoutUrls = text.replace(URL_REGEX, " ");
   return LABELLED_SECRET.test(withoutUrls) || matches(withoutUrls) !== null;
-}
-
-const POLISH_CHARS = /[ąćęłńóśźżĄĆĘŁŃÓŚŹŻ]/;
-const POLISH_WORDS = new Set("nie jest tutaj proszę cześć siema dzięki masz jak co gdzie kiedy jestem może właśnie".split(" "));
-
-export function languageHint(text: unknown): "pl" | "en" {
-  if (typeof text !== "string") return "pl";
-  if (POLISH_CHARS.test(text)) return "pl";
-  const words = text
-    .toLowerCase()
-    .split(/[^\p{L}]+/u)
-    .filter(Boolean);
-  return words.some((word) => POLISH_WORDS.has(word)) ? "pl" : "en";
 }
 
 const SYSTEM_MESSAGE = `You are a Slack bot that just intercepted a message before it reached
@@ -44,32 +32,33 @@ sentence structure. Match the tone of a normal casual DM from a helpful
 coworker, not a security alert. No quotes around the message, no
 markdown headers.
 
-The input you get is EITHER a language code (\`pl\`, \`en\`, ...) — write
-entirely in that language — OR a few of this person's other recent Slack
-messages, labeled as such. In that case they are only there so you can
-tell which language and tone this person actually writes in; never
-quote, reference, or reply to what they say in them.
+The input names the language to write in. It may also include a few of
+this person's other recent Slack messages, labeled as such. They are only
+there so you can match their tone (and their language, if the input says
+to); never quote, reference, or reply to what they say in them.
 `;
 
-function fallback(lang: "pl" | "en"): string {
-  if (lang === "pl") {
+function fallback(language: LanguageCode): string {
+  if (language === "pl") {
     return "Hej, ta wiadomość wygląda jakby zawierała klucz API albo hasło — nie zapisałem jej ani nie przekazałem dalej. Wklej takie rzeczy do <https://one.d.alergeek.me/|one.d.alergeek.me> zamiast wysyłać je na Slacku 🔒";
   }
   return "Hey, this message looks like it contains an API key or password — I didn't store or forward it. Please paste secrets like that into <https://one.d.alergeek.me/|one.d.alergeek.me> instead of sending them over Slack 🔒";
 }
 
-export async function secretWarning(context: string | null, fallbackLang: "pl" | "en"): Promise<string> {
+export async function secretWarning(language: { code: LanguageCode; name: string }, personContext: string | null): Promise<string> {
   const content =
-    context && context !== "" ? `Recent messages from this person, oldest first (language/tone reference only):\n${context}` : fallbackLang;
+    personContext && personContext !== ""
+      ? `Write in ${language.name}, or in the language this person writes in below if it differs.\n\nRecent messages from this person, oldest first (language/tone reference only):\n${personContext}`
+      : `Write in ${language.name}.`;
   try {
     const text = await generateSimple(PRIMARY_MODEL, [system(SYSTEM_MESSAGE), user(content)], {
       purpose: "secret_warning",
       timeoutMs: 8_000,
     });
     const cleaned = text.trim().replace(/^"+|"+$/g, "");
-    return cleaned === "" ? fallback(fallbackLang) : cleaned;
+    return cleaned === "" ? fallback(language.code) : cleaned;
   } catch (error) {
     log.debug(`SecretWarning: LLM error, falling back to fixed text: ${(error as Error).message}`);
-    return fallback(fallbackLang);
+    return fallback(language.code);
   }
 }

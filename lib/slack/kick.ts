@@ -1,4 +1,4 @@
-import { channelLanguage } from "../agent-settings.ts";
+import { channelLanguage, type LanguageCode } from "../agent-settings.ts";
 import { PRIMARY_MODEL, generateSimple, system, user } from "../llm/index.ts";
 import { logger } from "../log.ts";
 import { listFullThread, post } from "./api.ts";
@@ -13,10 +13,7 @@ const systemMessage = (language: string) => `Jesteś Manfrod, firmowy asystent n
 poprosił, żebyś przestał się w nim udzielać, i faktycznie już wychodzisz.
 
 Napisz jedną krótką wiadomość pożegnalną:
-- W JĘZYKU WĄTKU. Rozpoznaj język z załączonych wiadomości i użyj dokładnie
-  tego samego. Jeśli wątek jest po angielsku, pożegnaj się po angielsku;
-  jeśli po polsku, po polsku. Przy mieszance wybierz język, w którym
-  poproszono Cię o wyjście. Bez kontekstu użyj języka: ${language}.
+- w języku: ${language}, niezależnie od języka wiadomości w wątku
 - lekko smutną, ale bez dramatyzowania i bez proszenia się o powrót
 - nawiązującą do tego konkretnego wątku, jeśli z kontekstu widać, o czym był
 - z informacją, że wystarczy Cię oznaczyć (@Manfrod), żebyś wrócił
@@ -26,7 +23,10 @@ Napisz jedną krótką wiadomość pożegnalną:
 Odpowiedz samą treścią wiadomości, niczym więcej.
 `;
 
-const FALLBACK_FAREWELL = "Ok, znikam z tego wątku. 😔 Gdybyście mnie potrzebowali, wystarczy mnie oznaczyć.";
+const FALLBACK_FAREWELLS: Partial<Record<LanguageCode, string>> = {
+  pl: "Ok, znikam z tego wątku. 😔 Gdybyście mnie potrzebowali, wystarczy mnie oznaczyć.",
+  en: "Ok, I'm leaving this thread. 😔 If you need me, just mention me.",
+};
 
 async function threadContext(channel: string, threadTs: string): Promise<string> {
   const messages = await listFullThread(channel, threadTs);
@@ -40,19 +40,17 @@ async function threadContext(channel: string, threadTs: string): Promise<string>
 }
 
 export async function farewell(channel: string, threadTs: string): Promise<string> {
+  const language = await channelLanguage(channel);
+  const fallback = FALLBACK_FAREWELLS[language.code] ?? FALLBACK_FAREWELLS.en!;
   try {
-    const text = await generateSimple(
-      PRIMARY_MODEL,
-      [system(systemMessage((await channelLanguage(channel)).name)), user(await threadContext(channel, threadTs))],
-      {
-        purpose: "farewell",
-        timeoutMs: 8_000,
-      },
-    );
-    return text.trim() === "" ? FALLBACK_FAREWELL : text.trim();
+    const text = await generateSimple(PRIMARY_MODEL, [system(systemMessage(language.name)), user(await threadContext(channel, threadTs))], {
+      purpose: "farewell",
+      timeoutMs: 8_000,
+    });
+    return text.trim() === "" ? fallback : text.trim();
   } catch (error) {
     log.debug(`Slack Kick: farewell generation failed, using fallback: ${(error as Error).message}`);
-    return FALLBACK_FAREWELL;
+    return fallback;
   }
 }
 

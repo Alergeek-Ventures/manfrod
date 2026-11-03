@@ -1,4 +1,5 @@
 import { getUserBySlackId } from "../accounts.ts";
+import type { LanguageCode } from "../agent-settings.ts";
 import { broadcast } from "../events/index.ts";
 import { record } from "../feedback.ts";
 import { logger } from "../log.ts";
@@ -17,7 +18,27 @@ function decode(value: unknown): { rating: string; sessionKey: string | null } {
   return index === -1 ? { rating: value, sessionKey: null } : { rating: value.slice(0, index), sessionKey: value.slice(index + 1) };
 }
 
-export function feedbackBlock(sessionKey: string | null) {
+const LABELS = {
+  pl: {
+    good: "Dobra odpowiedź",
+    goodLabel: "Oceń odpowiedź pozytywnie",
+    bad: "Słaba odpowiedź",
+    badLabel: "Oceń odpowiedź negatywnie",
+    remove: "Usuń",
+    removeLabel: "Usuń tę odpowiedź",
+  },
+  en: {
+    good: "Good answer",
+    goodLabel: "Rate this answer as good",
+    bad: "Bad answer",
+    badLabel: "Rate this answer as bad",
+    remove: "Remove",
+    removeLabel: "Remove this answer",
+  },
+};
+
+export function feedbackBlock(sessionKey: string | null, language: LanguageCode) {
+  const labels = language === "pl" ? LABELS.pl : LABELS.en;
   return {
     type: "context_actions",
     elements: [
@@ -25,29 +46,29 @@ export function feedbackBlock(sessionKey: string | null) {
         type: "feedback_buttons",
         action_id: FEEDBACK_ACTION_ID,
         positive_button: {
-          text: { type: "plain_text", text: "Dobra odpowiedź" },
+          text: { type: "plain_text", text: labels.good },
           value: encode("good", sessionKey),
-          accessibility_label: "Oceń odpowiedź pozytywnie",
+          accessibility_label: labels.goodLabel,
         },
         negative_button: {
-          text: { type: "plain_text", text: "Słaba odpowiedź" },
+          text: { type: "plain_text", text: labels.bad },
           value: encode("bad", sessionKey),
-          accessibility_label: "Oceń odpowiedź negatywnie",
+          accessibility_label: labels.badLabel,
         },
       },
       {
         type: "icon_button",
         action_id: REMOVE_ACTION_ID,
         icon: "trash",
-        text: { type: "plain_text", text: "Usuń" },
-        accessibility_label: "Usuń tę odpowiedź",
+        text: { type: "plain_text", text: labels.remove },
+        accessibility_label: labels.removeLabel,
       },
     ],
   };
 }
 
-export function feedbackChunk(sessionKey: string | null) {
-  return { type: "blocks", blocks: [feedbackBlock(sessionKey)] };
+export function feedbackChunk(sessionKey: string | null, language: LanguageCode) {
+  return { type: "blocks", blocks: [feedbackBlock(sessionKey, language)] };
 }
 
 export async function removeMessage(channelId: string, messageTs: string): Promise<void> {

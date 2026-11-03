@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import type { BufferedMessage, Node, Project } from "../db/schema.ts";
 import { getUserBySlackId } from "../accounts.ts";
+import { channelLanguage } from "../agent-settings.ts";
 import { EVENTS, sendEvent } from "../inngest/client.ts";
 import { broadcast } from "../events/index.ts";
 import { addAccess, overlappingAbsences, putAbsence, setFact } from "../facts.ts";
@@ -249,7 +250,7 @@ async function createAbsence(result: Result, message: BufferedMessage, batch: Ba
   if (!node) return;
 
   const proposal = escalationProposal(batch, writeAccess, "absence");
-  if (proposal) await postEscalationQuestion(batch.channelId, message, node, proposal, writeAccess, lang(result), key);
+  if (proposal) await postEscalationQuestion(batch.channelId, message, node, proposal, writeAccess, key);
   await sendEvent(EVENTS.absenceRecorded, { userId, startDate, endDate, working: result.working === true });
 }
 
@@ -272,7 +273,7 @@ async function askHuman(result: Result, message: BufferedMessage, batch: Batch, 
       embedding,
       projectId: noteProjectId(batch.projects, batch.projectId, result),
     });
-    await postEscalationQuestion(batch.channelId, message, node, proposal, writeAccess, lang(result), null);
+    await postEscalationQuestion(batch.channelId, message, node, proposal, writeAccess, null);
   } catch (error) {
     log.info(`Classifier ask_human skipped for ${batch.channelId}: ${(error as Error).message}`);
   }
@@ -328,8 +329,6 @@ async function runOp(op: PendingOp) {
 function noteOrText(result: Result, message: BufferedMessage): string {
   return typeof result.note === "string" && result.note !== "" ? result.note : (message.text ?? "");
 }
-
-const lang = (result: Result): Lang => (result.lang === "pl" ? "pl" : "en");
 
 function absenceDates(result: Result) {
   const valid = (value: unknown) => (typeof value === "string" && isValidIsoDate(value) ? value : null);
@@ -398,9 +397,9 @@ async function postEscalationQuestion(
   node: Node,
   proposal: Proposal,
   writeAccess: string[],
-  language: Lang,
   factKey: string | null,
 ) {
+  const language: Lang = (await channelLanguage(channelId)).code === "pl" ? "pl" : "en";
   const prompt = escalationPromptText(language, node.content, currentLevelText(language, writeAccess));
   const initial = proposal.options.filter((level) => proposal.preselected.includes(level)).map((level) => checkboxOption(level, language));
   const checkboxes: Record<string, unknown> = {

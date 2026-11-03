@@ -1,5 +1,6 @@
 import { and, eq, lt } from "drizzle-orm";
 import { getUser, getUserBySlackId, isAdmin, isUuid } from "../accounts.ts";
+import { channelLanguage } from "../agent-settings.ts";
 import { TASK_KIND } from "../agent/context.ts";
 import { config } from "../config.ts";
 import { db, tables } from "../db/index.ts";
@@ -164,14 +165,14 @@ export async function handleCapabilityDecision(payload: Record<string, any>, app
   }
 }
 
-function buildPrompt(request: CapabilityRequest, admin: User, task: AgentTask | null): string {
+function buildPrompt(request: CapabilityRequest, admin: User, task: AgentTask | null, language: string): string {
   return `[Capability approved — not a message from a person] ${admin.name ?? "An admin"} approved your request for a new capability.
 
 Title: ${request.title}
 What it must do: ${request.description}
 Why it is needed: ${request.reason}
 ${task ? `It unblocks task ${task.id} "${task.title}": ${task.goal}\n` : ""}
-Delegate it to the self-modify subagent now. Brief it with what the capability must do, why it is needed and what good behavior looks like, and ask for the smallest change that adds it, following the repository's conventions (one tool per file in agent/tools). Tell it not to put Slack links, names or quotes into the pull request. Wait for its result with eve__task_wait. Then reply here with the pull request link and one sentence on what it adds; it becomes available once the pull request is merged and deployed${task ? ", and the task resumes on its own then" : ""}. If self-modify could not do it, say why in one sentence.`;
+Delegate it to the self-modify subagent now. Brief it with what the capability must do, why it is needed and what good behavior looks like, and ask for the smallest change that adds it, following the repository's conventions (one tool per file in agent/tools). Tell it not to put Slack links, names or quotes into the pull request. Wait for its result with eve__task_wait. Then post in this thread with post-slack-message (channel ${request.channelId}, thread_ts ${request.threadTs}), in ${language}, the pull request link and one sentence on what it adds; it becomes available once the pull request is merged and deployed${task ? ", and the task resumes on its own then" : ""}. If self-modify could not do it, post why in one sentence. Your final reply is never shown to anyone.`;
 }
 
 export async function startCapabilityBuild(requestId: string): Promise<boolean> {
@@ -183,7 +184,7 @@ export async function startCapabilityBuild(requestId: string): Promise<boolean> 
   const access = await resolveAccess(admin.id, request.channelId);
   await agentRuntime().sendToSlack(
     { channelId: request.channelId, threadTs: request.threadTs },
-    buildPrompt(request, admin, task),
+    buildPrompt(request, admin, task, (await channelLanguage(request.channelId)).name),
     userAuth(admin.id, admin.slackId, {
       kind: TASK_KIND,
       capabilityRequestId: request.id,

@@ -1,9 +1,9 @@
 import { defineSlackRenderer, type SlackEventContext } from "eve/channels/slack";
-import { channelLanguage } from "../agent-settings.ts";
+import { channelLanguage, type LanguageCode } from "../agent-settings.ts";
 import { planTitle, threadTitle } from "../agent/titles.ts";
 import { logger } from "../log.ts";
 import { isUntitledProactiveThread, markProactiveThreadTitled } from "../proactive.ts";
-import { isBackgroundKind, toolCtx, type ToolCtx } from "../agent/context.ts";
+import { isBackgroundKind, TASK_KIND, toolCtx, type ToolCtx } from "../agent/context.ts";
 import { deleteMessage, post, setStatus, setTitle, type SlackBody } from "./api.ts";
 import { feedbackBlock, feedbackChunk } from "./feedback.ts";
 import { fromMarkdown, toBlocks } from "./mrkdwn.ts";
@@ -12,7 +12,14 @@ import { TtlMap, shared } from "./state.ts";
 import { ensureStream, getStream, type Recipient } from "./stream.ts";
 
 const log = logger("Slack.ActivityHandler");
-const PROVISIONAL_PLAN_TITLE = "Pracuję nad tym";
+const PROVISIONAL_PLAN_TITLES: Record<LanguageCode, string> = {
+  pl: "Pracuję nad tym",
+  en: "Working on it",
+  de: "Ich arbeite daran",
+  uk: "Працюю над цим",
+  es: "Estoy en ello",
+  fr: "Je m'en occupe",
+};
 const MARKDOWN_BLOCK_LIMIT = 11_900;
 const DETAILS_LIMIT = 120;
 const NO_REPLY_TOOL = "no-reply";
@@ -70,7 +77,7 @@ function streamFor(where: Where, channel: SlackEventContext) {
   if (!where.threadTs) return null;
   const existing = getStream(where.channel, where.threadTs);
   if (existing && !existing.closed) return existing;
-  if (where.tool.kind === "skill_channel") return null;
+  if (where.tool.kind === "skill_channel" || where.tool.kind === TASK_KIND) return null;
   const target = recipient(where, channel);
   if (target === "unsupported") return null;
   return ensureStream(where.channel, where.threadTs, target);
@@ -81,7 +88,11 @@ async function postReply(where: Where, content: string, withFeedback: boolean) {
   const body: SlackBody = { channel: where.channel, text };
   if (where.threadTs) body.thread_ts = where.threadTs;
   const bodyBlocks = blocks ?? (content.length <= MARKDOWN_BLOCK_LIMIT ? [{ type: "markdown", text: content }] : null);
-  if (bodyBlocks) body.blocks = withFeedback ? [...bodyBlocks, feedbackBlock(where.tool.sessionKey)] : bodyBlocks;
+  if (bodyBlocks) {
+    body.blocks = withFeedback
+      ? [...bodyBlocks, feedbackBlock(where.tool.sessionKey, (await channelLanguage(where.channel)).code)]
+      : bodyBlocks;
+  }
   const result = await post("chat.postMessage", body);
   if (!result.ok) throw new Error(`chat.postMessage failed: ${result.error}`);
 }
@@ -121,7 +132,8 @@ async function deliverFinal(where: Where, rawContent: string) {
 
   let delivered = false;
   if (stream && !stream.closed) {
-    const outcome = await stream.finish(content, skill ? [] : [feedbackChunk(where.tool.sessionKey)]);
+    const feedback = skill ? [] : [feedbackChunk(where.tool.sessionKey, (await channelLanguage(where.channel)).code)];
+    const outcome = await stream.finish(content, feedback);
     delivered = outcome !== "not_streaming";
   }
   if (!delivered) {
@@ -155,7 +167,7 @@ export const manfrodRenderer = defineSlackRenderer({
 
     "message.appended"(event, channel, ctx) {
       const at = where(channel, ctx);
-      if (!at || at.tool.kind === "skill_channel") return;
+      if (!at || at.tool.kind === "skill_channel" || at.tool.kind === TASK_KIND) return;
       streamFor(at, channel)?.text(event.messageDelta);
     },
 
@@ -170,7 +182,10 @@ export const manfrodRenderer = defineSlackRenderer({
         if (at.threadTs) void setStatus(at.channel, at.threadTs, `is using ${name}...`);
         return;
       }
-      stream.planDefault(PROVISIONAL_PLAN_TITLE);
+      const language = channelLanguage(at.channel);
+      void language.then(({ code }) => {
+        if (!stream.closed) stream.planDefault(PROVISIONAL_PLAN_TITLES[code]);
+      });
       for (const action of actions) {
         const name = "toolName" in action ? action.toolName : action.kind;
         stream.task({
@@ -185,7 +200,7 @@ export const manfrodRenderer = defineSlackRenderer({
         plannedTurns.set(turnKey, true);
         const request = lastUserContent(at.tool.sessionKey);
         if (request) {
-          void channelLanguage(at.channel)
+          void language
             .then(({ name }) => planTitle(request, name))
             .then((title) => {
               if (title && !stream.closed) stream.plan(title);
@@ -214,6 +229,10 @@ export const manfrodRenderer = defineSlackRenderer({
       if (event.finishReason === "tool-calls") return;
       const at = where(channel, ctx);
       if (!at) return;
+      if (at.tool.kind === TASK_KIND) {
+        log.info(`Slack ActivityHandler kept the final reply of task ${at.tool.taskId ?? "?"} out of Slack`);
+        return;
+      }
       repliedTurns.set(`${ctx.session.id}:${event.turnId}`, true);
       await deliverFinal(at, event.message ?? "");
     },

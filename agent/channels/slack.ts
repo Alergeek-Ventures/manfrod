@@ -1,6 +1,7 @@
 import type { RouteHandlerArgs } from "eve/channels";
 import { slackChannel, type SlackChannelState, type SlackInboundMessageContext, type SlackMessage } from "eve/channels/slack";
 import { getUserBySlackId } from "../../lib/accounts.ts";
+import { channelLanguage } from "../../lib/agent-settings.ts";
 import { unfurlLinearLinks } from "../../lib/linear/unfurl.ts";
 import { logger } from "../../lib/log.ts";
 import { setStatus, setSuggestedPrompts } from "../../lib/slack/api.ts";
@@ -105,7 +106,10 @@ const base = slackChannel({
         channel: shortcut.channelId,
         thread_ts: threadTs,
         user: shortcut.user.id,
-        text: "Już mnie tu nie ma — oznacz mnie `@Manfrod`, jeśli mam wrócić.",
+        text:
+          (await channelLanguage(shortcut.channelId)).code === "pl"
+            ? "Już mnie tu nie ma — oznacz mnie `@Manfrod`, jeśli mam wrócić."
+            : "I've already left this thread — mention `@Manfrod` if you want me back.",
       });
     }
   },
