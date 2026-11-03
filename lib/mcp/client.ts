@@ -123,16 +123,3 @@ export async function discoverName(url: string): Promise<string | null> {
     return null;
   }
 }
-
-export async function discoverLogo(url: string): Promise<string | null> {
-  const origin = new URL(url).origin;
-  for (const suffix of ["/favicon.svg", "/favicon.ico"]) {
-    try {
-      const response = await fetch(origin + suffix, { signal: AbortSignal.timeout(8_000) });
-      if (response.status === 200 && (response.headers.get("content-type") ?? "").startsWith("image/")) {
-        return origin + suffix;
-      }
-    } catch {}
-  }
-  return null;
-}

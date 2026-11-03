@@ -5,8 +5,8 @@ import { deleteLogsOlderThan, deleteOlderThan } from "../events/store.ts";
 import { executeJob, JobError } from "../jobs/execute.ts";
 import { completeJob, dispatchUndispatched, failJob, getJob, markExecuting, pruneJobs } from "../jobs/index.ts";
 import { logger } from "../log.ts";
-import { ensureValidToken, invalidateTools, listAllConnectionsWithProvider, markExpired, markNotified } from "../mcp/index.ts";
-import { expiredConnectionPrompt } from "../mcp/tools.ts";
+import { giveUpOnToken, handleTokenFailure, retryToken, TOKEN_RETRY_DELAYS } from "../mcp/health.ts";
+import { ensureValidToken, listAllConnectionsWithProvider } from "../mcp/index.ts";
 import { flush, staleKeys } from "../memory/buffer.ts";
 import { extractSession } from "../memory/extractor.ts";
 import { sweep } from "../memory/pending.ts";
@@ -29,6 +29,7 @@ import {
   type AbsenceRecordedData,
   type BufferPushedData,
   type JobScheduledData,
+  type McpTokenUnavailableData,
   type SessionActivityData,
 } from "./client.ts";
 
@@ -139,24 +140,34 @@ const flushBuffer = inngest.createFunction(
 );
 
 const mcpExpiry = cronFunction("mcp-expiry", "15 * * * *", async () => {
-  const log = logger("McpExpiryWorker");
   const all = await listAllConnectionsWithProvider();
-  const expired: string[] = [];
+  const failing: Record<string, string> = {};
   for (const { connection, provider } of all) {
     const token = await ensureValidToken(connection);
-    if (token.ok) continue;
-    expired.push(`${provider.id}/${connection.userId}`);
-    log.info(`McpExpiryWorker: ${provider.id}/${connection.userId} unhealthy (${token.error}), marking expired`);
-    invalidateTools(connection.userId, provider.id);
-    const updated = await markExpired(connection);
-    if (updated.notifiedExpiredAt === null) {
-      await deliverProactive(connection.userId, expiredConnectionPrompt(provider.name));
-      await markNotified(updated);
-    }
+    if (!token.ok) failing[`${provider.id}/${connection.userId}`] = await handleTokenFailure(connection.userId, provider, token.error);
   }
-  log.info(`McpExpiryWorker: checked ${all.length} connection(s)`);
-  return { checked: all.length, expired };
+  logger("McpExpiryWorker").info(`McpExpiryWorker: checked ${all.length} connection(s)`);
+  return { checked: all.length, failing };
 });
+
+const mcpTokenRetry = inngest.createFunction(
+  {
+    id: "mcp-token-retry",
+    triggers: [{ event: EVENTS.mcpTokenUnavailable }],
+    singleton: { key: 'event.data.userId + ":" + event.data.providerId', mode: "skip" },
+    retries: 2,
+  },
+  async ({ event, step }) => {
+    const { userId, providerId } = event.data as McpTokenUnavailableData;
+    for (const [index, delay] of TOKEN_RETRY_DELAYS.entries()) {
+      await step.sleep(`wait-${index + 1}`, delay);
+      const outcome = await step.run(`retry-${index + 1}`, () => retryToken(userId, providerId));
+      if (outcome !== "unavailable") return { outcome, attempts: index + 1 };
+    }
+    await step.run("give-up", () => giveUpOnToken(userId, providerId));
+    return { outcome: "expired", attempts: TOKEN_RETRY_DELAYS.length };
+  },
+);
 
 const maintenance = cronFunction("maintenance", "*/5 * * * *", async () => {
   const dispatched = await dispatchUndispatched();
@@ -177,6 +188,7 @@ const allFunctions = [
   proactiveSend,
   absenceFollowUp,
   capabilityBuild,
+  mcpTokenRetry,
   extractSessionFn,
   flushBuffer,
   cronFunction("retrospection", "5 */3 * * *", async () => {

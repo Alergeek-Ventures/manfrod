@@ -1,8 +1,9 @@
+import { after } from "next/server";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { getGoogleAccount } from "@/lib/accounts.ts";
 import { calendarStatus } from "@/lib/google.ts";
 import { getConnection as getKalafiornia } from "@/lib/kalafiornia.ts";
-import { listConnections, providersForUser } from "@/lib/mcp/index.ts";
+import { discoverMissingLogos, listConnections, providersForUser } from "@/lib/mcp/index.ts";
 import { requireUser } from "@/lib/web/session.ts";
 import { IntegrationsClient } from "./integrations-client.tsx";
 
@@ -12,6 +13,7 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
   const user = await requireUser();
   const { error, info } = await searchParams;
   const providers = await providersForUser(user.id);
+  after(() => discoverMissingLogos(providers));
   const connections = Object.fromEntries(
     [...(await listConnections(user.id)).entries()].map(([provider, connection]) => [provider, connection.status]),
   );

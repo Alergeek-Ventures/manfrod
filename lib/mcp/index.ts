@@ -4,7 +4,8 @@ import { db, tables } from "../db/index.ts";
 import type { McpConnection, McpOauthClient } from "../db/schema.ts";
 import { logger } from "../log.ts";
 import { CHANNEL_AUDIENCES, isChannelAudience, type ChannelAudience } from "../memory/access.ts";
-import { discoverLogo, discoverName, listTools, type McpResult, type RemoteTool } from "./client.ts";
+import { discoverName, listTools, type McpResult, type RemoteTool } from "./client.ts";
+import { discoverLogo } from "./logo.ts";
 
 const { mcpConnections, mcpCustomProviders, mcpOauthClients } = tables;
 const log = logger("Mcp");
@@ -82,6 +83,17 @@ export async function createCustomProvider(userId: string, { url, name = null, s
   if (Object.keys(updates).length === 0) return provider;
   const [updated] = await db.update(mcpCustomProviders).set(updates).where(eq(mcpCustomProviders.id, provider.id)).returning();
   return updated;
+}
+
+const logoAttempts = new Set<string>();
+
+export async function discoverMissingLogos(providers: Provider[]): Promise<void> {
+  for (const provider of providers) {
+    if (!provider.custom || provider.logoUrl || logoAttempts.has(provider.id)) continue;
+    logoAttempts.add(provider.id);
+    const logoUrl = await discoverLogo(provider.mcpUrl);
+    if (logoUrl) await db.update(mcpCustomProviders).set({ logoUrl }).where(eq(mcpCustomProviders.id, provider.id));
+  }
 }
 
 export async function setCustomProviderAvailability(userId: string, id: string, availability: ChannelAudience[]): Promise<boolean> {
@@ -172,6 +184,10 @@ export async function disconnect(userId: string, provider: string): Promise<void
   await db.delete(mcpConnections).where(and(eq(mcpConnections.userId, userId), eq(mcpConnections.provider, provider)));
 }
 
+const REJECTED_TOKEN_ERRORS = new Set(["rejected", "no_token", "no_refresh_token", "client_not_registered"]);
+
+export const isTokenRejected = (error: string) => REJECTED_TOKEN_ERRORS.has(error);
+
 export async function ensureValidToken(connection: McpConnection): Promise<McpResult<string>> {
   if (connection.status === "disconnected") return { ok: false, error: "disconnected" };
   if (!connection.accessToken) return { ok: false, error: "no_token" };
@@ -182,7 +198,12 @@ export async function ensureValidToken(connection: McpConnection): Promise<McpRe
 export async function refreshToken(connection: McpConnection): Promise<McpResult<string>> {
   if (!connection.refreshToken) return { ok: false, error: "no_refresh_token" };
   const tokens = await refresh(connection.provider, connection.refreshToken);
-  if (!tokens.ok) return tokens;
+  if (!tokens.ok) {
+    if (tokens.error !== "rejected") return tokens;
+    const latest = await getConnection(connection.userId, connection.provider);
+    const rotated = latest?.status === "connected" && latest.accessToken && latest.refreshToken !== connection.refreshToken;
+    return rotated ? { ok: true, value: latest.accessToken! } : tokens;
+  }
   const updated = await saveTokens(connection.userId, connection.provider, {
     accessToken: tokens.value.accessToken,
     refreshToken: tokens.value.refreshToken ?? connection.refreshToken,
@@ -311,6 +332,11 @@ async function postToken(client: McpOauthClient, form: Record<string, string>): 
     signal: AbortSignal.timeout(10_000),
   }).catch((error: Error) => error);
   if (response instanceof Error) return { ok: false, error: response.message };
+  if (response.status === 400 || response.status === 401) {
+    const body = (await response.json().catch(() => null)) as { error?: string } | null;
+    log.warn(`Mcp.OAuth: token request rejected: HTTP ${response.status} ${body?.error ?? ""}`.trim());
+    return { ok: false, error: "rejected" };
+  }
   if (response.status !== 200) {
     log.error(`Mcp.OAuth: token request failed: HTTP ${response.status}`);
     return { ok: false, error: `token_request_failed_${response.status}` };
