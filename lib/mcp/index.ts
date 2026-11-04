@@ -40,7 +40,7 @@ export function builtinProviders(): Provider[] {
       authHeader: null,
       availability: [...CHANNEL_AUDIENCES],
     },
-    ...(config.googleMcpClientId
+    ...(config.gmailMcpEnabled && config.googleMcpClientId
       ? [
           {
             id: GMAIL,

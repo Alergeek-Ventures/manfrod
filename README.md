@@ -86,8 +86,10 @@ installed workspace.
 ## Gmail
 
 Gmail is an optional built-in MCP integration (Google's Gmail MCP server,
-Developer Preview: read threads and labels, create drafts, no sending). It shows
-up under Integrations only when `GOOGLE_MCP_CLIENT_ID` and
+Developer Preview: read threads and labels, create drafts, no sending). It stays
+hidden until the server is generally available, because until then every person
+has to join the Developer Preview Program to use it. It shows up under
+Integrations only when `GMAIL_MCP_ENABLED=true` and `GOOGLE_MCP_CLIENT_ID` and
 `GOOGLE_MCP_CLIENT_SECRET` are set. In the Google Cloud project, enable
 `gmail.googleapis.com` and `gmailmcp.googleapis.com`, then create a separate
 *Web application* OAuth client with *Use this client for an AI-powered agent*
