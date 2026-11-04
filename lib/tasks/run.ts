@@ -58,7 +58,7 @@ ${dms}
 4. If you cannot move forward because you lack a tool, an integration or access, call request-capability with this task id instead of giving up or pretending.
 5. ${ending}
 
-Your final reply is never shown to anyone, so don't use it to report what you did or didn't do. The only way to write in the thread is ${postHere}; use it only for something people there should read now, and write it in ${language}.`;
+Your final reply is never shown to anyone, so don't use it to report what you did or didn't do. The only way to write in the thread is ${postHere}; use it only for something people there should read now, and write it in ${language}. Never post there that nothing happened, that nobody answered yet, when you will check again, or comments on your own earlier messages; keep that in the update-task progress note and post nothing.`;
 }
 
 async function contactsOf(task: AgentTask): Promise<Contact[]> {
