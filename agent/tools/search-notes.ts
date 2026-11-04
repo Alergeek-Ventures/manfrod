@@ -11,6 +11,7 @@ export default defineManfrodTool({
     query: z.string().describe("Search query - what you want to find"),
     project: z.string().optional().describe(PROJECT_DOC),
   }),
+  label: { start: ({ query }) => `Search notes for "${query}"` },
   async execute({ query, project }, ctx) {
     const resolved = await resolveProject(project, ctx.msgCtx);
     if (!resolved.ok) return unknownProject(project);

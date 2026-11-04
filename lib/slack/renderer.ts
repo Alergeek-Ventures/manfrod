@@ -4,7 +4,7 @@ import { planTitle, threadTitle } from "../agent/titles.ts";
 import { logger } from "../log.ts";
 import { isUntitledProactiveThread, markProactiveThreadTitled } from "../proactive.ts";
 import { isBackgroundKind, TASK_KIND, toolCtx, type ToolCtx } from "../agent/context.ts";
-import { deleteMessage, post, setStatus, setTitle, type SlackBody } from "./api.ts";
+import { deleteMessage, post, setTitle, type SlackBody } from "./api.ts";
 import { feedbackBlock, feedbackChunk } from "./feedback.ts";
 import { fromMarkdown, toBlocks } from "./mrkdwn.ts";
 import { lastUserContent } from "./routing.ts";
@@ -27,6 +27,7 @@ const NO_REPLY_TOOL = "no-reply";
 const titled = shared("titledThreads", () => new TtlMap<string, true>(24 * 60 * 60 * 1000));
 const plannedTurns = shared("plannedTurns", () => new TtlMap<string, true>(60 * 60 * 1000));
 const repliedTurns = shared("repliedTurns", () => new TtlMap<string, true>(60 * 60 * 1000));
+const taskTitles = shared("planTaskTitles", () => new TtlMap<string, string>(60 * 60 * 1000));
 
 interface Where {
   channel: string;
@@ -42,6 +43,12 @@ function where(channel: SlackEventContext, ctx: Parameters<typeof toolCtx>[0]): 
 }
 
 const isNoReply = (action: object) => "toolName" in action && action.toolName === NO_REPLY_TOOL;
+
+function streaming(where: Where | null): boolean {
+  if (!where?.threadTs) return false;
+  const stream = getStream(where.channel, where.threadTs);
+  return stream !== undefined && !stream.closed;
+}
 
 const humanize = (name: string) => {
   const spaced = name.replaceAll(/[_-]/g, " ");
@@ -151,35 +158,44 @@ async function deliverFinal(where: Where, rawContent: string) {
 export const manfrodRenderer = defineSlackRenderer({
   received() {},
   events: {
-    async "turn.started"(_event, channel, ctx) {
+    async "turn.started"(_event, channel, ctx, next) {
       const at = where(channel, ctx);
-      if (!at?.threadTs) return;
-      const stream = getStream(at.channel, at.threadTs);
-      if (stream && !stream.closed) return;
+      if (!at?.threadTs || streaming(at)) return;
       if (await isUntitledProactiveThread(at.channel, at.threadTs)) return;
-      void setStatus(at.channel, at.threadTs, "is thinking...");
+      await next();
     },
 
-    "step.started"() {},
-    "reasoning.appended"() {},
-    "reasoning.completed"() {},
-    "action.partial"() {},
+    async "step.started"(_event, channel, ctx, next) {
+      if (!streaming(where(channel, ctx))) await next();
+    },
 
-    "message.appended"(event, channel, ctx) {
+    async "reasoning.appended"(_event, channel, ctx, next) {
+      if (!streaming(where(channel, ctx))) await next();
+    },
+
+    async "reasoning.completed"(_event, channel, ctx, next) {
+      if (!streaming(where(channel, ctx))) await next();
+    },
+
+    async "action.partial"(_event, channel, ctx, next) {
+      if (!streaming(where(channel, ctx))) await next();
+    },
+
+    async "message.appended"(event, channel, ctx, next) {
       const at = where(channel, ctx);
-      if (!at || at.tool.kind === "skill_channel" || at.tool.kind === TASK_KIND) return;
-      streamFor(at, channel)?.text(event.messageDelta);
+      if (!at || at.tool.kind === TASK_KIND) return;
+      const stream = at.tool.kind === "skill_channel" ? null : streamFor(at, channel);
+      if (stream) stream.text(event.messageDelta);
+      else await next();
     },
 
-    "actions.requested"(event, channel, ctx) {
+    async "actions.requested"(event, channel, ctx, next) {
       const at = where(channel, ctx);
       const actions = event.actions.filter((action) => !isNoReply(action));
       if (!at || actions.length === 0) return;
       const stream = streamFor(at, channel);
       if (!stream) {
-        const [first] = actions;
-        const name = first && "toolName" in first ? first.toolName : "a tool";
-        if (at.threadTs) void setStatus(at.channel, at.threadTs, `is using ${name}...`);
+        await next({ ...event, actions });
         return;
       }
       const language = channelLanguage(at.channel);
@@ -188,11 +204,14 @@ export const manfrodRenderer = defineSlackRenderer({
       });
       for (const action of actions) {
         const name = "toolName" in action ? action.toolName : action.kind;
+        const label = event.presentation?.[action.callId]?.label?.trim();
+        const title = label || humanize(name);
+        taskTitles.set(action.callId, title);
         stream.task({
           id: action.callId,
-          title: humanize(name),
+          title,
           status: "in_progress",
-          details: argsPreview("input" in action ? action.input : null),
+          details: label ? null : argsPreview("input" in action ? action.input : null),
         });
       }
       const turnKey = `${ctx.session.id}:${event.turnId}`;
@@ -209,25 +228,34 @@ export const manfrodRenderer = defineSlackRenderer({
       }
     },
 
-    "action.result"(event, channel, ctx) {
+    async "action.result"(event, channel, ctx, next) {
       const at = where(channel, ctx);
-      if (!at?.threadTs) return;
-      const stream = getStream(at.channel, at.threadTs);
-      if (!stream || stream.closed) return;
       const result = event.result;
+      if (!at?.threadTs || !streaming(at)) {
+        if (!isNoReply(result)) await next();
+        return;
+      }
       if (isNoReply(result)) return;
+      const stream = getStream(at.channel, at.threadTs);
+      if (!stream) return;
       const isError = "isError" in result && result.isError === true;
+      const title = taskTitles.get(result.callId) ?? humanize("toolName" in result ? result.toolName : result.kind);
+      taskTitles.delete(result.callId);
+      const label = event.presentation?.[result.callId]?.label?.trim();
       stream.task({
         id: result.callId,
-        title: humanize("toolName" in result ? result.toolName : result.kind),
+        title,
         status: isError ? "error" : "complete",
-        output: resultSummary("output" in result ? result.output : null),
+        output: label && label !== title && !isError ? label : resultSummary("output" in result ? result.output : null),
       });
     },
 
-    async "message.completed"(event, channel, ctx) {
-      if (event.finishReason === "tool-calls") return;
+    async "message.completed"(event, channel, ctx, next) {
       const at = where(channel, ctx);
+      if (event.finishReason === "tool-calls") {
+        if (!streaming(at)) await next();
+        return;
+      }
       if (!at) return;
       if (at.tool.kind === TASK_KIND) {
         log.info(`Slack ActivityHandler kept the final reply of task ${at.tool.taskId ?? "?"} out of Slack`);

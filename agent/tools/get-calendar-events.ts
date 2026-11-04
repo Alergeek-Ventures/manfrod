@@ -11,6 +11,7 @@ export default defineManfrodTool({
     date: z.string().optional().describe("Start date in ISO 8601 format (e.g., '2026-03-05'). Defaults to today if omitted."),
     days: z.number().int().optional().describe("Number of days to fetch from the start date (default: 1)"),
   }),
+  label: { start: ({ date, days }) => (date ? `Check the calendar ${days && days > 1 ? "from" : "for"} ${date}` : "Check the calendar") },
   async execute({ date, days }, ctx) {
     const access = await calendarToken(ctx.userId);
     if (!access.ok) return access.message;

@@ -14,6 +14,7 @@ export default defineManfrodTool({
     text: z.string().min(1).max(4000).describe("The message, in Slack mrkdwn; mention people as <@SLACK_ID>"),
     thread_ts: z.string().optional().describe("thread_ts of a thread in that channel to reply in; omit for a new message"),
   }),
+  label: { start: ({ channel }) => `Post in ${channel}` },
   async execute({ channel, text, thread_ts }, ctx) {
     if (ctx.kind === SELF_REVIEW_KIND) return "Self-review can't post on Slack.";
     const person = await getUser(ctx.userId);

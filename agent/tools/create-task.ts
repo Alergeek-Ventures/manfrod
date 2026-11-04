@@ -63,6 +63,7 @@ export default defineManfrodTool({
       .describe("Channel name or ID of the thread to work in, when it is not this conversation; requires thread_ts"),
     thread_ts: z.string().optional().describe("thread_ts of that thread, e.g. from post-slack-message"),
   }),
+  label: { start: ({ title }) => `Start task: ${title}` },
   async execute(input, ctx) {
     if (ctx.kind === SELF_REVIEW_KIND) return "Self-review can't start tasks.";
     const thread = await taskThread(input.channel, input.thread_ts, ctx);
