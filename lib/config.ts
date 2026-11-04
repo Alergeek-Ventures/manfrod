@@ -36,6 +36,9 @@ export const config = {
   get googleClientSecret() {
     return env("GOOGLE_CLIENT_SECRET");
   },
+  get gmailMcpEnabled() {
+    return env("GMAIL_MCP_ENABLED") === "true";
+  },
   get googleMcpClientId() {
     return env("GOOGLE_MCP_CLIENT_ID");
   },
