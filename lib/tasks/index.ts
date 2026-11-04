@@ -19,6 +19,8 @@ const WORK_START_HOUR = 8;
 const WORK_END_HOUR = 18;
 const CONTACT_LOOKBACK_DAYS = 30;
 const CLIP = 300;
+const PLAN_CLIP = 2000;
+const LISTED_UPDATES = 5;
 
 const clip = (text: string, limit = CLIP) => (text.length > limit ? `${text.slice(0, limit)}…` : text);
 const isWorkday = (dateIso: string) => [1, 2, 3, 4, 5].includes(new Date(`${dateIso}T12:00:00Z`).getUTCDay());
@@ -191,6 +193,17 @@ export async function canManage(task: AgentTask, userId: string, channelId: stri
 export function describeTask(task: AgentTask): string {
   const next = task.nextCheckAt ? `next check ${formatLocal(task.nextCheckAt)}` : "no check scheduled";
   return `- ${task.id} "${task.title}" [${task.status}, ${next}, ${task.checks} check(s) so far${task.deadline ? `, deadline ${formatLocal(task.deadline)}` : ""}]\n  Goal: ${clip(task.goal)}\n  Done when: ${clip(task.successCriteria)}`;
+}
+
+export async function taskDetails(task: AgentTask): Promise<string> {
+  const updates = await recentUpdates(task.id, LISTED_UPDATES);
+  const notes =
+    updates.map((update) => `    - ${formatLocal(update.insertedAt)}: ${clip(update.content)}`).join("\n") || "    - (none yet)";
+  return `${describeTask(task)}
+  Thread: channel ${task.channelId}, thread_ts ${task.threadTs}
+  Plan: ${task.plan ? clip(task.plan, PLAN_CLIP) : "(none)"}
+  Latest progress notes, oldest first:
+${notes}`;
 }
 
 async function threadTasksPrompt(channelId: string, threadTs: string): Promise<string> {

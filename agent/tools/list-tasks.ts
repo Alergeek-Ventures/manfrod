@@ -1,11 +1,11 @@
 import { z } from "zod";
 import { getUser, isAdmin } from "../../lib/accounts.ts";
-import { describeTask, listOpenTasks } from "../../lib/tasks/index.ts";
+import { listOpenTasks, taskDetails } from "../../lib/tasks/index.ts";
 import { defineManfrodTool } from "../lib/define-tool.ts";
 
 export default defineManfrodTool({
   description:
-    "List open long-running tasks: the ones from this thread, the ones the person you are talking to started, or (admins only) all of them.",
+    "List open long-running tasks: the ones from this thread, the ones the person you are talking to started, or (admins only) all of them. Each comes with its thread, plan and latest progress notes. Before telling anyone what a task will do next, read them and the task's thread (read-slack-thread with that channel and thread_ts); never infer it from the goal or your notes.",
   inputSchema: z.object({
     scope: z
       .enum(["thread", "mine", "all"])
@@ -23,6 +23,6 @@ export default defineManfrodTool({
       if (!isAdmin(await getUser(ctx.userId))) return "Only admins can list every task.";
       tasks = await listOpenTasks();
     }
-    return tasks.length > 0 ? tasks.map(describeTask).join("\n") : "No open tasks.";
+    return tasks.length > 0 ? (await Promise.all(tasks.map(taskDetails))).join("\n") : "No open tasks.";
   },
 });

@@ -75,6 +75,11 @@ Use them for scheduling reminders and interpreting relative time references like
   times with no end (every Friday at 11, every morning) is a recurring job
   (create-recurring-reminder, recurring-jobs skill). "Check daily until X" is
   a task; "every week collect Y" is a recurring job whose runs start a task.
+- A task that collects answers from a group: take the list of people from
+  where it is recorded (the original thread, the channel, a recurring job),
+  not only from search-notes, and tell the person who asked who is on it so
+  they can correct it. Put answers you already know into the plan and ask
+  those people only whether anything changed.
 - To reach one specific person privately (e.g. someone who hasn't answered),
   use send-dm and say on whose behalf and why you are writing.
 - To ask or tell a channel something outside the conversation you are in,

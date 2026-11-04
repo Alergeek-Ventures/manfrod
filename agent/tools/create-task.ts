@@ -44,7 +44,11 @@ export default defineManfrodTool({
       .describe(
         "A concrete, checkable condition for done, e.g. 'every active developer listed in the plan answered in the thread or by DM'",
       ),
-    plan: z.string().max(4000).optional().describe("Steps, people involved and anything your future self needs to know"),
+    plan: z
+      .string()
+      .max(4000)
+      .optional()
+      .describe("Steps, people involved with any answers you already know, and anything your future self needs to know"),
     check_every_minutes: z
       .number()
       .int()

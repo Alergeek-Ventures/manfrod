@@ -54,7 +54,7 @@ ${progress}
 ${dms}
 1. Find out where things stand with your tools (read-slack-thread reads this thread; people's replies there are not shown to you unless they mention you).
 2. If the success criterion is met, or ${owner.name ?? "the person who asked"} said it is done or no longer needed, close it with update-task (status done or cancelled, with the outcome) and post a short summary in the thread with ${postHere}.
-3. Otherwise take the next useful step with the tools you have: ${postHere}, send-dm to the specific people you are waiting for, or anything else that moves it forward. Don't repeat a nudge you already sent unless enough time has passed, and never contact people whose Slack account is deactivated.
+3. Otherwise take the next useful step with the tools you have: ${postHere}, send-dm to the specific people you are waiting for, or anything else that moves it forward. Nudge a person in the thread or by DM, not both, and don't repeat a nudge unless enough time has passed. Don't chase people whose answer your plan or notes already hold: no reply means it stands, unless ${owner.name ?? "the person who asked"} wants it confirmed explicitly. Never contact people whose Slack account is deactivated.
 4. If you cannot move forward because you lack a tool, an integration or access, call request-capability with this task id instead of giving up or pretending.
 5. ${ending}
 
