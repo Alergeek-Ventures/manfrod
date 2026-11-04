@@ -10,7 +10,7 @@ import { interceptInteractivity } from "../../lib/slack/interactivity.ts";
 import { runKick } from "../../lib/slack/kick.ts";
 import { post } from "../../lib/slack/api.ts";
 import { manfrodRenderer } from "../../lib/slack/renderer.ts";
-import { handleMessage, inboundFromRaw, type Dispatcher } from "../../lib/slack/routing.ts";
+import { handleMessage, inboundFromEvent, type Dispatcher } from "../../lib/slack/routing.ts";
 import { userContext } from "../../lib/slack/state.ts";
 import { buildPrompts } from "../../lib/slack/suggested-prompts.ts";
 
@@ -43,11 +43,13 @@ async function reportFailure(message: SlackMessage, error: unknown) {
 }
 
 function route(ctx: SlackInboundMessageContext, message: SlackMessage, isMention: boolean) {
-  void handleMessage(inboundFromRaw(message.raw, message.channelId), dispatcher(ctx), isMention).catch((error) =>
-    reportFailure(message, error).catch((reportError) =>
-      log.error(`Slack EventHandler could not report failure: ${(reportError as Error).message}`),
-    ),
-  );
+  void inboundFromEvent(message.raw, message.channelId)
+    .then((inbound) => handleMessage(inbound, dispatcher(ctx), isMention))
+    .catch((error) =>
+      reportFailure(message, error).catch((reportError) =>
+        log.error(`Slack EventHandler could not report failure: ${(reportError as Error).message}`),
+      ),
+    );
   return null;
 }
 

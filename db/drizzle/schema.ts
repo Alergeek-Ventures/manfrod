@@ -720,3 +720,13 @@ export const selfReviewSessions = pgTable("self_review_sessions", {
 }, (table) => [
 	check("self_review_sessions_verdict", sql`verdict = ANY (ARRAY['satisfied'::text, 'unsatisfied'::text, 'unclear'::text, 'skipped'::text])`),
 ]);
+
+export const sandboxFiles = pgTable("sandbox_files", {
+	sessionId: text("session_id").notNull(),
+	path: text().notNull(),
+	content: bytea("content").notNull(),
+	insertedAt: timestamp("inserted_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
+}, (table) => [
+	index("sandbox_files_inserted_at_index").using("btree", table.insertedAt.asc().nullsLast().op("timestamp_ops")),
+	primaryKey({ columns: [table.sessionId, table.path], name: "sandbox_files_pkey"}),
+]);
