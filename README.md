@@ -65,7 +65,7 @@ Web sign-in uses [Better Auth](https://better-auth.com) with Google (Workspace
 domain `alergeek.ventures`, sign-up disabled: only people who already exist as
 Manfrod users can sign in). The Google redirect URI stays
 `https://<host>/auth/google/callback`. `BETTER_AUTH_SECRET` is optional; without
-it the secret is derived from `LINEAR_ENCRYPTION_KEY`. Google tokens (also used
+it the secret is derived from `ENCRYPTION_KEY`. Google tokens (also used
 for Calendar) live in the `account` table; migration `0005` copied them over
 from `google_identities`.
 
@@ -86,7 +86,7 @@ installed workspace.
 ## Agent secrets
 
 Admins manage secrets in the web app (Admin → Secrets). Values are encrypted
-with the vault key (`LINEAR_ENCRYPTION_KEY`) and never shown again. Skills and
+with the vault key (`ENCRYPTION_KEY`) and never shown again. Skills and
 instructions reference them as `{{ SECRET_NAME }}`: the model only ever sees
 the placeholder, the value is substituted into tool arguments when a tool
 runs, and tool results have the value swapped back to the placeholder. Tools
@@ -120,6 +120,6 @@ Production runs on Coolify as three separate resources: a ParadeDB database
 (with scheduled backups to S3), Inngest, and the app built from `Dockerfile`
 on port 35233 with a persistent volume at `/app/.eve/.workflow-data`. Pushes
 to `main` deploy the app through `.github/workflows/deploy-production.yml`,
-which syncs secrets from Infisical. `LINEAR_ENCRYPTION_KEY` must stay the same as before, or stored Linear keys
-cannot be decrypted. After the first deploy, run `pnpm db:verify` against the
+which syncs secrets from Infisical. `ENCRYPTION_KEY` (read from `LINEAR_ENCRYPTION_KEY` when unset) must stay the same
+as before, or stored secrets, Linear keys and MCP tokens cannot be decrypted. After the first deploy, run `pnpm db:verify` against the
 production database.

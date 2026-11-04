@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull } from "drizzle-orm";
 import { db, tables } from "../db/index.ts";
 import type { McpConnection, McpOauthClient } from "../db/schema.ts";
 import { logger } from "../log.ts";
@@ -159,8 +159,39 @@ export async function deleteCustomProvider(userId: string, id: string): Promise<
   return true;
 }
 
+const decryptOrNull = (value: Buffer | null) => (value ? decrypt(value) : null);
+
+function encryptedTokens(attrs: { accessToken?: string | null; refreshToken?: string | null }) {
+  const values: Partial<McpConnection> = {};
+  if (attrs.accessToken !== undefined) {
+    values.accessToken = null;
+    values.accessTokenEncrypted = attrs.accessToken ? encrypt(attrs.accessToken) : null;
+  }
+  if (attrs.refreshToken !== undefined) {
+    values.refreshToken = null;
+    values.refreshTokenEncrypted = attrs.refreshToken ? encrypt(attrs.refreshToken) : null;
+  }
+  return values;
+}
+
+function withPlainTokens(row: McpConnection): McpConnection {
+  return {
+    ...row,
+    accessToken: row.accessToken ?? decryptOrNull(row.accessTokenEncrypted),
+    refreshToken: row.refreshToken ?? decryptOrNull(row.refreshTokenEncrypted),
+  };
+}
+
+async function encryptLegacyTokens(row: McpConnection): Promise<McpConnection> {
+  const plain = withPlainTokens(row);
+  if (row.accessToken !== null || row.refreshToken !== null) {
+    await db.update(mcpConnections).set(encryptedTokens(plain)).where(eq(mcpConnections.id, row.id));
+  }
+  return plain;
+}
+
 export async function listConnections(userId: string): Promise<Map<string, McpConnection>> {
-  const rows = await db.select().from(mcpConnections).where(eq(mcpConnections.userId, userId));
+  const rows = (await db.select().from(mcpConnections).where(eq(mcpConnections.userId, userId))).map(withPlainTokens);
   return new Map(rows.map((row) => [row.provider, row]));
 }
 
@@ -170,21 +201,26 @@ export async function getConnection(userId: string, provider: string): Promise<M
     .from(mcpConnections)
     .where(and(eq(mcpConnections.userId, userId), eq(mcpConnections.provider, provider)))
     .limit(1);
-  return row ?? null;
+  return row ? withPlainTokens(row) : null;
 }
 
 export async function listConnectionsForProvider(provider: string, status = "connected"): Promise<McpConnection[]> {
-  return db
-    .select()
-    .from(mcpConnections)
-    .where(and(eq(mcpConnections.provider, provider), eq(mcpConnections.status, status)));
-}
-
-export async function listAllConnectionsWithProvider(): Promise<{ connection: McpConnection; provider: Provider }[]> {
   const rows = await db
     .select()
     .from(mcpConnections)
-    .where(inArray(mcpConnections.status, ["connected", "expired"]));
+    .where(and(eq(mcpConnections.provider, provider), eq(mcpConnections.status, status)));
+  return rows.map(withPlainTokens);
+}
+
+export async function listAllConnectionsWithProvider(): Promise<{ connection: McpConnection; provider: Provider }[]> {
+  const rows = await Promise.all(
+    (
+      await db
+        .select()
+        .from(mcpConnections)
+        .where(inArray(mcpConnections.status, ["connected", "expired"]))
+    ).map(encryptLegacyTokens),
+  );
   const result: { connection: McpConnection; provider: Provider }[] = [];
   for (const connection of rows) {
     const provider = await getProviderForUser(connection.userId, connection.provider);
@@ -198,17 +234,18 @@ export type TokenAttrs = Partial<
 >;
 
 export async function saveTokens(userId: string, provider: string, attrs: TokenAttrs): Promise<McpConnection> {
-  const values = { status: "connected", ...attrs };
+  const { accessToken, refreshToken, ...rest } = attrs;
+  const values = { status: "connected", ...rest, ...encryptedTokens({ accessToken, refreshToken }) };
   const existing = await getConnection(userId, provider);
   if (existing) {
     const [updated] = await db.update(mcpConnections).set(values).where(eq(mcpConnections.id, existing.id)).returning();
-    return updated;
+    return withPlainTokens(updated);
   }
   const [created] = await db
     .insert(mcpConnections)
     .values({ userId, provider, ...values })
     .returning();
-  return created;
+  return withPlainTokens(created);
 }
 
 async function storeHeaderValue(userId: string, provider: string, value: string): Promise<void> {
@@ -228,6 +265,38 @@ export async function saveHeaderValue(userId: string, providerId: string, value:
   await storeHeaderValue(userId, providerId, auth.value);
 }
 
+export interface HeaderTokenSummary {
+  providerId: string;
+  name: string;
+  header: string;
+  host: string;
+  updatedAt: Date;
+}
+
+export async function listHeaderTokens(userId: string): Promise<HeaderTokenSummary[]> {
+  const providers = new Map(
+    (await providersForUser(userId)).filter((provider) => provider.authHeader).map((provider) => [provider.id, provider]),
+  );
+  if (providers.size === 0) return [];
+  const rows = await db
+    .select({ provider: mcpConnections.provider, updatedAt: mcpConnections.updatedAt })
+    .from(mcpConnections)
+    .where(and(eq(mcpConnections.userId, userId), isNotNull(mcpConnections.headerValue)));
+  return rows.flatMap((row) => {
+    const provider = providers.get(row.provider);
+    if (!provider) return [];
+    return [
+      {
+        providerId: provider.id,
+        name: provider.name,
+        header: provider.authHeader!,
+        host: new URL(provider.mcpUrl).hostname,
+        updatedAt: row.updatedAt,
+      },
+    ];
+  });
+}
+
 export function connectionHeaderAuth(provider: Provider, connection: McpConnection): McpAuth | null {
   if (!provider.authHeader || !connection.headerValue) return null;
   return { header: provider.authHeader, value: decrypt(connection.headerValue) };
@@ -236,7 +305,7 @@ export function connectionHeaderAuth(provider: Provider, connection: McpConnecti
 export async function markExpired(connection: McpConnection): Promise<McpConnection> {
   if (connection.status === "expired") return connection;
   const [updated] = await db.update(mcpConnections).set({ status: "expired" }).where(eq(mcpConnections.id, connection.id)).returning();
-  return updated;
+  return withPlainTokens(updated);
 }
 
 export async function markNotified(connection: McpConnection): Promise<void> {

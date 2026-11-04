@@ -1,9 +1,10 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { CopyIcon, PlusIcon } from "lucide-react";
+import { CopyIcon, LockIcon, PlusIcon } from "lucide-react";
 import { toast } from "sonner";
 import { ConfirmAction } from "@/components/confirm-action";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -23,6 +24,7 @@ export interface SecretRow {
   owner: string | null;
   mine: boolean;
   updatedAt: string;
+  mcpHeader: string | null;
 }
 
 type Run = (action: () => Promise<Result>, onSuccess?: () => void) => void;
@@ -159,44 +161,75 @@ function SecretsTable({
         </TableRow>
       </TableHeader>
       <TableBody>
-        {rows.map((secret) => (
-          <TableRow key={secret.id}>
-            <TableCell>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="font-mono"
-                onClick={() => {
-                  void navigator.clipboard?.writeText(placeholder(secret.name));
-                  toast.success("Placeholder copied");
-                }}
-              >
-                {placeholder(secret.name)}
-                <CopyIcon data-icon="inline-end" />
-              </Button>
-            </TableCell>
-            {showOwner && <TableCell>{secret.owner ?? "–"}</TableCell>}
-            <TableCell className="font-mono text-muted-foreground">{secret.hosts.join(", ") || "no hosts, unusable"}</TableCell>
-            <TableCell className="whitespace-normal text-muted-foreground">{secret.description || "–"}</TableCell>
-            <TableCell className="text-muted-foreground">{secret.updatedAt.slice(0, 16).replace("T", " ")}</TableCell>
-            <TableCell>
-              <div className="flex justify-end gap-1">
-                {editable && <SecretDialog scope={secret.scope} run={run} pending={pending} existing={secret} />}
-                {(editable || showOwner) && (
-                  <ConfirmAction
-                    label="Delete"
-                    title={`Delete ${secret.name}?`}
-                    description="Requests and skills that use this placeholder will fail until it is added again."
-                    confirmLabel="Delete"
-                    onConfirm={() => run(() => deleteSecretAction(secret.id))}
-                  />
-                )}
-              </div>
-            </TableCell>
-          </TableRow>
-        ))}
+        {rows.map((secret) =>
+          secret.mcpHeader ? (
+            <McpTokenRow key={secret.id} secret={secret} header={secret.mcpHeader} />
+          ) : (
+            <TableRow key={secret.id}>
+              <TableCell>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="font-mono"
+                  onClick={() => {
+                    void navigator.clipboard?.writeText(placeholder(secret.name));
+                    toast.success("Placeholder copied");
+                  }}
+                >
+                  {placeholder(secret.name)}
+                  <CopyIcon data-icon="inline-end" />
+                </Button>
+              </TableCell>
+              {showOwner && <TableCell>{secret.owner ?? "–"}</TableCell>}
+              <TableCell className="font-mono text-muted-foreground">{secret.hosts.join(", ") || "no hosts, unusable"}</TableCell>
+              <TableCell className="whitespace-normal text-muted-foreground">{secret.description || "–"}</TableCell>
+              <TableCell className="text-muted-foreground">{secret.updatedAt.slice(0, 16).replace("T", " ")}</TableCell>
+              <TableCell>
+                <div className="flex justify-end gap-1">
+                  {editable && <SecretDialog scope={secret.scope} run={run} pending={pending} existing={secret} />}
+                  {(editable || showOwner) && (
+                    <ConfirmAction
+                      label="Delete"
+                      title={`Delete ${secret.name}?`}
+                      description="Requests and skills that use this placeholder will fail until it is added again."
+                      confirmLabel="Delete"
+                      onConfirm={() => run(() => deleteSecretAction(secret.id))}
+                    />
+                  )}
+                </div>
+              </TableCell>
+            </TableRow>
+          ),
+        )}
       </TableBody>
     </Table>
+  );
+}
+
+function McpTokenRow({ secret, header }: { secret: SecretRow; header: string }) {
+  return (
+    <TableRow className="text-muted-foreground">
+      <TableCell>
+        <div className="flex items-center gap-2 px-2.5">
+          <LockIcon className="size-3.5" />
+          <span>{secret.name}</span>
+          <Badge variant="outline">MCP · {header}</Badge>
+        </div>
+      </TableCell>
+      <TableCell className="font-mono">{secret.hosts.join(", ")}</TableCell>
+      <TableCell className="whitespace-normal">{secret.description}</TableCell>
+      <TableCell>{secret.updatedAt.slice(0, 16).replace("T", " ")}</TableCell>
+      <TableCell>
+        <div className="flex justify-end gap-1">
+          <Button variant="ghost" size="sm" disabled title="Managed on the Integrations page">
+            Edit
+          </Button>
+          <Button variant="ghost" size="sm" nativeButton={false} render={<a href="/integrations" />}>
+            Integrations
+          </Button>
+        </div>
+      </TableCell>
+    </TableRow>
   );
 }
 

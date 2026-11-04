@@ -255,6 +255,8 @@ export const mcpConnections = pgTable("mcp_connections", {
 	insertedAt: timestamp("inserted_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
 	updatedAt: timestamp("updated_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
 	headerValue: bytea("header_value"),
+	accessTokenEncrypted: bytea("access_token_encrypted"),
+	refreshTokenEncrypted: bytea("refresh_token_encrypted"),
 }, (table) => [
 	uniqueIndex().using("btree", table.userId.asc().nullsLast().op("text_ops"), table.provider.asc().nullsLast().op("text_ops")),
 ]);

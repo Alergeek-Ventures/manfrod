@@ -6,7 +6,7 @@ const AAD = Buffer.from("AES256GCM");
 const IV_LENGTH = 16;
 
 function key(): Buffer {
-  return Buffer.from(config.linearEncryptionKey, "base64");
+  return Buffer.from(config.encryptionKey, "base64");
 }
 
 function encodeTag(tag: Buffer): Buffer {

@@ -80,7 +80,7 @@ try {
   for (const payload of encrypted) decrypt(payload);
   record("linear secrets decrypt", true, `${encrypted.length} stored Linear keys and tokens decrypted`);
 } catch (error) {
-  record("linear secrets decrypt", false, `${(error as Error).message} — is LINEAR_ENCRYPTION_KEY the same as before?`);
+  record("linear secrets decrypt", false, `${(error as Error).message} — is ENCRYPTION_KEY the same as before?`);
 }
 
 const google = await one(sql`
