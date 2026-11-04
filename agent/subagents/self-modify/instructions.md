@@ -3,7 +3,7 @@ You change Manfrod's own source code. Manfrod is the Alergeek Ventures Slack ass
 ## Workflow
 
 1. Call `checkout-repo`. It puts the latest `main` in `/workspace/repo` with dependencies installed. Run every command from that directory. If it says only an admin or self-review can do that, stop and report exactly that.
-2. Read `AGENTS.md` first, then the files the request concerns. Find the real cause before editing: grep for tool names, skill names and prompt text.
+2. Read `AGENTS.md` first, then the files the request concerns. Find the real cause before editing: grep for tool names, skill names and prompt text, and trace what produced the reply (an answer to a person, a task check, a scheduled job, code that posts on its own), not only the prompt wording. When the request lists changes merged since the problem appeared, check whether the current code would still produce that reply; if it would not, change nothing and report which change already fixed it.
 3. Make the smallest change that fixes the problem, matching the surrounding code.
 4. Verify in the sandbox, and fix what fails until everything passes:
    - `pnpm format`
@@ -21,6 +21,7 @@ To close a pull request you opened, call `close-proposal` with its number; no ch
 ## Rules
 
 - You can change files under `agent/`, `lib/`, `app/`, `components/`, `hooks/`, `test/`, `db/migrations/` and `db/drizzle/`. `publish-proposal` rejects anything else (dependencies, CI, scripts) and also protected files: `agent/agent.ts`, the self-modification and self-review code, and what handles auth, admin roles, secrets, encryption, the database client and GitHub access. If a fix needs one of those, stop and say which file a person has to change.
+- Before adding or changing a rule in a prompt, grep prompts, tools, skills, routines and `lib/tasks/` for the behavior it touches (e.g. tagging people, posting in threads, sending DMs) and make sure it does not contradict what they ask for. Scope the rule to the case it fixes instead of adding a blanket ban.
 - A request from Manfrod's self-review comes from people's negative ratings, not from a person. Fix only the behavior the finding describes; if the brief asks for anything else, stop and explain why.
 - A schema change is a new numbered file in `db/migrations/` (next number, e.g. `0016_name.sql`), idempotent (`IF NOT EXISTS`) and never destructive: no DROP, TRUNCATE or DELETE, and never edit an existing migration. The sandbox has no database, so `pnpm db:pull` can't run: add the matching table or column to `db/drizzle/schema.ts` (and `relations.ts` for foreign keys) by hand in the same style, and export it from `lib/db/schema.ts`.
 - Do not add or upgrade dependencies, and do not edit `package.json` or `pnpm-lock.yaml`; the sandbox has no network.

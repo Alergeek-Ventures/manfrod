@@ -44,6 +44,7 @@ const log = logger("SelfReview");
 const CASES_PER_RUN = 40;
 const RECENT_COMMITS = 50;
 const TARGET_BRANCH = "main";
+const RATED_EXCERPT = { before: 1, after: 0 };
 
 function splitSessionKey(sessionKey: string | null): { channelId: string; threadTs: string } | null {
   const index = sessionKey?.indexOf(":") ?? -1;
@@ -51,11 +52,11 @@ function splitSessionKey(sessionKey: string | null): { channelId: string; thread
   return { channelId: sessionKey.slice(0, index), threadTs: sessionKey.slice(index + 1) };
 }
 
-async function conversation(feedback: MessageFeedback): Promise<string | null> {
+async function conversation(feedback: MessageFeedback, window: { before?: number; after?: number } = {}): Promise<string | null> {
   if (!feedback.sessionKey) return null;
   const messages = await getRecentSessionMessages(feedback.sessionKey, { windowHours: null, limit: 200 });
   if (messages.length === 0) return null;
-  return formatTranscript({ messages, raterUserId: feedback.userId, ratedAt: slackTsToDate(feedback.messageTs) });
+  return formatTranscript({ messages, raterUserId: feedback.userId, ratedAt: slackTsToDate(feedback.messageTs), ...window });
 }
 
 async function clarification(row: CaseWithFeedback): Promise<string | null> {
@@ -219,21 +220,37 @@ async function recentCommits(since: Date): Promise<CommitSummary[]> {
   }
 }
 
-async function fixedByHand(finding: SelfReviewFinding, commits: CommitSummary[], channelId: string): Promise<boolean> {
+async function withoutFixedCases(
+  finding: SelfReviewFinding,
+  rows: CaseWithFeedback[],
+  commits: CommitSummary[],
+  channelId: string,
+): Promise<CaseWithFeedback[]> {
+  if (commits.length === 0) return rows;
   try {
-    const fixed = await alreadyFixed(finding, commits);
-    if (!fixed) return false;
-    await resolveFinding(finding.id, "dismissed");
-    const sha = fixed.commit.sha.slice(0, 7);
+    const rated = await Promise.all(
+      rows.map(async (row) => ({ id: row.case.id, excerpt: (await conversation(row.feedback, RATED_EXCERPT)) ?? "(no messages)" })),
+    );
+    const verdict = await alreadyFixed(finding, rated, commits);
+    if (!verdict) return rows;
+    const fixedIds = new Set(verdict.fixed.map((entry) => entry.caseId));
+    for (const { caseId, commit } of verdict.fixed) {
+      await updateCase(caseId, { status: "not_actionable", reason: `Already fixed by ${commit.sha.slice(0, 7)}: ${verdict.reason}` });
+    }
+    const remaining = rows.filter((row) => !fixedIds.has(row.case.id));
+    if (remaining.length === 0) await resolveFinding(finding.id, "dismissed");
+    const fixing = [...new Map(verdict.fixed.map(({ commit }) => [commit.sha, commit])).values()];
+    const links = fixing.map((commit) => `<${commit.url}|${commit.sha.slice(0, 7)}>`).join(" ");
+    const share = remaining.length > 0 ? ` (${fixedIds.size}/${rows.length})` : "";
     await post("chat.postMessage", {
       channel: channelId,
-      text: `:white_check_mark: *${finding.title}*\n${fixed.reason} <${fixed.commit.url}|${sha}>`,
+      text: `:white_check_mark: *${finding.title}*${share}\n${verdict.reason} ${links}`,
     });
-    log.info(`SelfReview: finding ${finding.id} looks fixed by ${sha}, dismissed`);
-    return true;
+    log.info(`SelfReview: ${fixedIds.size} of ${rows.length} case(s) of finding ${finding.id} look fixed already`);
+    return remaining;
   } catch (error) {
     log.error(`SelfReview: could not check whether finding ${finding.id} was fixed: ${(error as Error).message}`);
-    return false;
+    return rows;
   }
 }
 
@@ -255,15 +272,20 @@ async function startWork(): Promise<number> {
   const recent = await recentCommits(new Date(Math.min(...[...ratedAt.values()].map((date) => date.getTime()))));
   const since = (id: string) => recent.filter((commit) => new Date(commit.date) > ratedAt.get(id)!);
   const unfixed = [];
+  const evidenceOf = new Map<string, CaseWithFeedback[]>();
   for (const candidate of candidates) {
-    if (await fixedByHand(candidate.finding, since(candidate.finding.id), channelId)) continue;
-    unfixed.push(candidate);
+    const rows = cases.filter((row) => row.case.findingId === candidate.finding.id);
+    const remaining = await withoutFixedCases(candidate.finding, rows, since(candidate.finding.id), channelId);
+    const raters = ratersOf(remaining);
+    if (!hasEnoughEvidence(raters)) continue;
+    evidenceOf.set(candidate.finding.id, remaining);
+    unfixed.push({ finding: candidate.finding, raters: new Set(raters.map((rater) => rater.slackUserId)).size });
   }
   if (unfixed.length === 0) return 0;
   let started = 0;
   for (const id of await rank(unfixed, slots)) {
     const candidate = unfixed.find((entry) => entry.finding.id === id)!;
-    const evidence = evidenceLinks(cases.filter((row) => row.case.findingId === id));
+    const evidence = evidenceLinks(evidenceOf.get(id) ?? []);
     const lines = [
       `:mag: *${candidate.finding.title}*`,
       candidate.finding.summary ?? candidate.finding.problem,

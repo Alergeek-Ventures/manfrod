@@ -87,17 +87,24 @@ describe("parseFixed", () => {
     { sha: "fff9999aaa", message: "chore: deps", date: "2026-10-28T11:00:00Z", url: "u2", files: ["package.json"] },
   ];
 
-  it("returns the fixing commit, also from a short sha", () => {
-    expect(parseFixed(JSON.stringify({ fixed: true, commit: "abc1234", reason: "r" }), commits)).toEqual({
-      commit: commits[0],
+  const cases = ["case-1", "case-2"];
+
+  it("returns the fixed cases with their commits, also from a short sha", () => {
+    const raw = JSON.stringify({
+      fixed: [
+        { case: "case-1", commit: "abc1234" },
+        { case: "case-1", commit: "fff9999" },
+      ],
       reason: "r",
     });
+    expect(parseFixed(raw, cases, commits)).toEqual({ fixed: [{ caseId: "case-1", commit: commits[0] }], reason: "r" });
   });
 
-  it("ignores negative answers, unknown commits and garbage", () => {
-    expect(parseFixed(JSON.stringify({ fixed: false, commit: null, reason: "r" }), commits)).toBeNull();
-    expect(parseFixed(JSON.stringify({ fixed: true, commit: "0000000", reason: "r" }), commits)).toBeNull();
-    expect(parseFixed("nope", commits)).toBeNull();
+  it("ignores empty answers, unknown cases or commits and garbage", () => {
+    expect(parseFixed(JSON.stringify({ fixed: [], reason: "r" }), cases, commits)).toBeNull();
+    expect(parseFixed(JSON.stringify({ fixed: [{ case: "case-3", commit: "abc1234" }], reason: "r" }), cases, commits)).toBeNull();
+    expect(parseFixed(JSON.stringify({ fixed: [{ case: "case-2", commit: "0000000" }], reason: "r" }), cases, commits)).toBeNull();
+    expect(parseFixed("nope", cases, commits)).toBeNull();
   });
 });
 
