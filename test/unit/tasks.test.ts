@@ -72,6 +72,7 @@ describe("checkPrompt", () => {
     expect(prompt).toContain("next_check_in_minutes");
     expect(prompt).toContain(`post-slack-message with channel ${task().channelId} and thread_ts ${task().threadTs}`);
     expect(prompt).toContain("write it in Polish");
+    expect(prompt).toContain("Never post there that nothing happened");
   });
 
   it("tells the last check to close the task", () => {
