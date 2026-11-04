@@ -44,6 +44,7 @@ Inngest calls `http://app:35233/api/inngest`, which Next forwards to the eve
 ```
 agent/                 eve agent root
   agent.ts             model, context window, build externals
+  instructions.md      static system prompt shared by every run
   instructions/        dynamic system prompt (soul, notes, context, secrets)
   channels/slack.ts    Slack hooks, renderer, interactivity/slash-command/shortcut wrapper
   channels/jobs.ts     Inngest serve endpoint (/api/inngest)
@@ -83,7 +84,7 @@ test/                  vitest (unit + DB tests behind TEST_DATABASE_URL)
 | `Agent.Server` turn loop | eve harness |
 | `Agent.Server` batching / gate / catch-up / restore | `lib/slack/routing.ts` + `lib/agent/turns.ts` |
 | `Agent.ResponseGate`, `PlanTitle`, `ThreadTitle` | `lib/agent/response-gate.ts`, `lib/agent/titles.ts` |
-| `Agent.Init`, system prompt, `Soul.base_prompt` | `lib/agent/prompts.ts`, `lib/agent/system-prompt.ts` |
+| `Agent.Init`, system prompt, `Soul.base_prompt` | `agent/instructions.md`, `lib/agent/prompts.ts`, `lib/agent/system-prompt.ts` |
 | `Tools.*` | `agent/tools/<tool-name>.ts` |
 | `Skills`, `SkillRunner` | `agent/skills/` (on-demand), `lib/routines.ts` + `lib/jobs/execute.ts` (scheduled runs are eve sessions) |
 | `Proactive`, `TriggerWorker` | `lib/proactive.ts`, `run-job` / `proactive-send` functions |
