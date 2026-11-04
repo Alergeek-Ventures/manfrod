@@ -13,6 +13,7 @@ export default defineManfrodTool({
       .describe("Channel name (e.g. 'general' or '#general') or Slack channel ID (e.g. 'C087QF130R3'). Omit for the current channel."),
     limit: z.number().int().optional().describe("Max messages to return, newest included (default 20, max 100)"),
   }),
+  label: { start: ({ channel }) => (channel ? `Read channel ${channel}` : "Read this channel") },
   async execute({ channel, limit }, ctx) {
     const resolved = await channelFor(channel, ctx.msgCtx);
     if (!resolved.ok) {

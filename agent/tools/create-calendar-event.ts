@@ -27,6 +27,7 @@ export default defineManfrodTool({
     location: z.string().optional(),
     meet: z.boolean().optional().describe("Add a Google Meet link (default: true when inviting others and no location is given)"),
   }),
+  label: { start: ({ summary }) => `Create event "${summary}"` },
   async execute({ summary, start, end, duration_minutes, attendees = [], description, location, meet }, ctx) {
     const startTime = parseEventTime(start);
     if (!startTime) return "ERROR: start must be YYYY-MM-DDTHH:MM or YYYY-MM-DD.";

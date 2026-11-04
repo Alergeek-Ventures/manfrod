@@ -22,6 +22,7 @@ export default defineManfrodTool({
       .describe("'desc' (default, newest first) or 'asc' (oldest first — use to find the earliest/oldest notes in a range)"),
     project: z.string().optional().describe(PROJECT_DOC),
   }),
+  label: { start: ({ project }) => (project ? `Read recent notes in ${project}` : "Read recent notes") },
   async execute(args, ctx) {
     const since = dateBound(args.since, "since");
     const until = dateBound(args.until, "until");

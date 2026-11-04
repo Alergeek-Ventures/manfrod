@@ -30,6 +30,7 @@ export default defineManfrodTool({
     earliest: z.string().optional().describe("Earliest start time each day, HH:MM (default 09:00)"),
     latest: z.string().optional().describe("Latest end time each day, HH:MM (default 17:00)"),
   }),
+  label: { start: ({ duration_minutes }) => `Find a ${duration_minutes} min meeting slot` },
   async execute({ attendees, duration_minutes, from, to, earliest, latest }, ctx) {
     const access = await calendarToken(ctx.userId);
     if (!access.ok) return access.message;
