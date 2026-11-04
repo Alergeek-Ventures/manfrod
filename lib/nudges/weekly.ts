@@ -19,7 +19,7 @@ const log = logger("Nudges.Weekly");
 
 const GUIDANCE = `It is Friday afternoon. Write a short wrap-up of this person's week and a look at the next one. Useful: hours logged in Firmowid this week, workdays with no session (offer to add them), and what is notable next week: a holiday or long weekend, their own leave, a day packed with meetings, colleagues away that matter to them, desk bookings. Mention only what is there. If there is nothing worth saying, do not send.`;
 
-const FOLLOW_UP = `Gdy odpowie: jeśli chce uzupełnić godziny, użyj narzędzi firmowid__* (najpierw dopytaj o brakujące szczegóły). Jeśli chce zarezerwować biurko albo zgłosić urlop, użyj zwykłych narzędzi.`;
+const FOLLOW_UP = `Gdy odpowie: jeśli chce uzupełnić godziny, dopytaj o projekt, godziny i tytuł, a potem dodaj brakujące sesje jednym wywołaniem firmowid__add_sessions (project_id z firmowid__list_projects, czasy z offsetem strefy Europe/Warsaw). Jeśli chce zarezerwować biurko albo zgłosić urlop, użyj zwykłych narzędzi.`;
 
 export interface DayLog {
   date: string;

@@ -28,7 +28,10 @@ This becomes a normal live conversation once they answer.
 - Call `firmowid__list_projects` (status: "active") and match their answer
   against the project names.
   - Exactly one match: call `firmowid__start_session` with that
-    `project_id` and a short `title` summarizing what they said.
+    `project_id` and a short `title` summarizing what they said. If they
+    say they've been working since earlier (e.g. "od 8:30"), also add that
+    earlier stretch as a completed session with `firmowid__add_sessions`,
+    ending when the new session started, with Europe/Warsaw offsets.
   - No match or several plausible matches: tell them which project names
     you found and ask them to pick one — don't guess.
 - If they say they're not actually working / not in the office / it's a
