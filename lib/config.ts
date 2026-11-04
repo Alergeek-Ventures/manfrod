@@ -36,11 +36,11 @@ export const config = {
   get googleClientSecret() {
     return env("GOOGLE_CLIENT_SECRET");
   },
-  get gmailMcpClientId() {
-    return env("GMAIL_MCP_CLIENT_ID");
+  get googleMcpClientId() {
+    return env("GOOGLE_MCP_CLIENT_ID");
   },
-  get gmailMcpClientSecret() {
-    return env("GMAIL_MCP_CLIENT_SECRET");
+  get googleMcpClientSecret() {
+    return env("GOOGLE_MCP_CLIENT_SECRET");
   },
   get googleApiKey() {
     return env("GOOGLE_API_KEY");

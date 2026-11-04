@@ -87,8 +87,8 @@ installed workspace.
 
 Gmail is an optional built-in MCP integration (Google's Gmail MCP server,
 Developer Preview: read threads and labels, create drafts, no sending). It shows
-up under Integrations only when `GMAIL_MCP_CLIENT_ID` and
-`GMAIL_MCP_CLIENT_SECRET` are set. In the Google Cloud project, enable
+up under Integrations only when `GOOGLE_MCP_CLIENT_ID` and
+`GOOGLE_MCP_CLIENT_SECRET` are set. In the Google Cloud project, enable
 `gmail.googleapis.com` and `gmailmcp.googleapis.com`, then create a separate
 *Web application* OAuth client with *Use this client for an AI-powered agent*
 checked and the redirect URI `https://<host>/mcp/gmail/callback`. Keep the

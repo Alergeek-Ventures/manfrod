@@ -40,7 +40,7 @@ export function builtinProviders(): Provider[] {
       authHeader: null,
       availability: [...CHANNEL_AUDIENCES],
     },
-    ...(config.gmailMcpClientId
+    ...(config.googleMcpClientId
       ? [
           {
             id: GMAIL,
@@ -370,10 +370,10 @@ type OauthClient = Pick<McpOauthClient, "clientId" | "clientSecret" | "authoriza
 };
 
 function preregisteredClient(provider: string): OauthClient | null {
-  if (provider !== GMAIL || !config.gmailMcpClientId) return null;
+  if (provider !== GMAIL || !config.googleMcpClientId) return null;
   return {
-    clientId: config.gmailMcpClientId,
-    clientSecret: config.gmailMcpClientSecret ?? null,
+    clientId: config.googleMcpClientId,
+    clientSecret: config.googleMcpClientSecret ?? null,
     authorizationEndpoint: "https://accounts.google.com/o/oauth2/v2/auth",
     tokenEndpoint: "https://oauth2.googleapis.com/token",
     authorizeParams: { access_type: "offline", prompt: "consent" },
