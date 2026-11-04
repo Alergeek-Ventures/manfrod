@@ -83,6 +83,17 @@ chosen team. Installing also switches existing API-key connections whose team
 the app can see over to the app. *Admin → Access → Linear* lists every
 installed workspace.
 
+## Gmail
+
+Gmail is an optional built-in MCP integration (Google's Gmail MCP server,
+Developer Preview: read threads and labels, create drafts, no sending). It shows
+up under Integrations only when `GOOGLE_MCP_CLIENT_ID` and
+`GOOGLE_MCP_CLIENT_SECRET` are set. In the Google Cloud project, enable
+`gmail.googleapis.com` and `gmailmcp.googleapis.com`, then create a separate
+*Web application* OAuth client with *Use this client for an AI-powered agent*
+checked and the redirect URI `https://<host>/mcp/gmail/callback`. Keep the
+consent screen *Internal* so refresh tokens do not expire after a week.
+
 ## Agent secrets
 
 Admins manage secrets in the web app (Admin → Secrets). Values are encrypted

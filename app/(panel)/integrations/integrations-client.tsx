@@ -65,10 +65,9 @@ const availabilitySummary = (availability: ChannelAudience[]) =>
 type Run = (action: () => Promise<ActionResult>, onSuccess?: () => void) => void;
 
 function ProviderLogo({ provider }: { provider: ProviderView }) {
-  const src = provider.id === "firmowid" ? "/images/mcp/firmowid.png" : provider.logoUrl;
   return (
     <Avatar className="size-10 rounded-lg">
-      {src && <AvatarImage src={src} alt="" />}
+      {provider.logoUrl && <AvatarImage src={provider.logoUrl} alt="" />}
       <AvatarFallback className="rounded-lg">{(provider.name || "?").charAt(0).toUpperCase()}</AvatarFallback>
     </Avatar>
   );

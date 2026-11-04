@@ -36,6 +36,12 @@ export const config = {
   get googleClientSecret() {
     return env("GOOGLE_CLIENT_SECRET");
   },
+  get googleMcpClientId() {
+    return env("GOOGLE_MCP_CLIENT_ID");
+  },
+  get googleMcpClientSecret() {
+    return env("GOOGLE_MCP_CLIENT_SECRET");
+  },
   get googleApiKey() {
     return env("GOOGLE_API_KEY");
   },
