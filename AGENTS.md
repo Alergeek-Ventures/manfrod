@@ -23,6 +23,7 @@ Manfrod is a Slack AI agent with a memory graph, written in TypeScript on eve (a
 - `agent/sandbox.ts` gives the main agent a files-only sandbox (`agent/lib/attachment-sandbox.ts`) that keeps Slack images and PDFs eve stages for the model in `sandbox_files`; it cannot run commands, and files older than 30 days are deleted by `events-cleanup`. `lib/slack/files.ts` decides which Slack files reach the model
 - `lib/` holds all domain code, shared by the agent and the web app. Keep it free of `next/*` imports
 - The languages Manfrod writes in (internal vs. client channels) are admin settings in `agent_settings`, edited in the panel's Agent tab; `lib/agent-settings.ts` adds them to every system prompt, so never hardcode a reply language in prompts
+- `agent/instructions.md` is the system prompt every run gets, background runs included; `agent/instructions/context.ts` adds the rest per turn (thread rules, soul, context, languages, secrets and tasks in conversations, a short preamble in background runs) from `lib/agent/system-prompt.ts`
 - `agent/skills/<name>/SKILL.md` are native eve skills the model loads with `eve__skill`. Prompts run in the background by Inngest (cron skills, Firmowid check-ins) live in `agent/routines/<name>.md`, loaded by `lib/routines.ts`; cron routines declare `cron:` in the frontmatter
 - `app/` is the Next.js App Router. Prefer server components and server actions; client components only where interactivity needs them, and never import values from a `"use client"` module into a server component
 

@@ -5,7 +5,7 @@ import { getSoulAnchor, type SoulAnchor } from "../memory/nodes.ts";
 import { secretsPrompt } from "../secrets.ts";
 import { tasksPrompt } from "../tasks/index.ts";
 import { localIsoWithOffset, isoWeek, localToday, offsetMinutes, weekdayName, zoneAbbreviation, TIMEZONE } from "../time.ts";
-import { SOUL_BASE_PROMPT, SOUL_ONBOARDING_PROMPT, SYSTEM_PROMPT, TIME_NOTE_HEADER } from "./prompts.ts";
+import { CONVERSATION_PROMPT, SOUL_BASE_PROMPT, SOUL_ONBOARDING_PROMPT, TIME_NOTE_HEADER } from "./prompts.ts";
 
 function soulContext({ soul, linked, more }: SoulAnchor): string {
   const sections = [`[Soul - Entrypoint to your notes graph]\n${soul.content}\n`];
@@ -44,18 +44,22 @@ async function currentContext(userId: string, sessionKey: string | null): Promis
   return userLine === "" ? "" : `[Current Context]${userLine}`;
 }
 
+const sections = (...parts: (string | null | undefined)[]) =>
+  parts
+    .map((part) => part?.trim() ?? "")
+    .filter((part) => part !== "")
+    .join("\n\n");
+
 export async function buildSystemPrompt(userId: string, sessionKey: string | null, readableLevels: string[]): Promise<string> {
-  if (!(await healthy())) return SYSTEM_PROMPT + SOUL_BASE_PROMPT;
+  if (!(await healthy())) return sections(CONVERSATION_PROMPT, SOUL_BASE_PROMPT);
   const dm = isDmSession(sessionKey);
   const anchor = dm ? await getSoulAnchor(userId, readableLevels) : null;
-  const base = anchor
-    ? `${soulContext(anchor)}\n\n${SYSTEM_PROMPT}`
-    : `${SYSTEM_PROMPT}${SOUL_BASE_PROMPT}${dm ? SOUL_ONBOARDING_PROMPT : ""}`;
-  const secrets = await secretsPrompt(userId);
-  const language = await languageInstructions(sessionKey?.split(":")[0] ?? null);
-  const tasks = await tasksPrompt(sessionKey);
+  const identity = anchor ? soulContext(anchor) : `${SOUL_BASE_PROMPT}${dm ? SOUL_ONBOARDING_PROMPT : ""}`;
   const context = await currentContext(userId, sessionKey);
-  return `${base}\n\n${context ? `${context}\n\n` : ""}${language}${secrets ? `\n\n${secrets}` : ""}${tasks ? `\n\n${tasks}` : ""}`;
+  const language = await languageInstructions(sessionKey?.split(":")[0] ?? null);
+  const secrets = await secretsPrompt(userId);
+  const tasks = await tasksPrompt(sessionKey);
+  return sections(CONVERSATION_PROMPT, identity, context, language, secrets, tasks);
 }
 
 export async function skillRunnerPrompt(channelId: string | null, userId: string | null): Promise<string> {
