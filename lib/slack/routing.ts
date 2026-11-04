@@ -1,3 +1,4 @@
+import type { FilePart, UserContent } from "ai";
 import { findOrCreateBySlackId, getUserBySlackId } from "../accounts.ts";
 import { channelLanguage } from "../agent-settings.ts";
 import { decide } from "../agent/response-gate.ts";
@@ -18,12 +19,14 @@ import {
   fetchUserInfo,
   fetchUserName,
   getChannelInfo,
+  getFileInfo,
   listFullThread,
   listMessages,
   post,
   setStatus,
   type SlackBody,
 } from "./api.ts";
+import { fileParts, MAX_FILES_PER_TURN, parseSlackFiles, withFilesNote, type SlackFile } from "./files.ts";
 import { firstDelivery, shared, threadSeen, userContext } from "./state.ts";
 import { allow, isAllowed, isKicked } from "./thread-permission.ts";
 
@@ -47,7 +50,7 @@ export interface HistoryMessage {
 
 export interface Dispatcher {
   send(
-    content: string,
+    content: string | UserContent,
     options: { auth: Auth; context?: string[]; history?: HistoryMessage[]; turnPolicy?: "steer" | "queue" },
   ): Promise<unknown>;
   isSubscribed(): Promise<boolean>;
@@ -65,6 +68,7 @@ export interface Inbound {
   text: string;
   user: string | null;
   channelType: string | null;
+  files: SlackFile[];
 }
 
 export function inboundFromRaw(raw: Record<string, any>, fallbackChannel: string): Inbound {
@@ -75,7 +79,21 @@ export function inboundFromRaw(raw: Record<string, any>, fallbackChannel: string
     text: typeof raw.text === "string" ? raw.text : "",
     user: typeof raw.user === "string" ? raw.user : null,
     channelType: raw.channel_type ?? null,
+    files: parseSlackFiles(raw.files),
   };
+}
+
+async function completeFiles(files: unknown): Promise<unknown> {
+  if (!Array.isArray(files)) return files;
+  return Promise.all(
+    files.map(async (file) =>
+      file?.file_access === "check_file_info" && typeof file.id === "string" ? ((await getFileInfo(file.id)) ?? file) : file,
+    ),
+  );
+}
+
+export async function inboundFromEvent(raw: Record<string, any>, fallbackChannel: string): Promise<Inbound> {
+  return inboundFromRaw({ ...raw, files: await completeFiles(raw.files) }, fallbackChannel);
 }
 
 const isDm = (channel: string) => channel.startsWith("D");
@@ -84,6 +102,7 @@ const formatAuthor = (name: string | null | undefined, slackUserId: string) => (
 
 interface Gated {
   content: string;
+  files: FilePart[];
   auth: Auth;
   ts: string;
   channel: string;
@@ -91,22 +110,36 @@ interface Gated {
   userId: string;
 }
 
+interface Backlog {
+  contents: string[];
+  files: FilePart[];
+}
+
 const gates = shared("slackGates", () => new Map<string, { pending: Gated[]; timer: NodeJS.Timeout | null }>());
-const backlogs = shared("slackBacklogs", () => new Map<string, string[]>());
+const backlogs = shared("slackFileBacklogs", () => new Map<string, Backlog>());
 const lastContent = shared("slackLastContent", () => new Map<string, string>());
 
 export function lastUserContent(sessionKey: string): string | null {
   return lastContent.get(sessionKey) ?? null;
 }
 
-function takeBacklog(sessionKey: string): string[] {
-  const backlog = backlogs.get(sessionKey) ?? [];
+function takeBacklog(sessionKey: string): Backlog {
+  const backlog = backlogs.get(sessionKey) ?? { contents: [], files: [] };
   backlogs.delete(sessionKey);
   return backlog;
 }
 
-function addBacklog(sessionKey: string, contents: string[]) {
-  backlogs.set(sessionKey, [...(backlogs.get(sessionKey) ?? []), ...contents]);
+function addBacklog(sessionKey: string, contents: string[], files: FilePart[]) {
+  const backlog = backlogs.get(sessionKey) ?? { contents: [], files: [] };
+  backlogs.set(sessionKey, {
+    contents: [...backlog.contents, ...contents],
+    files: [...backlog.files, ...files].slice(-MAX_FILES_PER_TURN),
+  });
+}
+
+function turnMessage(text: string, files: FilePart[]): string | UserContent {
+  const attached = files.slice(-MAX_FILES_PER_TURN);
+  return attached.length === 0 ? text : [{ type: "text", text }, ...attached];
 }
 
 async function channelName(channel: string): Promise<string> {
@@ -174,13 +207,15 @@ async function dispatch(
   auth: Auth,
   sessionKey: string,
   contents: string[],
+  files: FilePart[],
   toPersist: string | null = null,
   alreadyPersisted = 0,
 ) {
   const userId = auth.principalId;
   if (toPersist !== null) await persistUser(userId, sessionKey, toPersist);
   const persisted = alreadyPersisted + (toPersist !== null ? 1 : 0);
-  const context = takeBacklog(sessionKey);
+  const backlog = takeBacklog(sessionKey);
+  const context = backlog.contents;
   const current = activeAuthor(sessionKey);
   const turnPolicy = current && current !== userId ? "queue" : "steer";
   lastContent.set(sessionKey, contents.at(-1) ?? "");
@@ -190,7 +225,7 @@ async function dispatch(
     const history = subscribed ? [] : await restoreHistory(sessionKey, persisted + context.length);
     const notices = !subscribed && history.length > 0 ? [restartNotice(history.length)] : [];
     const fullContext = [...context, ...notices];
-    await dispatcher.send(contents.join("\n\n"), {
+    await dispatcher.send(turnMessage(contents.join("\n\n"), [...backlog.files, ...files]), {
       auth,
       context: fullContext.length > 0 ? fullContext : undefined,
       history: history.length > 0 ? history : undefined,
@@ -230,6 +265,7 @@ async function deliverImmediate(
   inbound: Inbound,
   threadTs: string,
   content: string,
+  files: FilePart[],
   accessChannel: string | null,
 ) {
   const sessionKey = `${inbound.channel}:${threadTs}`;
@@ -243,8 +279,16 @@ async function deliverImmediate(
     writeAccess: access.writeAccess,
   });
   await messageReceived(auth, sessionKey, content, inbound.channel, access.writeAccess);
-  const waiting = drainGate(sessionKey).map((gated) => gated.content);
-  await dispatch(dispatcher, auth, sessionKey, [...waiting, content], content, waiting.length);
+  const waiting = drainGate(sessionKey);
+  await dispatch(
+    dispatcher,
+    auth,
+    sessionKey,
+    [...waiting.map((gated) => gated.content), content],
+    [...waiting.flatMap((gated) => gated.files), ...files],
+    content,
+    waiting.length,
+  );
 }
 
 async function gateElapsed(sessionKey: string) {
@@ -252,6 +296,7 @@ async function gateElapsed(sessionKey: string) {
   if (pending.length === 0) return;
   const last = pending.at(-1)!;
   const contents = pending.map((gated) => gated.content);
+  const files = pending.flatMap((gated) => gated.files);
 
   const recent = await getRecentSessionMessages(sessionKey, { limit: TRANSCRIPT_WINDOW + pending.length });
   const prior = recent
@@ -273,11 +318,11 @@ async function gateElapsed(sessionKey: string) {
     });
   }
   if (decision.kind === "respond" || decision.kind === "react_and_respond") {
-    await dispatch(last.dispatcher, last.auth, sessionKey, contents, null, contents.length);
+    await dispatch(last.dispatcher, last.auth, sessionKey, contents, files, null, contents.length);
     return;
   }
   log.debug(`Agent.Server: response gate chose ${decision.kind} for session ${sessionKey}`);
-  addBacklog(sessionKey, contents);
+  addBacklog(sessionKey, contents, files);
 }
 
 function scheduleGate(sessionKey: string, gated: Gated) {
@@ -330,17 +375,26 @@ function mentionText(text: string, inThread: boolean): string {
 const ownMessage = (bot: { userId: string; botId: string }, message: SlackBody) =>
   message.user === bot.userId || message.bot_id === bot.botId;
 
-async function threadCatchUp(inbound: Inbound, threadTs: string, sessionKey: string): Promise<string> {
+interface CatchUp {
+  text: string;
+  files: FilePart[];
+}
+
+const NO_CATCH_UP: CatchUp = { text: "", files: [] };
+
+const withheld = (message: SlackBody) => present(message.text) && containsSecret(message.text);
+
+async function threadCatchUp(inbound: Inbound, threadTs: string, sessionKey: string): Promise<CatchUp> {
   if (!inbound.threadTs) {
     threadSeen.mark(sessionKey, [inbound.ts]);
-    return "";
+    return NO_CATCH_UP;
   }
   const bot = await botIdentity();
   const messages = await listFullThread(inbound.channel, threadTs);
   if (!messages || !bot) {
     log.warn(`Slack EventHandler: failed to read thread ${sessionKey} for catch-up`);
     threadSeen.mark(sessionKey, [inbound.ts]);
-    return "";
+    return NO_CATCH_UP;
   }
   const prior = messages.filter((message) => message.ts !== inbound.ts);
   const seen = threadSeen.seen(sessionKey);
@@ -362,18 +416,18 @@ async function threadCatchUp(inbound: Inbound, threadTs: string, sessionKey: str
   }
   threadSeen.mark(sessionKey, [inbound.ts, ...messages.map((message) => message.ts)]);
 
-  const withText = catchUp.filter((message) => present(message.text));
+  const relevant = catchUp.filter((message) => present(message.text) || parseSlackFiles(message.files).length > 0);
   const names = new Map<string, string | null>();
-  for (const message of withText) {
+  for (const message of relevant) {
     if (typeof message.user === "string" && message.user !== bot.userId && !names.has(message.user)) {
       names.set(message.user, await fetchUserName(message.user));
     }
   }
   const capped =
-    kind === "joined" && withText.length > CATCH_UP_LIMIT
-      ? [withText[0], ...withText.slice(1).slice(-(CATCH_UP_LIMIT - 1))]
-      : withText.slice(-CATCH_UP_LIMIT);
-  if (capped.length === 0) return "";
+    kind === "joined" && relevant.length > CATCH_UP_LIMIT
+      ? [relevant[0], ...relevant.slice(1).slice(-(CATCH_UP_LIMIT - 1))]
+      : relevant.slice(-CATCH_UP_LIMIT);
+  if (capped.length === 0) return NO_CATCH_UP;
 
   const lines = capped.map((message) => {
     const author = ownMessage(bot, message)
@@ -381,18 +435,25 @@ async function threadCatchUp(inbound: Inbound, threadTs: string, sessionKey: str
       : message.user
         ? formatAuthor(names.get(message.user), message.user)
         : (message.username ?? message.bot_profile?.name ?? "bot");
-    const text = containsSecret(message.text)
+    const text = withheld(message)
       ? "[message withheld - looks like a secret]"
-      : String(message.text).replace(/<@([A-Z0-9]+)>/g, (whole: string, id: string) =>
-          id === bot.userId ? "@Manfrod" : names.get(id) ? `@${names.get(id)}` : whole,
+      : withFilesNote(
+          String(message.text ?? "").replace(/<@([A-Z0-9]+)>/g, (whole: string, id: string) =>
+            id === bot.userId ? "@Manfrod" : names.get(id) ? `@${names.get(id)}` : whole,
+          ),
+          parseSlackFiles(message.files),
         );
     return `${author}: ${text}`;
   });
+  const files = capped
+    .filter((message) => !ownMessage(bot, message) && !withheld(message))
+    .flatMap((message) => fileParts(parseSlackFiles(message.files)))
+    .slice(-MAX_FILES_PER_TURN);
   const header =
     kind === "joined"
       ? "[Thread history — you were just mentioned in an ongoing thread. These messages were sent before you joined:]"
       : "[Thread messages you have not seen yet, posted since you were last in this conversation:]";
-  return `${header}\n${lines.join("\n")}\n[End of thread history]\n`;
+  return { text: `${header}\n${lines.join("\n")}\n[End of thread history]\n`, files };
 }
 
 async function bufferMessage(inbound: Inbound) {
@@ -400,7 +461,7 @@ async function bufferMessage(inbound: Inbound) {
   await bufferPush(inbound.channel, inbound.threadTs, name, {
     user: inbound.user!,
     user_name: userName,
-    text: inbound.text,
+    text: withFilesNote(inbound.text, inbound.files),
     ts: inbound.ts,
   });
 }
@@ -409,8 +470,8 @@ async function handleDm(inbound: Inbound, dispatcher: Dispatcher) {
   const threadTs = inbound.threadTs ?? inbound.ts;
   const info = await fetchUserInfo(inbound.user!);
   const user = await findOrCreateBySlackId(inbound.user!, inbound.channel, info?.name ?? null, info?.email ?? null);
-  const content = await withViewingContext(inbound.text, inbound.user!);
-  await deliverImmediate(dispatcher, user, inbound, threadTs, content, null);
+  const content = await withViewingContext(withFilesNote(inbound.text, inbound.files), inbound.user!);
+  await deliverImmediate(dispatcher, user, inbound, threadTs, content, fileParts(inbound.files), null);
 }
 
 export async function handleMention(inbound: Inbound, dispatcher: Dispatcher) {
@@ -443,9 +504,18 @@ export async function handleMention(inbound: Inbound, dispatcher: Dispatcher) {
   const accessChannel = await agentChannel(inbound, info);
   const userName = await fetchUserName(inbound.user);
   const channelContext = `Slack channel: #${info.name}, from: ${formatAuthor(userName, inbound.user)}`;
-  const history = await threadCatchUp(inbound, threadTs, sessionKey);
-  const text = mentionText(stripBotMention(inbound.text, bot?.userId ?? ""), inbound.threadTs !== null);
-  await deliverImmediate(dispatcher, user, inbound, threadTs, `${history}[${channelContext}]\n${text}`, accessChannel);
+  const catchUp = await threadCatchUp(inbound, threadTs, sessionKey);
+  const body = stripBotMention(inbound.text, bot?.userId ?? "");
+  const text = inbound.files.length > 0 ? withFilesNote(body, inbound.files) : mentionText(body, inbound.threadTs !== null);
+  await deliverImmediate(
+    dispatcher,
+    user,
+    inbound,
+    threadTs,
+    `${catchUp.text}[${channelContext}]\n${text}`,
+    [...catchUp.files, ...fileParts(inbound.files)],
+    accessChannel,
+  );
 }
 
 async function handleThreadReply(inbound: Inbound, dispatcher: Dispatcher): Promise<boolean> {
@@ -453,7 +523,8 @@ async function handleThreadReply(inbound: Inbound, dispatcher: Dispatcher): Prom
   if (!inbound.threadTs || !inbound.user || !bot) return false;
   const user = await getUserBySlackId(inbound.user);
   const cleaned = stripBotMention(inbound.text, bot.userId);
-  if (!user || !present(cleaned) || !(await isAllowed(bot.userId, inbound.channel, inbound.threadTs))) {
+  const hasContent = present(cleaned) || inbound.files.length > 0;
+  if (!user || !hasContent || !(await isAllowed(bot.userId, inbound.channel, inbound.threadTs))) {
     log.debug(
       `Slack EventHandler not forwarding channel message ${inbound.channel}/${inbound.ts} (top-level, unknown author, or thread the bot was not invited into)`,
     );
@@ -463,10 +534,11 @@ async function handleThreadReply(inbound: Inbound, dispatcher: Dispatcher): Prom
   const info = await channelInfo(inbound.channel);
   const accessChannel = await agentChannel(inbound, info);
   threadSeen.mark(sessionKey, [inbound.ts]);
-  const content = `[from: ${formatAuthor(user.name, inbound.user)}]\n${cleaned}`;
+  const content = `[from: ${formatAuthor(user.name, inbound.user)}]\n${withFilesNote(cleaned, inbound.files)}`;
+  const files = fileParts(inbound.files);
 
   if (activeAuthor(sessionKey) === user.id) {
-    await deliverImmediate(dispatcher, user, inbound, inbound.threadTs, content, accessChannel);
+    await deliverImmediate(dispatcher, user, inbound, inbound.threadTs, content, files, accessChannel);
     return true;
   }
 
@@ -481,13 +553,13 @@ async function handleThreadReply(inbound: Inbound, dispatcher: Dispatcher): Prom
   });
   await messageReceived(auth, sessionKey, content, inbound.channel, access.writeAccess);
   await persistUser(user.id, sessionKey, content);
-  scheduleGate(sessionKey, { content, auth, ts: inbound.ts, channel: inbound.channel, dispatcher, userId: user.id });
+  scheduleGate(sessionKey, { content, files, auth, ts: inbound.ts, channel: inbound.channel, dispatcher, userId: user.id });
   return true;
 }
 
 export async function handleMessage(inbound: Inbound, dispatcher: Dispatcher, isMentionEvent = false) {
-  if (!present(inbound.text) || !inbound.user) {
-    log.debug("Slack EventHandler ignoring message with no text or no user");
+  if ((!present(inbound.text) && inbound.files.length === 0) || !inbound.user) {
+    log.debug("Slack EventHandler ignoring message with no text, no files or no user");
     return;
   }
   if (containsSecret(inbound.text)) {

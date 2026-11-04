@@ -12,6 +12,7 @@ import { extractSession } from "../memory/extractor.ts";
 import { sweep } from "../memory/pending.ts";
 import { processAllBuckets, reviewProcessedGraph } from "../memory/retrospector.ts";
 import { runHolidayCheck } from "../holidays.ts";
+import { deleteSandboxFilesOlderThan } from "../sandbox-files.ts";
 import { cleanUpClosedPulls } from "../self-modify-pulls.ts";
 import { deliverProactive } from "../proactive.ts";
 import { runMorning as selfReviewMorning, runNightly as selfReviewNightly } from "../self-review/index.ts";
@@ -183,6 +184,7 @@ const cleanup = cronFunction("events-cleanup", "40 * * * *", async () => {
   await deleteOlderThan(7);
   await sweep();
   await pruneJobs(7);
+  await deleteSandboxFilesOlderThan(30);
 });
 
 const allFunctions = [
