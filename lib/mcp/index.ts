@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { and, asc, eq, inArray, isNotNull } from "drizzle-orm";
+import { config } from "../config.ts";
 import { db, tables } from "../db/index.ts";
 import type { McpConnection, McpOauthClient } from "../db/schema.ts";
 import { logger } from "../log.ts";
@@ -23,6 +24,9 @@ export interface Provider {
   availability: ChannelAudience[];
 }
 
+export const GMAIL = "gmail";
+const GMAIL_SCOPES = ["https://www.googleapis.com/auth/gmail.readonly", "https://www.googleapis.com/auth/gmail.compose"];
+
 export function builtinProviders(): Provider[] {
   return [
     {
@@ -30,12 +34,27 @@ export function builtinProviders(): Provider[] {
       name: "Firmowid",
       mcpUrl: "https://firmowid.pl/mcp",
       mock: false,
-      logoUrl: null,
+      logoUrl: "/images/mcp/firmowid.png",
       custom: false,
       scope: "mcp",
       authHeader: null,
       availability: [...CHANNEL_AUDIENCES],
     },
+    ...(config.gmailMcpClientId
+      ? [
+          {
+            id: GMAIL,
+            name: "Gmail",
+            mcpUrl: "https://gmailmcp.googleapis.com/mcp/v1",
+            mock: false,
+            logoUrl: "/images/mcp/gmail.png",
+            custom: false,
+            scope: GMAIL_SCOPES.join(" "),
+            authHeader: null,
+            availability: ["dm", "internal"] satisfies ChannelAudience[],
+          },
+        ]
+      : []),
   ];
 }
 
@@ -346,7 +365,24 @@ export async function refreshToken(connection: McpConnection): Promise<McpResult
   return { ok: true, value: updated.accessToken! };
 }
 
-export async function getOauthClient(provider: string): Promise<McpOauthClient | null> {
+type OauthClient = Pick<McpOauthClient, "clientId" | "clientSecret" | "authorizationEndpoint" | "tokenEndpoint"> & {
+  authorizeParams?: Record<string, string>;
+};
+
+function preregisteredClient(provider: string): OauthClient | null {
+  if (provider !== GMAIL || !config.gmailMcpClientId) return null;
+  return {
+    clientId: config.gmailMcpClientId,
+    clientSecret: config.gmailMcpClientSecret ?? null,
+    authorizationEndpoint: "https://accounts.google.com/o/oauth2/v2/auth",
+    tokenEndpoint: "https://oauth2.googleapis.com/token",
+    authorizeParams: { access_type: "offline", prompt: "consent" },
+  };
+}
+
+export async function getOauthClient(provider: string): Promise<OauthClient | null> {
+  const preregistered = preregisteredClient(provider);
+  if (preregistered) return preregistered;
   const [client] = await db.select().from(mcpOauthClients).where(eq(mcpOauthClients.provider, provider)).limit(1);
   return client ?? null;
 }
@@ -381,7 +417,7 @@ export async function discoverMetadata(mcpUrl: string): Promise<Metadata | null>
   );
 }
 
-async function ensureClient(provider: string, mcpUrl: string, redirectUri: string): Promise<McpResult<McpOauthClient>> {
+async function ensureClient(provider: string, mcpUrl: string, redirectUri: string): Promise<McpResult<OauthClient>> {
   const existing = await getOauthClient(provider);
   if (existing) return { ok: true, value: existing };
 
@@ -444,6 +480,7 @@ export async function authorizeUrl(
     state,
   });
   if (scope) params.set("scope", scope);
+  for (const [key, value] of Object.entries(client.value.authorizeParams ?? {})) params.set(key, value);
   return { ok: true, value: { url: `${client.value.authorizationEndpoint}?${params}`, codeVerifier, state } };
 }
 
@@ -454,7 +491,7 @@ export interface Tokens {
   scope: string | null;
 }
 
-async function postToken(client: McpOauthClient, form: Record<string, string>): Promise<McpResult<Tokens>> {
+async function postToken(client: OauthClient, form: Record<string, string>): Promise<McpResult<Tokens>> {
   const body = new URLSearchParams(form);
   if (client.clientSecret) body.set("client_secret", client.clientSecret);
   const response = await fetch(client.tokenEndpoint, {
