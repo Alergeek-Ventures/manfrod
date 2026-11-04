@@ -51,14 +51,20 @@ export const config = {
   get linearClientSecret() {
     return env("LINEAR_CLIENT_SECRET");
   },
-  get linearEncryptionKey() {
-    return env("LINEAR_ENCRYPTION_KEY") ?? "N0G8yzhz8v1uS0kDf1PBjaVAd7RITiXHhJI3q6Pn0lU=";
+  get encryptionKey() {
+    const key = env("ENCRYPTION_KEY") ?? env("LINEAR_ENCRYPTION_KEY");
+    if (!key) throw new Error("ENCRYPTION_KEY is not set");
+    return key;
   },
   get internalApiSecret() {
     return env("INTERNAL_API_SECRET") ?? env("SECRET_KEY_BASE") ?? "manfrod-local-internal-secret";
   },
   get betterAuthSecret() {
-    return env("BETTER_AUTH_SECRET") ?? createHash("sha256").update(`better-auth:${this.linearEncryptionKey}`).digest("base64");
+    const explicit = env("BETTER_AUTH_SECRET");
+    if (explicit) return explicit;
+    // next build evaluates lib/auth.ts before runtime secrets exist
+    if (process.env.NEXT_PHASE === "phase-production-build") return "build-time-placeholder";
+    return createHash("sha256").update(`better-auth:${this.encryptionKey}`).digest("base64");
   },
   get appUrl() {
     const explicit = env("APP_URL");

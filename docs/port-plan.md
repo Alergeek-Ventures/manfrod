@@ -155,7 +155,7 @@ with their 1024-d Voyage embeddings, links with context), access levels,
 conversations/messages, facts, projects/channel mappings/memberships,
 recurring reminders, desks and reservations, MCP/Google/Kalafiornia
 connections and OAuth clients, encrypted Linear keys (same
-`LINEAR_ENCRYPTION_KEY`), thread kicks, feedback, rollups, audit events.
+`ENCRYPTION_KEY`), thread kicks, feedback, rollups, audit events.
 
 Conversation continuity: the first message in a Slack thread after the switch
 seeds a new eve session from `messages` (DMs: up to 400 messages, no age
@@ -185,7 +185,7 @@ decryption and the Oban import. Run it before and after the cutover.
 - Env: `DATABASE_URL`, `APP_URL`, `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET`,
   `OPENROUTER_API_KEY`, `TYPESAFE_AI_API_KEY`, `VOYAGE_API_KEY`,
   `BRAVE_SEARCH_API_KEY`, `GOOGLE_*`, `HOLIDAY_CALENDAR_ID`,
-  `KALAFIORNIA_OFFICE_ACCESS_API_KEY`, `LINEAR_ENCRYPTION_KEY`,
+  `KALAFIORNIA_OFFICE_ACCESS_API_KEY`, `ENCRYPTION_KEY`,
   `INNGEST_BASE_URL`, `INNGEST_EVENT_KEY`, `INNGEST_SIGNING_KEY`, `E2B_API_KEY`.
   `SLACK_APP_TOKEN`, `ZEN_API_KEY`, `GROQ_API_KEY`, `SECRET_KEY_BASE` are no
   longer used.

@@ -5,5 +5,6 @@ export default defineConfig({
     include: ["test/**/*.test.ts"],
     fileParallelism: false,
     testTimeout: 20_000,
+    env: { ENCRYPTION_KEY: "zO7HniI1WHaeX9V4TNxjaQkY4tKbwOLGXJPiASc4zAI=" },
   },
 });
