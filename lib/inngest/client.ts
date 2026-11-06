@@ -9,6 +9,7 @@ export const EVENTS = {
   bufferPushed: "manfrod/memory.buffer.pushed",
   proactiveRequested: "manfrod/proactive.requested",
   absenceRecorded: "manfrod/absence.recorded",
+  absenceAsked: "manfrod/absence.asked",
   absenceShared: "manfrod/absence.shared",
   capabilityApproved: "manfrod/capability.approved",
   mcpTokenUnavailable: "manfrod/mcp.token.unavailable",

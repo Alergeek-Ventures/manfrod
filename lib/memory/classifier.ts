@@ -252,7 +252,7 @@ async function createAbsence(result: Result, message: BufferedMessage, batch: Ba
   const absence: AbsenceRecordedData = { userId, startDate, endDate, working: result.working === true, details: note };
   const proposal = escalationProposal(batch, writeAccess, "absence");
   const asked = proposal !== null && (await postEscalationQuestion(batch.channelId, message, node, proposal, writeAccess, key, absence));
-  if (!asked) await sendEvent(EVENTS.absenceRecorded, absence);
+  await sendEvent(asked ? EVENTS.absenceAsked : EVENTS.absenceRecorded, absence);
 }
 
 async function askHuman(result: Result, message: BufferedMessage, batch: Batch, writeAccess: string[]) {

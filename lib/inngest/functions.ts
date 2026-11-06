@@ -109,6 +109,14 @@ const absenceSharedFollowUp = inngest.createFunction(
   async ({ event, step }) => step.run("follow-up", () => absenceFollowUpStep(event.data as AbsenceRecordedData)),
 );
 
+const absenceUnansweredFollowUp = inngest.createFunction(
+  { id: "absence-unanswered-follow-up", triggers: [{ event: EVENTS.absenceAsked }], retries: 1 },
+  async ({ event, step }) => {
+    await step.sleep("wait-for-sharing-choice", "30m");
+    return step.run("follow-up", () => absenceFollowUpStep(event.data as AbsenceRecordedData));
+  },
+);
+
 const capabilityBuild = inngest.createFunction(
   { id: "capability-build", triggers: [{ event: EVENTS.capabilityApproved }], retries: 1, idempotency: "event.data.requestId" },
   async ({ event, step }) =>
@@ -197,6 +205,7 @@ const allFunctions = [
   proactiveSend,
   absenceFollowUp,
   absenceSharedFollowUp,
+  absenceUnansweredFollowUp,
   capabilityBuild,
   mcpTokenRetry,
   extractSessionFn,
