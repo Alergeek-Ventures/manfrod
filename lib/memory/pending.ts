@@ -1,5 +1,6 @@
 import { and, eq, lt, sql } from "drizzle-orm";
 import { db, tables } from "../db/index.ts";
+import type { AbsenceRecordedData } from "../inngest/client.ts";
 
 const { memoryPendingOps, memoryPendingConfirmations } = tables;
 
@@ -80,6 +81,7 @@ export interface ConfirmationPayload {
   fact_key: string | null;
   lang: "pl" | "en";
   author_slack_id?: string;
+  absence?: AbsenceRecordedData;
 }
 
 export async function putConfirmation(botTs: string, channelId: string, payload: ConfirmationPayload) {

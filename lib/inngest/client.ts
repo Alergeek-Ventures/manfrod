@@ -9,6 +9,8 @@ export const EVENTS = {
   bufferPushed: "manfrod/memory.buffer.pushed",
   proactiveRequested: "manfrod/proactive.requested",
   absenceRecorded: "manfrod/absence.recorded",
+  absenceAsked: "manfrod/absence.asked",
+  absenceShared: "manfrod/absence.shared",
   capabilityApproved: "manfrod/capability.approved",
   mcpTokenUnavailable: "manfrod/mcp.token.unavailable",
 } as const;
@@ -37,6 +39,7 @@ export interface AbsenceRecordedData {
   startDate: string;
   endDate: string;
   working: boolean;
+  details?: string;
 }
 
 export interface McpTokenUnavailableData {

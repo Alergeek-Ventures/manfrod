@@ -90,6 +90,10 @@ const proactiveSend = inngest.createFunction(
     }),
 );
 
+async function absenceFollowUpStep({ userId, startDate, endDate, working, details }: AbsenceRecordedData) {
+  return { userId, period: `${startDate}..${endDate}`, sent: await runAbsenceFollowUp(userId, startDate, endDate, working, details) };
+}
+
 const absenceFollowUp = inngest.createFunction(
   {
     id: "absence-follow-up",
@@ -97,11 +101,20 @@ const absenceFollowUp = inngest.createFunction(
     retries: 1,
     debounce: { key: "event.data.userId", period: "2m" },
   },
-  async ({ event, step }) =>
-    step.run("follow-up", async () => {
-      const { userId, startDate, endDate, working } = event.data as AbsenceRecordedData;
-      return { userId, period: `${startDate}..${endDate}`, sent: await runAbsenceFollowUp(userId, startDate, endDate, working) };
-    }),
+  async ({ event, step }) => step.run("follow-up", () => absenceFollowUpStep(event.data as AbsenceRecordedData)),
+);
+
+const absenceSharedFollowUp = inngest.createFunction(
+  { id: "absence-shared-follow-up", triggers: [{ event: EVENTS.absenceShared }], retries: 1 },
+  async ({ event, step }) => step.run("follow-up", () => absenceFollowUpStep(event.data as AbsenceRecordedData)),
+);
+
+const absenceUnansweredFollowUp = inngest.createFunction(
+  { id: "absence-unanswered-follow-up", triggers: [{ event: EVENTS.absenceAsked }], retries: 1 },
+  async ({ event, step }) => {
+    await step.sleep("wait-for-sharing-choice", "30m");
+    return step.run("follow-up", () => absenceFollowUpStep(event.data as AbsenceRecordedData));
+  },
 );
 
 const capabilityBuild = inngest.createFunction(
@@ -191,6 +204,8 @@ const allFunctions = [
   runJob,
   proactiveSend,
   absenceFollowUp,
+  absenceSharedFollowUp,
+  absenceUnansweredFollowUp,
   capabilityBuild,
   mcpTokenRetry,
   extractSessionFn,
