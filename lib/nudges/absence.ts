@@ -16,10 +16,10 @@ const MAX_CHANNELS = 6;
 
 const log = logger("Nudges.Absence");
 
-const GUIDANCE = `This person just told you about an upcoming absence and you have already confirmed it. Offer, in one message, only the follow-ups that apply: submitting a Firmowid leave request when none in the data covers these dates (not for a business trip), cancelling their desk bookings on those days, a short note in their project channels, and meetings that clash (name them and suggest letting attendees know). If a holiday sits right next to it, you may point out the long break. End warmly. If nothing applies, do not send.`;
+const GUIDANCE = `This person just told you about an upcoming absence and has just chosen who may see it. Offer, in one message, only the follow-ups that apply. When their Firmowid leave requests are listed and none covers these dates, always send and open by asking whether to submit the leave request to Firmowid now, with the dates and the type you would pick filled in: "rest" for vacation or a day off, "indisposition" for feeling unwell, "other" with a short note for anything else. Firmowid can't take sick leave (L4) or unpaid leave this way, so for those say they need to file it in Firmowid themselves. Then mention, briefly, the other follow-ups that apply: cancelling their desk bookings on those days, a short note in their project channels, and meetings that clash (name them and suggest letting attendees know). If a holiday sits right next to it, you may point out the long break. End warmly. If nothing applies, do not send.`;
 
 const FOLLOW_UP = `Gdy odpowie:
-- wniosek urlopowy: dopytaj o rodzaj (wypoczynek, niedyspozycja, inne) i wywołaj firmowid__create_leave_request z reason "rest", "indisposition" albo "other" oraz datami starts_on i ends_on z danych
+- wniosek urlopowy: najpierw sprawdź firmowid__list_leave_requests dla tych dat i jeśli jakiś wniosek już je pokrywa, nie twórz drugiego, tylko o tym powiedz. Inaczej wywołaj firmowid__create_leave_request ze starts_on i ends_on z danych, reason "rest", "indisposition" albo "other" (ten, który zaproponowałeś, chyba że poprawi) i krótkim note. L4 ani urlopu bezpłatnego nie da się tak zgłosić, wtedy powiedz, że trzeba to zrobić w Firmowidzie
 - biurka: cancel-desk-reservation dla każdego dnia
 - kanały projektów: napisz krótką notkę i wyślij ją przez announce-absence do kanałów, które wybierze
 - jeśli czegoś nie chce, przyjmij to i nie wracaj do tego`;
@@ -55,7 +55,13 @@ async function leaveRequests(userId: string, startDate: string, endDate: string)
   return text.length > FIRMOWID_CHARS ? `${text.slice(0, FIRMOWID_CHARS)}…` : text;
 }
 
-export async function runAbsenceFollowUp(userId: string, startDate: string, endDate: string, working: boolean): Promise<boolean> {
+export async function runAbsenceFollowUp(
+  userId: string,
+  startDate: string,
+  endDate: string,
+  working: boolean,
+  details?: string,
+): Promise<boolean> {
   const person = await getUser(userId);
   const period = `${startDate}..${endDate}`;
   if (!person?.slackDmChannelId || endDate < localToday()) return false;
@@ -70,6 +76,7 @@ export async function runAbsenceFollowUp(userId: string, startDate: string, endD
     const nearby = holidays.ok ? holidays.value : [];
     const context = [
       `Absence: ${period}${working ? " (working away from the office, not time off)" : ""}`,
+      details ? `How they described it: ${details}` : "",
       requests !== null ? `Their Firmowid leave requests for these dates:\n${requests}` : "",
       desks.length > 0 ? `Their desk bookings on those days:\n${desks.map((row) => `- ${row.date}: ${row.desk.label}`).join("\n")}` : "",
       calendar && calendar.length > 0 ? `Their meetings on those days:\n${describeMeetings(calendar)}` : "",

@@ -3,7 +3,7 @@ import path from "node:path";
 import type { BufferedMessage, Node, Project } from "../db/schema.ts";
 import { getUserBySlackId } from "../accounts.ts";
 import { channelLanguage } from "../agent-settings.ts";
-import { EVENTS, sendEvent } from "../inngest/client.ts";
+import { EVENTS, sendEvent, type AbsenceRecordedData } from "../inngest/client.ts";
 import { broadcast } from "../events/index.ts";
 import { addAccess, overlappingAbsences, putAbsence, setFact } from "../facts.ts";
 import { generateText, system, user } from "../llm/index.ts";
@@ -249,9 +249,10 @@ async function createAbsence(result: Result, message: BufferedMessage, batch: Ba
   const node = await createAbsenceNode(userId, writeAccess, note, batch);
   if (!node) return;
 
+  const absence: AbsenceRecordedData = { userId, startDate, endDate, working: result.working === true, details: note };
   const proposal = escalationProposal(batch, writeAccess, "absence");
-  if (proposal) await postEscalationQuestion(batch.channelId, message, node, proposal, writeAccess, key);
-  await sendEvent(EVENTS.absenceRecorded, { userId, startDate, endDate, working: result.working === true });
+  const asked = proposal !== null && (await postEscalationQuestion(batch.channelId, message, node, proposal, writeAccess, key, absence));
+  if (!asked) await sendEvent(EVENTS.absenceRecorded, absence);
 }
 
 async function askHuman(result: Result, message: BufferedMessage, batch: Batch, writeAccess: string[]) {
@@ -273,7 +274,7 @@ async function askHuman(result: Result, message: BufferedMessage, batch: Batch, 
       embedding,
       projectId: noteProjectId(batch.projects, batch.projectId, result),
     });
-    await postEscalationQuestion(batch.channelId, message, node, proposal, writeAccess, null);
+    await postEscalationQuestion(batch.channelId, message, node, proposal, writeAccess, null, null);
   } catch (error) {
     log.info(`Classifier ask_human skipped for ${batch.channelId}: ${(error as Error).message}`);
   }
@@ -398,7 +399,8 @@ async function postEscalationQuestion(
   proposal: Proposal,
   writeAccess: string[],
   factKey: string | null,
-) {
+  absence: AbsenceRecordedData | null,
+): Promise<boolean> {
   const language: Lang = (await channelLanguage(channelId)).code === "pl" ? "pl" : "en";
   const prompt = escalationPromptText(language, node.content, currentLevelText(language, writeAccess));
   const initial = proposal.options.filter((level) => proposal.preselected.includes(level)).map((level) => checkboxOption(level, language));
@@ -432,7 +434,7 @@ async function postEscalationQuestion(
   const response = await post("chat.postMessage", { channel: channelId, thread_ts: original.ts, text: prompt, blocks });
   if (!response.ok) {
     log.error(`Classifier ask_human: failed to post: ${response.error}`);
-    return;
+    return false;
   }
   await putConfirmation(response.body.ts, channelId, {
     node_id: node.id,
@@ -442,8 +444,10 @@ async function postEscalationQuestion(
     fact_key: factKey,
     lang: language,
     ...(original.user ? { author_slack_id: original.user } : {}),
+    ...(absence ? { absence } : {}),
   });
   log.info(`Classifier ask_human: posted escalation prompt on ${channelId}/${original.ts} (options: ${proposal.options.join(", ")})`);
+  return true;
 }
 
 export function canResolveEscalation(payload: Pick<ConfirmationPayload, "author_slack_id">, slackUserId: string | undefined): boolean {
@@ -487,6 +491,7 @@ export async function resolveEscalation(
     text: outcome,
     blocks: [{ type: "section", text: { type: "mrkdwn", text: outcome } }],
   });
+  if (payload.absence) await sendEvent(EVENTS.absenceShared, payload.absence);
 }
 
 export async function preselectedLevels(botTs: string): Promise<string[]> {
