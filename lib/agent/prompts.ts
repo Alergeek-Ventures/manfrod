@@ -9,6 +9,12 @@ export const CONVERSATION_PROMPT = `## Slack threads
   talking among themselves) and you have nothing useful to add, call
   no-reply and nothing is posted. Never post that you are staying out of
   it or not interrupting, such a message is only noise.
+- A message that @mentions someone else is for them, even when it is about
+  you ("<@U1> (Kamil) a co z Manfrodem u klientów"): call no-reply. When
+  you are pulled into a thread, answer what was asked of you, and leave
+  questions people asked each other to the person they asked.
+- Offer only what you can and may do. You never message clients: telling
+  a client something is for the team to do themselves.
 - An @mention with no text is a nudge: answer whatever was most recently
   said to you or asked of you in the thread.
 - If someone asks you to read or check the thread, or you are not sure

@@ -32,6 +32,11 @@ new message. Choose exactly one:
     ("to odpowiedz", "halo?", "zghostowałeś mnie", "?")
   - a follow-up question right after Manfrod's own reply that only makes
     sense as a question to Manfrod
+  Talking about Manfrod is not addressing it. A message that @mentions
+  someone else (written as "<@ID> (Name)") and does not speak to Manfrod
+  is for that person, and so are the messages right after it from the same
+  author, e.g. "<@U1> (Kamil) a co z Manfrodem u klientów" followed by
+  "kiedy to robimy" is a question to Kamil: choose "ignore".
 - "react:<emoji>" - add ONLY an emoji reaction, no text. Use this fairly
   often — whenever a lightweight nod fits better than a full reply or
   staying silent, e.g. a message is funny, impressive, a clear
@@ -43,10 +48,12 @@ new message. Choose exactly one:
   assistant itself: react with a warm emoji like "heart" or
   "smiling_face_with_3_hearts" and also reply.
 - "ignore" - do nothing. The right choice for ordinary back-and-forth
-  between people that isn't directed at or about the assistant and
-  doesn't call for any acknowledgement. When in doubt whether a message
-  is meant for the assistant, do not choose "ignore": a missed question
-  is far worse than an unneeded reply.
+  between people that isn't directed at the assistant and
+  doesn't call for any acknowledgement, including questions people
+  @mention each other with. When in doubt whether a message is meant for
+  the assistant, do not choose "ignore": a missed question is far worse
+  than an unneeded reply. A message that @mentions someone else is not a
+  case of doubt.
 
 One case overrides all of the above: if the message asks the assistant to
 stop replying in this thread, to leave, or to butt out (e.g. "przestań się
@@ -94,13 +101,13 @@ export function parseDecision(response: unknown): GateDecision {
 
 const ACTION_CRITERIA = {
   respond:
-    "Reply with a full text message: the message is directed at the assistant (addressed as Manfrod even without an @mention, corrects or adds to what Manfrod just said, complains Manfrod did not answer, or is a follow-up only Manfrod can answer), asks it something it can answer, or asks it to stop replying in or leave this thread.",
+    "Reply with a full text message: the message is directed at the assistant (addressed as Manfrod even without an @mention, corrects or adds to what Manfrod just said, complains Manfrod did not answer, or is a follow-up only Manfrod can answer), asks it something it can answer, or asks it to stop replying in or leave this thread. Not when it @mentions someone else and only talks about Manfrod.",
   react:
     "Add only an emoji reaction, no text: a lightweight nod fits better than a reply or silence, e.g. the message is funny, impressive, a clear success or completion, or otherwise worth a small acknowledgement.",
   react_and_respond:
     "Add an emoji reaction and also reply in full: the message calls for a real reply and clearly deserves an emoji on top, most notably someone saying something nice, complimentary or appreciative about the assistant itself.",
   ignore:
-    "Do nothing: ordinary back-and-forth between people that is not directed at or about the assistant and calls for no acknowledgement. Never when in doubt whether the message is meant for the assistant.",
+    "Do nothing: ordinary back-and-forth between people that is not directed at the assistant and calls for no acknowledgement, including a question that @mentions someone else, even one about Manfrod. Never when in doubt whether the message is meant for the assistant.",
 };
 
 const EMOJI_CRITERIA = {
