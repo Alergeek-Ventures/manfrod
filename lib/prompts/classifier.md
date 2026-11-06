@@ -71,6 +71,12 @@ Possible actions:
 - ALWAYS use create_absence for absences, from every channel type — never ask_human. The system
   saves at the channel's default access and asks the humans about sharing to external/all itself.
 - NOT an absence: remote work, recurring unavailability, "I start gym on Wednesdays"
+- A message may come with the absences already recorded for its author. Compare against them
+  before choosing create_absence. One that only repeats or refers to a recorded absence is not
+  new: weekends and public holidays in between do not matter, so "nie będzie mnie 13.11-20.11"
+  repeats recorded 2026-11-13 (Friday) and 2026-11-16 (Monday)..2026-11-20 (Friday) → ignore.
+  One that changes a recorded absence (other dates, longer, shorter) → create_absence with the
+  whole new period and "replaces": true.
 - NOT an absence: a reply confirming or discussing whether to submit an ALREADY-reported absence
   to Firmowid — e.g. "tak, zapisz do firmowida", "dodaj mi ten urlop do firmowida", "yes please
   add it to Firmowid", "jaki rodzaj urlopu?". These replies repeat absence wording ("urlop",
@@ -153,7 +159,7 @@ rule above wins:
 
 ── OUTPUT ───────────────────────────────────────────────────────────────
 For a batch of messages I send you, respond ONLY as a JSON array (no extra text), one object per message in the same order:
-[{"action": "<action>", "reasoning": "<max 1 sentence>", "note": "<string or null>", "project": "<slug or null>", "start_date": "YYYY-MM-DD or null", "end_date": "YYYY-MM-DD or null"}, ...]
+[{"action": "<action>", "reasoning": "<max 1 sentence>", "note": "<string or null>", "project": "<slug or null>", "start_date": "YYYY-MM-DD or null", "end_date": "YYYY-MM-DD or null", "replaces": true or false}, ...]
 
 Valid actions: "ignore", "create_memory", "create_absence", "create_meeting", "flag_sensitive", "ask_human"
 
@@ -179,3 +185,6 @@ the channel's project.
 "start_date"/"end_date" — REQUIRED for create_absence (null otherwise): the resolved absence
 period as absolute ISO dates, computed against the current date provided with the batch.
 A single-day absence has start_date == end_date. "jutro" means current date + 1 day.
+
+"replaces" — for create_absence: true when the message changes an absence already recorded for
+the author, false otherwise.
