@@ -367,6 +367,15 @@ function stripBotMention(text: string, botUserId: string): string {
   return text.replaceAll(`<@${botUserId}>`, "").trim();
 }
 
+const MENTION_PATTERN = /<@([A-Z0-9]+)>/g;
+
+async function withMentionNames(text: string): Promise<string> {
+  const ids = [...new Set([...text.matchAll(MENTION_PATTERN)].map((match) => match[1]))];
+  if (ids.length === 0) return text;
+  const names = new Map(await Promise.all(ids.map(async (id) => [id, await fetchUserName(id)] as const)));
+  return text.replace(MENTION_PATTERN, (whole: string, id: string) => (names.get(id) ? `${whole} (${names.get(id)})` : whole));
+}
+
 function mentionText(text: string, inThread: boolean): string {
   if (text !== "") return text;
   return inThread ? "(@mention with no text - answer what was most recently said to you in this thread)" : "(@mention with no text)";
@@ -505,7 +514,7 @@ export async function handleMention(inbound: Inbound, dispatcher: Dispatcher) {
   const userName = await fetchUserName(inbound.user);
   const channelContext = `Slack channel: #${info.name}, from: ${formatAuthor(userName, inbound.user)}`;
   const catchUp = await threadCatchUp(inbound, threadTs, sessionKey);
-  const body = stripBotMention(inbound.text, bot?.userId ?? "");
+  const body = await withMentionNames(stripBotMention(inbound.text, bot?.userId ?? ""));
   const text = inbound.files.length > 0 ? withFilesNote(body, inbound.files) : mentionText(body, inbound.threadTs !== null);
   await deliverImmediate(
     dispatcher,
@@ -534,7 +543,7 @@ async function handleThreadReply(inbound: Inbound, dispatcher: Dispatcher): Prom
   const info = await channelInfo(inbound.channel);
   const accessChannel = await agentChannel(inbound, info);
   threadSeen.mark(sessionKey, [inbound.ts]);
-  const content = `[from: ${formatAuthor(user.name, inbound.user)}]\n${withFilesNote(cleaned, inbound.files)}`;
+  const content = `[from: ${formatAuthor(user.name, inbound.user)}]\n${withFilesNote(await withMentionNames(cleaned), inbound.files)}`;
   const files = fileParts(inbound.files);
 
   if (activeAuthor(sessionKey) === user.id) {
