@@ -5,12 +5,12 @@ import { getUserBySlackId } from "../accounts.ts";
 import { channelLanguage } from "../agent-settings.ts";
 import { EVENTS, sendEvent } from "../inngest/client.ts";
 import { broadcast } from "../events/index.ts";
-import { addAccess, overlappingAbsences, putAbsence, setFact } from "../facts.ts";
+import { addAccess, overlappingAbsences, putAbsence, setFact, upcomingAbsences } from "../facts.ts";
 import { generateText, system, user } from "../llm/index.ts";
 import { decideAction, type MemoryAction } from "./action-decider.ts";
 import { logger } from "../log.ts";
 import { post } from "../slack/api.ts";
-import { isValidIsoDate, localToday, weekdayName } from "../time.ts";
+import { isValidIsoDate, localToday, weekdayName, withWeekday } from "../time.ts";
 import { embedQuery } from "../voyage.ts";
 import { clientIdForProject, ensureMembership, getActiveMapping, isPrivate, privateLevel } from "./access.ts";
 import { detect, ensureMapping } from "./channel-detector.ts";
@@ -47,6 +47,7 @@ interface Batch {
   projects: Project[];
   clientId: string | null;
   userIds: Map<string, string>;
+  absences: Map<string, string[]>;
 }
 
 class ClassifierUnavailableError extends Error {}
@@ -67,7 +68,22 @@ export async function classifyBatch(messages: BufferedMessage[], channelId: stri
     projects: projectId ? await listProjects() : [],
     clientId: mapping?.clientId ?? (projectId ? await clientIdForProject(projectId) : null),
     userIds,
+    absences: await recordedAbsences(userIds),
   });
+}
+
+async function recordedAbsences(userIds: Map<string, string>): Promise<Map<string, string[]>> {
+  const today = localToday();
+  const entries = await Promise.all(
+    [...new Set(userIds.values())].map(async (userId) => {
+      const ranges = await upcomingAbsences(userId, today);
+      return [
+        userId,
+        ranges.map(({ from, to }) => (from === to ? withWeekday(from) : `${withWeekday(from)}..${withWeekday(to)}`)),
+      ] as const;
+    }),
+  );
+  return new Map(entries.filter(([, ranges]) => ranges.length > 0));
 }
 
 async function resolveAuthors(messages: BufferedMessage[]): Promise<Map<string, string>> {
@@ -121,7 +137,7 @@ export function noteProjectId(projects: Pick<Project, "id" | "slug" | "name">[],
 
 async function llmResults(messages: BufferedMessage[], batch: Batch, today: string): Promise<Result[]> {
   if (messages.length === 0) return [];
-  const formatted = messages.map((message, index) => `Message ${index}:\n${formatMessage(message, batch.kind)}`).join("\n---\n");
+  const formatted = messages.map((message, index) => `Message ${index}:\n${formatMessage(message, batch)}`).join("\n---\n");
   const userMessage =
     `Current date: ${today} (${weekdayName(today)}).\n` +
     projectContext(batch.projects, batch.projectId) +
@@ -232,7 +248,7 @@ async function createAbsence(result: Result, message: BufferedMessage, batch: Ba
   const note = noteOrText(result, message);
   const overlapping = userId !== null && (await overlappingAbsences(userId, startDate, endDate)).length > 0;
 
-  if (overlapping && result.flagged === true) {
+  if (overlapping && (result.flagged === true || result.replaces === true)) {
     const { fact } = await putAbsence(userId!, startDate, endDate, note, writeAccess);
     await createAbsenceNode(userId!, fact.access, note, batch);
     return;
@@ -552,12 +568,15 @@ const RESOLVED_SCOPES: Record<string, string> = {
   project_external: "internal + external/<client_id>",
 };
 
-function formatMessage(message: BufferedMessage, kind: string): string {
+function formatMessage(message: BufferedMessage, batch: Batch): string {
+  const { kind } = batch;
+  const userId = authorId(batch, message);
+  const absences = userId ? batch.absences.get(userId) : undefined;
   return `Channel: ${kind}
 Channel type: ${CHANNEL_TYPES[kind] ?? "unknown"}
 Resolved scope: ${RESOLVED_SCOPES[kind] ?? "none"}
 User: ${message.user_name ?? message.user ?? "unknown"}
-Message: "${message.text ?? ""}"
+${absences ? `Absences already recorded for this user: ${absences.join(", ")}\n` : ""}Message: "${message.text ?? ""}"
 `;
 }
 

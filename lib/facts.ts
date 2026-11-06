@@ -84,6 +84,12 @@ export async function overlappingAbsences(userId: string, startDate: string, end
   });
 }
 
+export async function upcomingAbsences(userId: string, today: string): Promise<{ from: string; to: string }[]> {
+  return (await listFactsByUserUnscoped("absence:", userId))
+    .map((fact) => parseDateRange(fact.value))
+    .filter((range): range is { from: string; to: string } => range !== null && compareDates(range.to, today) >= 0);
+}
+
 export async function putAbsence(
   userId: string,
   startDate: string,

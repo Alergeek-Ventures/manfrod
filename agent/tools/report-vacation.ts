@@ -2,13 +2,11 @@ import { z } from "zod";
 import { overlappingAbsences, parseDateRange, putAbsence } from "../../lib/facts.ts";
 import { createNode } from "../../lib/memory/nodes.ts";
 import { flagMessage } from "../../lib/memory/pending.ts";
-import { weekdayName } from "../../lib/time.ts";
+import { withWeekday } from "../../lib/time.ts";
 import { embedQuery } from "../../lib/voyage.ts";
 import { flaggable } from "../../lib/../lib/agent/context.ts";
 import { absenceNote } from "../lib/vacation.ts";
 import { defineManfrodTool } from "../lib/define-tool.ts";
-
-const withWeekday = (date: string) => `${date} (${weekdayName(date)})`;
 
 export default defineManfrodTool({
   keepSecretPlaceholders: true,

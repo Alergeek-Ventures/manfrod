@@ -106,6 +106,8 @@ export function weekdayName(dateIso: string): string {
   return WEEKDAYS[new Date(Date.UTC(year, month - 1, day)).getUTCDay()];
 }
 
+export const withWeekday = (dateIso: string) => `${dateIso} (${weekdayName(dateIso)})`;
+
 export function compareDates(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
