@@ -1,10 +1,19 @@
 import type { RouteHandlerArgs } from "eve/channels";
-import { slackChannel, type SlackChannelState, type SlackInboundMessageContext, type SlackMessage } from "eve/channels/slack";
+import {
+  slackChannel,
+  type SlackChannelState,
+  type SlackInboundMessageContext,
+  type SlackInteractionAction,
+  type SlackInteractionContext,
+  type SlackMessage,
+  type SlackSessionOperations,
+} from "eve/channels/slack";
 import { getUserBySlackId } from "../../lib/accounts.ts";
 import { channelLanguage } from "../../lib/agent-settings.ts";
 import { unfurlLinearLinks } from "../../lib/linear/unfurl.ts";
 import { logger } from "../../lib/log.ts";
 import { setStatus, setSuggestedPrompts } from "../../lib/slack/api.ts";
+import { handleCardReply, isCardReplyAction } from "../../lib/slack/card-actions.ts";
 import { handleSlashCommand } from "../../lib/slack/commands.ts";
 import { interceptInteractivity } from "../../lib/slack/interactivity.ts";
 import { runKick } from "../../lib/slack/kick.ts";
@@ -17,7 +26,7 @@ import { buildPrompts } from "../../lib/slack/suggested-prompts.ts";
 const log = logger("Slack.EventHandler");
 const KICK_CALLBACK_ID = "kick_manfrod";
 
-function dispatcher(ctx: SlackInboundMessageContext): Dispatcher {
+function dispatcher(ctx: SlackSessionOperations & { isSubscribed?: () => Promise<boolean> }): Dispatcher {
   return {
     send: (content, options) =>
       ctx.send(content, {
@@ -26,31 +35,47 @@ function dispatcher(ctx: SlackInboundMessageContext): Dispatcher {
         history: options.history,
         turnPolicy: options.turnPolicy,
       }),
-    isSubscribed: () => ctx.isSubscribed(),
+    isSubscribed: async () => (ctx.isSubscribed ? ctx.isSubscribed() : (await ctx.resolveSession()) !== undefined),
     reset: (reason) => ctx.reset({ reason }),
   };
 }
 
-async function reportFailure(message: SlackMessage, error: unknown) {
-  log.error(`Slack EventHandler failed for ${message.channelId}/${message.ts}: ${(error as Error).stack ?? error}`);
-  const threadTs = message.threadTs ?? message.ts;
-  await setStatus(message.channelId, threadTs, "");
+async function reportFailure(channelId: string, threadTs: string, ts: string, error: unknown) {
+  log.error(`Slack EventHandler failed for ${channelId}/${ts}: ${(error as Error).stack ?? error}`);
+  await setStatus(channelId, threadTs, "");
   await post("chat.postMessage", {
-    channel: message.channelId,
+    channel: channelId,
     thread_ts: threadTs,
     text: "Sorry, I encountered an error and couldn't answer. Please try again in a moment.",
   });
 }
 
+const reportingFailure = (channelId: string, threadTs: string, ts: string) => (error: unknown) =>
+  reportFailure(channelId, threadTs, ts, error).catch((reportError) =>
+    log.error(`Slack EventHandler could not report failure: ${(reportError as Error).message}`),
+  );
+
 function route(ctx: SlackInboundMessageContext, message: SlackMessage, isMention: boolean) {
   void inboundFromEvent(message.raw, message.channelId)
     .then((inbound) => handleMessage(inbound, dispatcher(ctx), isMention))
-    .catch((error) =>
-      reportFailure(message, error).catch((reportError) =>
-        log.error(`Slack EventHandler could not report failure: ${(reportError as Error).message}`),
-      ),
-    );
+    .catch(reportingFailure(message.channelId, message.threadTs ?? message.ts, message.ts));
   return null;
+}
+
+async function onInteraction(action: SlackInteractionAction, ctx: SlackInteractionContext) {
+  if (!isCardReplyAction(action.actionId)) return;
+  await handleCardReply(
+    {
+      actionId: action.actionId,
+      value: action.value,
+      label: action.label,
+      messageTs: action.messageTs,
+      slackUserId: action.user.id,
+      channelId: ctx.slack.channelId,
+      threadTs: ctx.slack.threadTs,
+    },
+    dispatcher(ctx),
+  ).catch(reportingFailure(ctx.slack.channelId, ctx.slack.threadTs, action.messageTs ?? ctx.slack.threadTs));
 }
 
 async function suggestPrompts(slackUserId: string | undefined, channelId: string | undefined, threadTs: string | undefined) {
@@ -67,6 +92,7 @@ const base = slackChannel({
   onDirectMessage: (ctx, message) => route(ctx, message, false),
   onAppMention: (ctx, message) => route(ctx, message, true),
   onMessage: (ctx, message) => route(ctx, message, false),
+  onInteraction,
 
   async onEvent(_ctx, event) {
     const data = event as Record<string, any>;
