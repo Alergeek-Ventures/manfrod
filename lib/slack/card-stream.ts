@@ -2,7 +2,7 @@ import { TASK_KIND, turnThread, type ToolCtx } from "../agent/context.ts";
 import { SELF_REVIEW_KIND } from "../self-review/rules.ts";
 import { post } from "./api.ts";
 import { createElementScanner } from "./card-scan.ts";
-import { createCardBuilder, isRichBlock, plainBlocks, type CardWarning, type DroppedElement } from "./cards.ts";
+import { CARD_LIMITS, createCardBuilder, degradeBlocks, isRichBlock, type CardWarning, type DroppedElement } from "./cards.ts";
 import { shared, TtlMap } from "./state.ts";
 import { sendBlocks, type BlockDelivery } from "./stream.ts";
 
@@ -41,6 +41,7 @@ export interface CardOutcome {
   streamed: number;
   posted: number;
   degraded: number;
+  cut: number;
   dropped: DroppedElement[];
   warnings: CardWarning[];
   error: string | null;
@@ -176,8 +177,9 @@ function postBlocks(channel: string, threadTs: string | null | undefined, blocks
 async function postCard(channel: string, threadTs: string | null | undefined, blocks: Block[]) {
   const result = await postBlocks(channel, threadTs, blocks);
   const rich = blocks.filter(isRichBlock).length;
-  if (result.ok || rich === 0 || !isInvalidBlocks(result.error)) return { result, degraded: 0 };
-  return { result: await postBlocks(channel, threadTs, plainBlocks(blocks)), degraded: rich };
+  if (result.ok || rich === 0 || !isInvalidBlocks(result.error)) return { result, degraded: 0, cut: [] };
+  const plain = degradeBlocks(blocks);
+  return { result: await postBlocks(channel, threadTs, plain.blocks), degraded: rich, cut: plain.cut };
 }
 
 export async function showCard(callId: string, elements: unknown[], tool: ToolCtx): Promise<CardOutcome> {
@@ -185,6 +187,7 @@ export async function showCard(callId: string, elements: unknown[], tool: ToolCt
   const streamed = await streamedElements(callId);
   const add = createCardBuilder();
   const unsent: Block[] = [];
+  const unsentElements: { index: number; type?: string }[] = [];
   const dropped: DroppedElement[] = [];
   const warnings: CardWarning[] = [];
   let shown = 0;
@@ -198,14 +201,22 @@ export async function showCard(callId: string, elements: unknown[], tool: ToolCt
     }
     if (step.warning) warnings.push({ index, type: elementType(value), message: step.warning });
     if (streamed.has(element)) shown += 1;
-    else unsent.push(step.block);
+    else {
+      unsent.push(step.block);
+      unsentElements.push({ index, type: elementType(value) });
+    }
   });
-  const base = { streamed: shown, posted: 0, degraded: 0, dropped, warnings };
+  const base = { streamed: shown, posted: 0, degraded: 0, cut: 0, dropped, warnings };
   if (unsent.length === 0) return { ...base, error: null };
   if (!channel) return { ...base, error: "there is no Slack conversation to show it in" };
-  const { result, degraded } = await postCard(channel, threadTs, unsent);
+  const { result, degraded, cut } = await postCard(channel, threadTs, unsent);
   if (!result.ok) return { ...base, error: result.error };
-  return { ...base, posted: unsent.length, degraded, error: null };
+  for (const position of cut)
+    warnings.push({
+      ...unsentElements[position],
+      message: `posted as a text list cut at ${CARD_LIMITS.sectionText} characters; the rest of its data is not shown`,
+    });
+  return { ...base, posted: unsent.length, degraded, cut: cut.length, error: null };
 }
 
 export function describeCardOutcome(outcome: CardOutcome): string {
@@ -217,7 +228,9 @@ export function describeCardOutcome(outcome: CardOutcome): string {
   else lines.push(`Card shown: ${outcome.streamed} block(s) in your reply, ${outcome.posted} posted separately in the thread.`);
   if (outcome.degraded > 0)
     lines.push(
-      `Slack did not accept ${outcome.degraded} chart or columns element(s); they were posted as plain text or a table with the same data instead.`,
+      outcome.cut > 0
+        ? `Slack did not accept ${outcome.degraded} chart or columns element(s); they were posted as plain text or a table instead, and ${outcome.cut} of them did not fit and were cut short (listed below).`
+        : `Slack did not accept ${outcome.degraded} chart or columns element(s); they were posted as plain text or a table with the same data instead.`,
     );
   if (outcome.dropped.length > 0) {
     lines.push("Dropped elements (the person does not see them; mention or fix this in your reply, shown blocks cannot be removed):");

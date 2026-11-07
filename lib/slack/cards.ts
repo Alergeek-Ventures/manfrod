@@ -367,7 +367,11 @@ const numberText = (value: unknown) => (typeof value === "number" ? String(value
 
 function chartRows(block: Block): string[][] {
   const chart = isRecord(block.chart) ? block.chart : {};
-  if (chart.type === "pie") return records(chart.segments).map((segment) => [String(segment.label ?? ""), numberText(segment.value)]);
+  if (chart.type === "pie")
+    return [
+      ["", typeof block.title === "string" ? block.title : ""],
+      ...records(chart.segments).map((segment) => [String(segment.label ?? ""), numberText(segment.value)]),
+    ];
   const series = records(chart.series);
   const axis = isRecord(chart.axis_config) ? chart.axis_config : {};
   const categories = Array.isArray(axis.categories) ? axis.categories.map(String) : [];
@@ -378,26 +382,32 @@ function chartRows(block: Block): string[][] {
   ];
 }
 
-function chartLines(rows: string[][], pie: boolean): string {
+function chartLines(rows: string[][]): string {
   const [head, ...body] = rows;
-  const lines = pie ? rows : body;
-  if (pie || head.length <= 2) return lines.map(([label, ...values]) => `• ${label}: ${values.join(" ")}`).join("\n");
+  if (head.length <= 2) return body.map(([label, ...values]) => `• ${label}: ${values.join(" ")}`).join("\n");
   return body
     .map(([label, ...values]) => `• ${label}: ${values.map((value, index) => `${head[index + 1]} ${value}`).join(" · ")}`)
     .join("\n");
 }
 
-function chartFallback(block: Block, withTable: boolean): Block[] {
+const overflows = (value: string, max: number) => withoutBroadcasts(fromMarkdown(value)).length > max;
+
+function chartFallback(block: Block, withTable: boolean): { blocks: Block[]; cut: boolean } {
   const title = typeof block.title === "string" ? block.title : "";
   const rows = chartRows(block);
-  const pie = isRecord(block.chart) && block.chart.type === "pie";
-  if (withTable) return [{ type: "section", text: mrkdwn(`**${title}**`, CARD_LIMITS.sectionText) }, tableBlock(rows)];
-  return [{ type: "section", text: mrkdwn(`**${title}**\n${chartLines(rows, pie)}`, CARD_LIMITS.sectionText) }];
+  if (withTable)
+    return { blocks: [{ type: "section", text: mrkdwn(`**${title}**`, CARD_LIMITS.sectionText) }, tableBlock(rows)], cut: false };
+  const text = `**${title}**\n${chartLines(rows)}`;
+  return {
+    blocks: [{ type: "section", text: mrkdwn(text, CARD_LIMITS.sectionText) }],
+    cut: overflows(text, CARD_LIMITS.sectionText),
+  };
 }
 
-export function plainBlocks(blocks: Block[]): Block[] {
+export function degradeBlocks(blocks: Block[]): { blocks: Block[]; cut: number[] } {
   let tables = countTables(blocks.filter((block) => !isRichBlock(block)));
-  return blocks.flatMap((block) => {
+  const cut: number[] = [];
+  const plain = blocks.flatMap((block, index) => {
     if (block.type === "layout") {
       const fallback = records(block.fallback);
       tables += countTables(fallback);
@@ -406,9 +416,14 @@ export function plainBlocks(blocks: Block[]): Block[] {
     if (block.type !== "data_visualization") return [block];
     const withTable = tables < CARD_LIMITS.maxTables;
     if (withTable) tables += 1;
-    return chartFallback(block, withTable);
+    const fallback = chartFallback(block, withTable);
+    if (fallback.cut) cut.push(index);
+    return fallback.blocks;
   });
+  return { blocks: plain, cut };
 }
+
+export const plainBlocks = (blocks: Block[]) => degradeBlocks(blocks).blocks;
 
 function describeIssues(error: z.ZodError): string {
   return error.issues.map((issue) => (issue.path.length > 0 ? `${issue.path.join(".")}: ${issue.message}` : issue.message)).join("; ");

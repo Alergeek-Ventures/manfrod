@@ -14,7 +14,7 @@ const api = vi.hoisted(() => ({
 
 vi.mock("../../lib/slack/api.ts", () => api);
 
-const { blockWeight, CARD_LIMITS, cardToBlocks, countCharts, plainBlocks } = await import("../../lib/slack/cards.ts");
+const { blockWeight, CARD_LIMITS, cardToBlocks, countCharts, degradeBlocks, plainBlocks } = await import("../../lib/slack/cards.ts");
 const { cancelCardCall, describeCardOutcome, showCard, streamCardInput } = await import("../../lib/slack/card-stream.ts");
 const { ensureStream } = await import("../../lib/slack/stream.ts");
 
@@ -49,6 +49,19 @@ const pieChart = {
   title: "Candy",
   categories: ["Kit Kat", "Twix"],
   series: [{ name: "Votes", values: [45, 28] }],
+};
+
+const longCategories = Array.from({ length: 20 }, (_, index) => `Category number ${index}`.slice(0, 20));
+
+const longChart = {
+  type: "chart",
+  kind: "bar",
+  title: "Everything",
+  categories: longCategories,
+  series: Array.from({ length: 12 }, (_, index) => ({
+    name: `Series name ${index}`,
+    values: longCategories.map((_, point) => point * 1000),
+  })),
 };
 
 const kpis = {
@@ -273,6 +286,23 @@ describe("plainBlocks", () => {
     expect(plain.at(-1)).toEqual({ type: "section", text: { type: "mrkdwn", text: "*Candy*\n• Kit Kat: 45\n• Twix: 28" } });
   });
 
+  it("gives a pie's fallback table a header row so the first segment stays a data row", () => {
+    const table = plainBlocks(cardToBlocks([pieChart]).blocks).find((block) => block.type === "table") as Body;
+    const cells = (table.rows as Body[][]).map((row) => JSON.stringify(row));
+    expect(cells).toHaveLength(3);
+    expect(cells[0]).toContain("Candy");
+    expect(cells[1]).toContain("Kit Kat");
+    expect(cells[1]).toContain("45");
+    expect(cells[2]).toContain("Twix");
+  });
+
+  it("reports which charts' text fallback was cut to fit a section", () => {
+    const { blocks } = cardToBlocks([{ type: "table", rows: [["a"]] }, longChart, lineChart]);
+    const { blocks: plain, cut } = degradeBlocks(blocks);
+    expect(cut).toEqual([1]);
+    expect((plain[1].text as Body).text).toHaveLength(CARD_LIMITS.sectionText);
+  });
+
   it("uses one table for the first chart and text for the second", () => {
     const plain = plainBlocks(cardToBlocks([pieChart, lineChart]).blocks);
     expect(plain.map((block) => block.type)).toEqual(["section", "table", "section"]);
@@ -386,6 +416,19 @@ describe("degrading charts and columns Slack rejects", () => {
     expect(JSON.stringify(posted()[1].blocks)).toContain("35000");
     expect(outcome).toMatchObject({ posted: 3, degraded: 2, error: null });
     expect(describeCardOutcome(outcome)).toContain("Slack did not accept 2 chart or columns element(s)");
+    expect(describeCardOutcome(outcome)).toContain("with the same data");
+    expect(outcome.cut).toBe(0);
+  });
+
+  it("warns when a chart's text fallback had to be cut instead of claiming the same data", async () => {
+    api.post.mockResolvedValueOnce(invalidBlocks);
+    const outcome = await showCard("call-degrade-cut", [{ type: "table", rows: [["a"]] }, longChart], ctx("C1", nextId()));
+    expect(outcome).toMatchObject({ posted: 2, degraded: 1, cut: 1, error: null });
+    expect(outcome.warnings).toEqual([{ index: 1, type: "chart", message: expect.stringContaining("cut at 3000 characters") }]);
+    const text = describeCardOutcome(outcome);
+    expect(text).not.toContain("same data");
+    expect(text).toContain("1 of them did not fit and were cut short");
+    expect(text).toContain("- elements[1] (chart): posted as a text list cut at 3000 characters");
   });
 
   it("does not retry other errors or cards without charts and columns", async () => {
