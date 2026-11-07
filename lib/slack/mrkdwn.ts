@@ -49,8 +49,8 @@ export function fromMarkdown(text: string): string {
   return restore(restore(converted, blocks.matches, CODE_BLOCK_PLACEHOLDER), inlines.matches, INLINE_CODE_PLACEHOLDER);
 }
 
-const MAX_TABLE_ROWS = 100;
-const MAX_TABLE_COLS = 20;
+export const MAX_TABLE_ROWS = 100;
+export const MAX_TABLE_COLS = 20;
 const TABLE_SEP_CELL_RE = /^:?-+:?$/;
 const BOX_BORDER_RE = /^\s*[─┬┼┴┌┐├┤└┘]+\s*$/u;
 const BOX_CONTENT_RE = /^\s*│.+│\s*$/u;
@@ -77,6 +77,12 @@ const parseBoxRow = (line: string) =>
     .replace(/^│+|│+$/gu, "")
     .split("│")
     .map((cell) => cell.trim());
+
+export const withoutTableSeparators = (text: string) =>
+  text
+    .split("\n")
+    .filter((line) => !(isTableRow(line) && isTableSeparator(line)))
+    .join("\n");
 
 function segmentLines(lines: string[]): Segment[] {
   const segments: Segment[] = [];
@@ -146,12 +152,20 @@ function tableCell(text: string) {
   return { type: "raw_text", text };
 }
 
+export function tableBlock(rows: string[][]): Record<string, unknown> {
+  const kept = rows.slice(0, MAX_TABLE_ROWS).map((row) => row.slice(0, MAX_TABLE_COLS));
+  const width = Math.max(0, ...kept.map((row) => row.length));
+  return {
+    type: "table",
+    rows: kept.map((row) => Array.from({ length: width }, (_, index) => tableCell(row[index]?.trim() ? row[index] : " "))),
+  };
+}
+
 function segmentToBlocks(segment: Segment): Record<string, unknown>[] {
   if (segment.kind === "text") {
     return [{ type: "section", text: { type: "mrkdwn", text: fromMarkdown(segment.text).slice(0, 2900) } }];
   }
-  const rows = segment.rows.slice(0, MAX_TABLE_ROWS).map((row) => row.slice(0, MAX_TABLE_COLS).map(tableCell));
-  return [{ type: "table", rows }];
+  return [tableBlock(segment.rows)];
 }
 
 export function toBlocks(text: string): { text: string; blocks: Record<string, unknown>[] | null } {
