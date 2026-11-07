@@ -3,7 +3,7 @@ import { channelLanguage, type LanguageCode } from "../agent-settings.ts";
 import { planTitle, threadTitle } from "../agent/titles.ts";
 import { logger } from "../log.ts";
 import { isUntitledProactiveThread, markProactiveThreadTitled } from "../proactive.ts";
-import { isBackgroundKind, TASK_KIND, toolCtx, type ToolCtx } from "../agent/context.ts";
+import { isBackgroundKind, TASK_KIND, toolCtx, turnThread, type ToolCtx } from "../agent/context.ts";
 import { deleteMessage, post, setTitle, type SlackBody } from "./api.ts";
 import { feedbackBlock, feedbackChunk } from "./feedback.ts";
 import { fromMarkdown, toBlocks } from "./mrkdwn.ts";
@@ -37,9 +37,9 @@ interface Where {
 
 function where(channel: SlackEventContext, ctx: Parameters<typeof toolCtx>[0]): Where | null {
   const tool = toolCtx(ctx);
-  const channelId = channel.state.channelId ?? tool.msgCtx.channel;
-  if (!channelId) return null;
-  return { channel: channelId, threadTs: channel.state.threadTs ?? tool.msgCtx.threadTs, tool };
+  const thread = turnThread(tool, channel.state);
+  if (!thread.channel) return null;
+  return { channel: thread.channel, threadTs: thread.threadTs, tool };
 }
 
 const isNoReply = (action: object) => "toolName" in action && action.toolName === NO_REPLY_TOOL;
@@ -87,6 +87,9 @@ function streamFor(where: Where, channel: SlackEventContext) {
   if (where.tool.kind === "skill_channel" || where.tool.kind === TASK_KIND) return null;
   const target = recipient(where, channel);
   if (target === "unsupported") return null;
+  const own = turnThread(where.tool);
+  if (where.tool.kind === "slack" && (own.channel !== where.channel || own.threadTs !== where.threadTs))
+    log.warn(`Slack ActivityHandler stream thread differs from the turn's auth thread in ${where.channel}, cards will not stream`);
   return ensureStream(where.channel, where.threadTs, target);
 }
 
@@ -140,8 +143,7 @@ async function deliverFinal(where: Where, rawContent: string) {
   let delivered = false;
   if (stream && !stream.closed) {
     const feedback = skill ? [] : [feedbackChunk(where.tool.sessionKey, (await channelLanguage(where.channel)).code)];
-    const outcome = await stream.finish(content, feedback);
-    delivered = outcome !== "not_streaming";
+    delivered = (await stream.finish(content, feedback)) === "ok";
   }
   if (!delivered) {
     if (skill) {

@@ -44,6 +44,7 @@ const INTENT_TOOLS = new Set([
   "set-proactive-preferences",
   "set-reminder",
   "set-soul-note",
+  "show-card",
   "show-desk-map",
   "unlink-notes",
   "update-calendar-event",

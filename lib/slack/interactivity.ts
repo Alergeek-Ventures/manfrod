@@ -15,6 +15,7 @@ import {
 import { logger } from "../log.ts";
 import { CAPABILITY_APPROVE_ACTION_ID, CAPABILITY_REJECT_ACTION_ID, handleCapabilityDecision } from "../tasks/capabilities.ts";
 import { preselectedLevels, resolveEscalation } from "../memory/classifier.ts";
+import { CARD_LINK_ACTION_PREFIX } from "./cards.ts";
 import { FEEDBACK_ACTION_ID, recordFeedback, REMOVE_ACTION_ID, removeMessage } from "./feedback.ts";
 import { handleSecretSubmission, openSecretModal, readSubmission, SECRET_ADD_ACTION_ID, SECRET_CALLBACK_ID } from "./secret-modal.ts";
 import { verifySlackSignature } from "./verify.ts";
@@ -36,6 +37,9 @@ const OWNED_ACTIONS = new Set([
   "memory_escalation_cancel",
   "memory_escalation_levels",
 ]);
+
+const isOwnedAction = (actionId: unknown) =>
+  typeof actionId === "string" && (OWNED_ACTIONS.has(actionId) || actionId.startsWith(CARD_LINK_ACTION_PREFIX));
 
 const LEVELS_BLOCK_ID = "memory_escalation_levels_block";
 const LEVELS_ACTION_ID = "memory_escalation_levels";
@@ -125,7 +129,7 @@ export function interceptInteractivity(headers: Headers, body: string): Intercep
 
   const ownedSubmission = payload.type === "view_submission" && payload.view?.callback_id === CONNECT_CALLBACK_ID;
   const secretSubmission = payload.type === "view_submission" && payload.view?.callback_id === SECRET_CALLBACK_ID;
-  const ownedAction = payload.type === "block_actions" && OWNED_ACTIONS.has(payload.actions?.[0]?.action_id);
+  const ownedAction = payload.type === "block_actions" && isOwnedAction(payload.actions?.[0]?.action_id);
   if (!ownedSubmission && !secretSubmission && !ownedAction) return null;
 
   if (!verifySlackSignature(headers, body))

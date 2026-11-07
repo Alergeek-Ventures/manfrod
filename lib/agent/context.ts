@@ -70,6 +70,15 @@ export function toolCtx(ctx: SessionLike): ToolCtx {
   return toolCtxFromAuth(ctx.session.auth.current ?? ctx.session.auth.initiator);
 }
 
+export interface SlackThreadState {
+  channelId?: string | null;
+  threadTs?: string | null;
+}
+
+export function turnThread(tool: ToolCtx, state: SlackThreadState = {}): { channel: string | null; threadTs: string | null } {
+  return { channel: state.channelId ?? tool.msgCtx.channel, threadTs: state.threadTs ?? tool.msgCtx.threadTs };
+}
+
 export function flaggable(msgCtx: MsgCtx): { channel: string; ts: string } | null {
   return msgCtx.channel && msgCtx.ts ? { channel: msgCtx.channel, ts: msgCtx.ts } : null;
 }
