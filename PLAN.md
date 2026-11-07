@@ -104,6 +104,26 @@ _To be filled after step 4._
 
 Button clicks need `action_id` routing and permission checks, following the `request-capability` pattern in `lib/tasks/capabilities.ts`.
 
+## Stage 5: rich layout (charts, columns, title buttons)
+
+Requested by the user on 2026-11-07 (screenshot of a Slack agent reply with a title row plus a "View report" button, three columns of bold labels and values, and a monthly revenue area chart). Goal: richer cards on request or for clearly numeric/structured data, never decoration on ordinary answers.
+
+Research (Szperacz, docs.slack.dev, 2026-11-07):
+- `data_visualization` block (added 2026-06-16): line, area, bar, pie; at most 2 per message; title ≤ 50 chars; labels and series names ≤ 20 chars; 1–12 series; 1–20 points per series; every series needs a point for every category in `axis_config.categories`; unique series names. Works in `chat.postMessage`; streaming in `blocks` chunks and `chat.update` are unverified.
+- `layout` block: up to 5 rows of 1–3 elements (section, rich_text, data_visualization, table, actions, card…; not `markdown`), widths narrow/standard/wide, optional `grid_lines`; a chart must take more than half a row; always set `fallback` (context, divider, header, image, rich_text, section, table, video only). Mobile stacks columns.
+- No text colour in Block Kit; use ▲/▼ or 🟢/🔴 for deltas. Button `style` primary/danger is the only colour.
+- `section.accessory` button gives the title-row button.
+- Also available, not in this stage: `card`, `carousel`, `alert`, `data_table`, `container`.
+
+Scope:
+- Catalog: `chart` element (line/area/bar/pie → `data_visualization`, strict validation of the limits above), `columns` element (→ `layout`, 1–3 columns per row, each column markdown text with an optional title, `fallback` built from the same content), optional `button` accessory on `section`/`header`-like title rows.
+- Per-message limits: at most 2 charts per message alongside the existing 49 blocks / 1 table.
+- Degrade gracefully: if Slack rejects a chart or layout block (`invalid_blocks`), retry without it and post a text/table fallback built from the same data, never losing the reply.
+- Prompt: rich elements only when the person asks for a chart/summary/report or the answer is genuinely numeric or tabular; plain text by default; no card for short conversational answers.
+
+Decisions:
+- Stage 5 is the third layer of the gh stack (`feat/card-rich` on `feat/card-actions`).
+
 ## Risks
 
 - Slack `blocks` chunk is a new API; spike decides whether the whole approach works. Fallback if it does not: separate message plus `chat.update` every ~500 ms (about 20 updates/min limit).
