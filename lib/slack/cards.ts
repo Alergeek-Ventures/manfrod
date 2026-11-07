@@ -18,6 +18,8 @@ export const CARD_LIMITS = {
 } as const;
 
 export const CARD_LINK_ACTION_PREFIX = "card_link_";
+export const CARD_REPLY_ACTION_PREFIX = "card_reply_";
+export const CARD_BUTTONS_BLOCK_PREFIX = "card_buttons_";
 
 const ELLIPSIS = "…";
 
@@ -34,19 +36,30 @@ function httpsHref(value: string): string | null {
 
 const text = z.string().trim().min(1);
 
-const linkButton = z.object({
-  text: text.describe("Button label, plain text"),
-  url: z
-    .string()
-    .trim()
-    .superRefine((value, ctx) => {
-      const href = httpsHref(value);
-      if (href === null) ctx.addIssue({ code: "custom", message: "must be an https URL" });
-      else if (href.length > CARD_LIMITS.buttonUrl)
-        ctx.addIssue({ code: "custom", message: `must be at most ${CARD_LIMITS.buttonUrl} characters` });
-    })
-    .describe("https link the button opens"),
-});
+const button = z
+  .object({
+    text: text.describe("Button label, plain text"),
+    url: z
+      .string()
+      .trim()
+      .superRefine((value, ctx) => {
+        const href = httpsHref(value);
+        if (href === null) ctx.addIssue({ code: "custom", message: "must be an https URL" });
+        else if (href.length > CARD_LIMITS.buttonUrl)
+          ctx.addIssue({ code: "custom", message: `must be at most ${CARD_LIMITS.buttonUrl} characters` });
+      })
+      .optional()
+      .describe("Link button: https link the button opens"),
+    reply: z
+      .literal(true)
+      .optional()
+      .describe("Reply button: set to true and the click sends you exactly the button text as a message from whoever clicks it"),
+    style: z.enum(["primary", "danger"]).optional().describe("Optional color: primary (green) or danger (red)"),
+  })
+  .superRefine((value, ctx) => {
+    if ((value.url === undefined) === (value.reply === undefined))
+      ctx.addIssue({ code: "custom", message: "a button needs exactly one of url or reply: true" });
+  });
 
 export const cardElementSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("header"), text: text.describe("Short plain text title") }),
@@ -72,7 +85,7 @@ export const cardElementSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("divider") }),
   z.object({
     type: z.literal("buttons"),
-    buttons: z.array(linkButton).min(1).max(CARD_LIMITS.maxButtons).describe("Link buttons"),
+    buttons: z.array(button).min(1).max(CARD_LIMITS.maxButtons).describe("Link or reply buttons"),
   }),
 ]);
 
@@ -118,7 +131,25 @@ const mrkdwn = (value: string, max: number) => ({
 });
 const plainText = (value: string, max: number) => ({ type: "plain_text", text: truncate(value, max) });
 
-export function elementToBlock(element: CardElement): Block {
+type CardButton = z.infer<typeof button>;
+
+function buttonBlock(button: CardButton, index: number): Block {
+  const base = {
+    type: "button",
+    text: plainText(button.text, CARD_LIMITS.buttonText),
+    ...(button.style ? { style: button.style } : {}),
+  };
+  if (button.reply) return { ...base, action_id: `${CARD_REPLY_ACTION_PREFIX}${index}` };
+  const url = button.url ?? "";
+  return { ...base, action_id: `${CARD_LINK_ACTION_PREFIX}${index}`, url: httpsHref(url) ?? url };
+}
+
+export interface ButtonIds {
+  blockId?: string;
+  firstButton?: number;
+}
+
+export function elementToBlock(element: CardElement, ids: ButtonIds = {}): Block {
   switch (element.type) {
     case "header":
       return { type: "header", text: plainText(element.text, CARD_LIMITS.headerText) };
@@ -135,12 +166,8 @@ export function elementToBlock(element: CardElement): Block {
     case "buttons":
       return {
         type: "actions",
-        elements: element.buttons.map((button, index) => ({
-          type: "button",
-          action_id: `${CARD_LINK_ACTION_PREFIX}${index}`,
-          text: plainText(button.text, CARD_LIMITS.buttonText),
-          url: httpsHref(button.url) ?? button.url,
-        })),
+        ...(ids.blockId ? { block_id: ids.blockId } : {}),
+        elements: element.buttons.map((button, index) => buttonBlock(button, (ids.firstButton ?? 0) + index)),
       };
   }
 }
@@ -168,8 +195,19 @@ function tableWarning(rows: string[][]): string | undefined {
 }
 
 export function createCardBuilder() {
+  const card = crypto.randomUUID().slice(0, 8);
   let blocks = 0;
   let tables = 0;
+  let rows = 0;
+  let buttons = 0;
+
+  const toBlock = (element: CardElement): Block => {
+    if (element.type !== "buttons") return elementToBlock(element);
+    const block = elementToBlock(element, { blockId: `${CARD_BUTTONS_BLOCK_PREFIX}${card}_${rows}`, firstButton: buttons });
+    rows += 1;
+    buttons += element.buttons.length;
+    return block;
+  };
 
   return function add(value: unknown): CardStep {
     const parsed = cardElementSchema.safeParse(value);
@@ -181,7 +219,8 @@ export function createCardBuilder() {
     }
     blocks += 1;
     const warning = parsed.data.type === "table" ? tableWarning(parsed.data.rows) : undefined;
-    return warning ? { block: elementToBlock(parsed.data), warning } : { block: elementToBlock(parsed.data) };
+    const block = toBlock(parsed.data);
+    return warning ? { block, warning } : { block };
   };
 }
 

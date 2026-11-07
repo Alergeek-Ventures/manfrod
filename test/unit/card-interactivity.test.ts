@@ -24,6 +24,17 @@ describe("card link buttons", () => {
     await expect(intercepted!.work).resolves.toBeUndefined();
   });
 
+  it("leaves card reply clicks to eve so they reach the channel's onInteraction", () => {
+    const { headers, body } = request({
+      type: "block_actions",
+      user: { id: "U1" },
+      channel: { id: "C1" },
+      message: { ts: "1.2", thread_ts: "1.1" },
+      actions: [{ action_id: "card_reply_0", type: "button", value: "Pokaż szczegóły" }],
+    });
+    expect(interceptInteractivity(headers, body)).toBeNull();
+  });
+
   it("leaves other actions to eve", () => {
     const { headers, body } = request({ type: "block_actions", actions: [{ action_id: "something_else" }] });
     expect(interceptInteractivity(headers, body)).toBeNull();

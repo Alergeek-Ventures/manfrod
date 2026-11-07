@@ -113,6 +113,11 @@ export async function fetchUserInfo(slackUserId: string): Promise<{ name: string
   return { name: displayName(user), email: user.profile?.email ?? null };
 }
 
+export async function isBotUser(slackUserId: string): Promise<boolean> {
+  const user = await userInfo(slackUserId);
+  return user?.is_bot === true || user?.id === "USLACKBOT";
+}
+
 export async function deactivatedSlackIds(): Promise<Set<string>> {
   const ids = await cached("users:deactivated", async () => {
     const deleted: string[] = [];
@@ -252,6 +257,12 @@ export async function listFullThread(channel: string, threadTs: string, max = 10
     }
     return acc.slice(0, max);
   }
+}
+
+export async function getThreadMessage(channel: string, threadTs: string, ts: string): Promise<SlackBody | null> {
+  const result = await get("conversations.replies", { channel, ts: threadTs, oldest: ts, latest: ts, inclusive: true, limit: 10 });
+  if (!result.ok) return null;
+  return (result.body.messages as SlackBody[]).find((message) => message.ts === ts) ?? null;
 }
 
 export async function respond(responseUrl: string, body: SlackBody): Promise<boolean> {
