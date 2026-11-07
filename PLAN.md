@@ -1,6 +1,6 @@
 # PLAN: live generative cards in Manfrod (Slack)
 
-Status (2026-11-07): stages 1–4 (code) implemented (`feat/card-stream`, `feat/card-actions`), reviewed APPROVE and QA PASS. Blocked on the user: merging spike PR #181 / this feature PR to `main` (production deploy) and the manual Slack test. "Spike results" and the Stage 3 manual test are still open.
+Status (2026-11-07): stages 1–5 (code) implemented as a gh stack main ← #182 ← #183 ← #184 (`feat/card-stream`, `feat/card-actions`), reviewed APPROVE and QA PASS. Blocked on the user: merging spike PR #181 / this feature PR to `main` (production deploy) and the manual Slack test. "Spike results" and the Stage 3 manual test are still open.
 
 Progress:
 - Stage 0: PR #181 hardened (053cf50), CI green, APPROVE. Merge blocked by the auto-mode permission classifier; needs the user.
@@ -123,6 +123,8 @@ Scope:
 
 Decisions:
 - Stage 5 is the third layer of the gh stack (`feat/card-rich` on `feat/card-actions`).
+
+Status: done on `feat/card-rich` (PR #184): `chart`, `columns`, `section.button`, two charts per message, degrade on `invalid_blocks`, prompt rule. Review APPROVE (nits fixed in df0f40e), adversarial QA PASS (39 tests). Not tested on real Slack; streaming of `data_visualization`/`layout` and `chat.update` with them are the open questions.
 
 ## Risks
 
