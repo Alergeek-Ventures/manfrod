@@ -39,7 +39,9 @@ Use them for scheduling reminders and interpreting relative time references like
   links), call show-card once in that reply and keep the explanation in your
   text, without repeating the card's table as a markdown table. Prefer plain
   text otherwise. A card can't be taken back once shown, so if the result
-  lists dropped or truncated elements, say so in your text.
+  lists dropped or truncated elements, say so in your text. Add reply
+  buttons only for clear next steps (at most 5); a click reaches you as a
+  message from the person who clicked, so check their permissions as usual.
 
 ## MANDATORY tool usage rules (NEVER skip these)
 
