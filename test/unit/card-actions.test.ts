@@ -477,3 +477,67 @@ describe("handleCardReply", () => {
     expect(api.post).not.toHaveBeenCalled();
   });
 });
+
+const titleRowCard = () =>
+  cardToBlocks([
+    { type: "section", text: "**Raport**", button: { text: "Pokaż raport", reply: true } },
+    { type: "section", text: "Link", button: { text: "Otwórz", url: "https://example.com/r" } },
+    { type: "buttons", buttons: [{ text: "Odśwież", reply: true }] },
+  ]).blocks as Body[];
+
+describe("title-row buttons", () => {
+  it("puts the button in the section accessory with ids unique across the card", () => {
+    const [reply, link, row] = titleRowCard();
+    expect(reply).toMatchObject({
+      type: "section",
+      text: { type: "mrkdwn", text: "*Raport*" },
+      accessory: { type: "button", action_id: "card_reply_0", text: { type: "plain_text", text: "Pokaż raport" } },
+    });
+    expect(reply.accessory).not.toHaveProperty("value");
+    expect(link.accessory).toEqual({
+      type: "button",
+      action_id: "card_link_1",
+      text: { type: "plain_text", text: "Otwórz" },
+      url: "https://example.com/r",
+    });
+    expect(row.elements.map((element: Body) => element.action_id)).toEqual(["card_reply_2"]);
+    expect(new Set([reply.block_id, link.block_id, row.block_id]).size).toBe(3);
+  });
+
+  it("leaves a section without a button as before", () => {
+    expect(cardToBlocks([{ type: "section", text: "a" }]).blocks[0]).toEqual({ type: "section", text: { type: "mrkdwn", text: "a" } });
+  });
+
+  it("rejects an invalid accessory button", () => {
+    expect(parseElement(JSON.stringify({ type: "section", text: "a", button: { text: "x" } }))).toBeNull();
+    expect(parseElement(JSON.stringify({ type: "section", text: "a", button: { text: "x", url: "http://example.com" } }))).toBeNull();
+  });
+
+  it("reads the accessory label only with its own block_id", () => {
+    const blocks = titleRowCard();
+    expect(replyLabel(blocks, blocks[0].block_id, "card_reply_0")).toBe("Pokaż raport");
+    expect(replyLabel(blocks, blocks[2].block_id, "card_reply_0")).toBeNull();
+    expect(replyLabel(blocks, blocks[1].block_id, "card_link_1")).toBeNull();
+  });
+
+  it("drops the reply accessory, keeps the title and the link accessory and notes the choice under it", () => {
+    const result = answeredBlocks(titleRowCard(), "note")!;
+    expect(result.map((block) => block.type)).toEqual(["section", "context", "section"]);
+    expect(result[0]).not.toHaveProperty("accessory");
+    expect(result[0].text.text).toBe("*Raport*");
+    expect(result[2].accessory.action_id).toBe("card_link_1");
+    expect(answeredBlocks(result, "again")).toBeNull();
+  });
+
+  it("dispatches a click on the title-row button and marks the card answered", async () => {
+    const blocks = titleRowCard();
+    slack.message = { ts: "", text: "Raport", blocks };
+    await handleCardReply(click({ actionId: "card_reply_0", blockId: blocks[0].block_id }), dispatcher);
+    expect(sends).toHaveLength(1);
+    expect(sends[0].content).toMatch(/\n\[clicked card button\] Pokaż raport$/);
+    const updated = updates()[0].blocks as Body[];
+    expect(updated[0]).not.toHaveProperty("accessory");
+    expect(JSON.stringify(updated)).toContain(":point_right: <@U2>: Pokaż raport");
+    expect(updated.some((block) => block.elements?.some((element: Body) => element.action_id === "card_reply_2"))).toBe(false);
+  });
+});

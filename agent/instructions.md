@@ -44,6 +44,9 @@ Use them for scheduling reminders and interpreting relative time references like
   message from the person who clicked, starting with [clicked card button],
   so check their permissions as usual. A button click is not enough
   confirmation for admin-only or irreversible actions: ask explicitly first.
+  Use charts, columns and title-row buttons only when the person asks for a
+  chart, report or summary, or the answer is genuinely numeric; never on
+  short conversational answers, and never more than one card per reply.
 
 ## MANDATORY tool usage rules (NEVER skip these)
 

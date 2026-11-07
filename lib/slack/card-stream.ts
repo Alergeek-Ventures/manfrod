@@ -2,7 +2,7 @@ import { TASK_KIND, turnThread, type ToolCtx } from "../agent/context.ts";
 import { SELF_REVIEW_KIND } from "../self-review/rules.ts";
 import { post } from "./api.ts";
 import { createElementScanner } from "./card-scan.ts";
-import { createCardBuilder, type CardWarning, type DroppedElement } from "./cards.ts";
+import { CARD_LIMITS, createCardBuilder, degradeBlocks, isRichBlock, type CardWarning, type DroppedElement } from "./cards.ts";
 import { shared, TtlMap } from "./state.ts";
 import { sendBlocks, type BlockDelivery } from "./stream.ts";
 
@@ -40,6 +40,8 @@ export interface StreamedBatch {
 export interface CardOutcome {
   streamed: number;
   posted: number;
+  degraded: number;
+  cut: number;
   dropped: DroppedElement[];
   warnings: CardWarning[];
   error: string | null;
@@ -147,12 +149,37 @@ function elementType(value: unknown): string | undefined {
   return typeof type === "string" ? type : undefined;
 }
 
+function blockText(block: Block): unknown {
+  if (block.type === "data_visualization") return block.title;
+  if (block.type === "layout") return block.label;
+  return (block.text as { text?: unknown } | undefined)?.text;
+}
+
 function notificationText(blocks: Block[]): string {
   for (const block of blocks) {
-    const text = (block.text as { text?: unknown } | undefined)?.text;
+    const text = blockText(block);
     if (typeof text === "string" && text.trim() !== "") return text.slice(0, NOTIFICATION_TEXT_LIMIT);
   }
   return "Card";
+}
+
+const isInvalidBlocks = (error: string) => error.startsWith("invalid_blocks");
+
+function postBlocks(channel: string, threadTs: string | null | undefined, blocks: Block[]) {
+  return post("chat.postMessage", {
+    channel,
+    ...(threadTs ? { thread_ts: threadTs } : {}),
+    text: notificationText(blocks),
+    blocks,
+  });
+}
+
+async function postCard(channel: string, threadTs: string | null | undefined, blocks: Block[]) {
+  const result = await postBlocks(channel, threadTs, blocks);
+  const rich = blocks.filter(isRichBlock).length;
+  if (result.ok || rich === 0 || !isInvalidBlocks(result.error)) return { result, degraded: 0, cut: [] };
+  const plain = degradeBlocks(blocks);
+  return { result: await postBlocks(channel, threadTs, plain.blocks), degraded: rich, cut: plain.cut };
 }
 
 export async function showCard(callId: string, elements: unknown[], tool: ToolCtx): Promise<CardOutcome> {
@@ -160,6 +187,7 @@ export async function showCard(callId: string, elements: unknown[], tool: ToolCt
   const streamed = await streamedElements(callId);
   const add = createCardBuilder();
   const unsent: Block[] = [];
+  const unsentElements: { index: number; type?: string }[] = [];
   const dropped: DroppedElement[] = [];
   const warnings: CardWarning[] = [];
   let shown = 0;
@@ -173,18 +201,22 @@ export async function showCard(callId: string, elements: unknown[], tool: ToolCt
     }
     if (step.warning) warnings.push({ index, type: elementType(value), message: step.warning });
     if (streamed.has(element)) shown += 1;
-    else unsent.push(step.block);
+    else {
+      unsent.push(step.block);
+      unsentElements.push({ index, type: elementType(value) });
+    }
   });
-  if (unsent.length === 0) return { streamed: shown, posted: 0, dropped, warnings, error: null };
-  if (!channel) return { streamed: shown, posted: 0, dropped, warnings, error: "there is no Slack conversation to show it in" };
-  const result = await post("chat.postMessage", {
-    channel,
-    ...(threadTs ? { thread_ts: threadTs } : {}),
-    text: notificationText(unsent),
-    blocks: unsent,
-  });
-  if (!result.ok) return { streamed: shown, posted: 0, dropped, warnings, error: result.error };
-  return { streamed: shown, posted: unsent.length, dropped, warnings, error: null };
+  const base = { streamed: shown, posted: 0, degraded: 0, cut: 0, dropped, warnings };
+  if (unsent.length === 0) return { ...base, error: null };
+  if (!channel) return { ...base, error: "there is no Slack conversation to show it in" };
+  const { result, degraded, cut } = await postCard(channel, threadTs, unsent);
+  if (!result.ok) return { ...base, error: result.error };
+  for (const position of cut)
+    warnings.push({
+      ...unsentElements[position],
+      message: `posted as a text list cut at ${CARD_LIMITS.sectionText} characters; the rest of its data is not shown`,
+    });
+  return { ...base, posted: unsent.length, degraded, cut: cut.length, error: null };
 }
 
 export function describeCardOutcome(outcome: CardOutcome): string {
@@ -194,6 +226,12 @@ export function describeCardOutcome(outcome: CardOutcome): string {
   else if (outcome.posted === 0) lines.push("Card shown in your reply.");
   else if (outcome.streamed === 0) lines.push("Card posted in the thread.");
   else lines.push(`Card shown: ${outcome.streamed} block(s) in your reply, ${outcome.posted} posted separately in the thread.`);
+  if (outcome.degraded > 0)
+    lines.push(
+      outcome.cut > 0
+        ? `Slack did not accept ${outcome.degraded} chart or columns element(s); they were posted as plain text or a table instead, and ${outcome.cut} of them did not fit and were cut short (listed below).`
+        : `Slack did not accept ${outcome.degraded} chart or columns element(s); they were posted as plain text or a table with the same data instead.`,
+    );
   if (outcome.dropped.length > 0) {
     lines.push("Dropped elements (the person does not see them; mention or fix this in your reply, shown blocks cannot be removed):");
     for (const item of outcome.dropped) lines.push(`- elements[${item.index}]${item.type ? ` (${item.type})` : ""}: ${item.reason}`);
