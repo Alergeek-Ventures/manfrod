@@ -8,7 +8,7 @@ import { defineManfrodTool } from "../lib/define-tool.ts";
 export default defineManfrodTool({
   keepSecretPlaceholders: true,
   description:
-    "Send a direct message on Slack to one specific person, e.g. to ask someone who hasn't answered in a thread, or to pass something on when asked to. Say on whose behalf and why you are writing, and link the thread if there is one. Pass task_id when it is for a long-running task, so their reply comes back to it. Refuses people with deactivated accounts, people who turned these messages off, and repeating yourself within two hours.",
+    "Send a direct message on Slack to one specific person, e.g. to ask someone who hasn't answered in a thread, or to pass something on when asked to. Before reminding someone about a pending request, check that they haven't already answered or handled it in the thread or elsewhere. Say on whose behalf and why you are writing, and link the thread if there is one. Pass task_id when it is for a long-running task, so their reply comes back to it. Refuses people with deactivated accounts, people who turned these messages off, and repeating yourself within two hours.",
   inputSchema: z.object({
     recipient: z.string().describe("Slack ID (e.g. U094WT397D2) or Manfrod user ID of the person"),
     text: z.string().min(1).max(3000).describe("The message, in Slack mrkdwn, in the language you use with this person"),

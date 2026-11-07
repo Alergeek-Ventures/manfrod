@@ -17,10 +17,11 @@ const MAX_THREADS = 12;
 const COMMITMENT_DAYS = 14;
 const TEXT_CHARS = 500;
 const TAIL_CHARS = 200;
+const OWN_MESSAGES = 15;
 
 const log = logger("Nudges.Waiting");
 
-const GUIDANCE = `This person just started their workday. Tell them, briefly, about Slack threads where someone is still waiting for their answer or action, and about things they promised to do that are still open and due around now. Skip FYIs, thank-yous, questions this person or someone else already answered (also in a separate channel message right after), matters that look closed, and anything older that has clearly gone stale. If nothing genuinely needs them, do not send.`;
+const GUIDANCE = `This person just started their workday. Tell them, briefly, about Slack threads where someone is still waiting for their answer or action, and about things they promised to do that are still open and due around now. Skip FYIs, thank-yous, questions this person or someone else already answered (also in a separate channel message right after), anything their own later messages elsewhere show they already answered, did or handled, matters that look closed, and anything older that has clearly gone stale. If nothing genuinely needs them, do not send.`;
 
 const FOLLOW_UP = `Gdy odpowie: jeśli chce coś odpisać albo zobaczyć, przeczytaj wątek przez read-slack-thread i pomóż. Jeśli coś jest już załatwione, przyjmij to i nie wracaj do tego.`;
 
@@ -67,6 +68,32 @@ export function waitingFor(slackUserId: string, threads: SlackThread[], now: num
     });
   }
   return found.sort((a, b) => Number(b.ts) - Number(a.ts)).slice(0, MAX_THREADS);
+}
+
+export interface OwnMessage {
+  channelName: string;
+  ts: string;
+  text: string;
+}
+
+export function ownMessagesSince(slackUserId: string, threads: SlackThread[], since: string): OwnMessage[] {
+  return threads
+    .flatMap((thread) =>
+      thread.messages
+        .filter((message) => message.user === slackUserId && typeof message.text === "string" && Number(message.ts) > Number(since))
+        .map((message) => ({ channelName: thread.channelName, ts: String(message.ts), text: message.text as string })),
+    )
+    .sort((a, b) => Number(b.ts) - Number(a.ts))
+    .slice(0, OWN_MESSAGES);
+}
+
+function describeOwnMessages(messages: OwnMessage[]): string {
+  return messages
+    .map((message) => {
+      const age = Math.round((Date.now() - Number(message.ts) * 1000) / 3_600_000);
+      return `- #${message.channelName}, ${age}h ago: ${clip(message.text, TAIL_CHARS)}`;
+    })
+    .join("\n");
 }
 
 async function describeThreads(found: WaitingThread[]): Promise<string> {
@@ -138,9 +165,11 @@ export async function runWorkStartNudges(today = localToday()): Promise<number> 
         await recordDelivery(person.id, "waiting", today, false, "Nothing waiting.");
         continue;
       }
+      const own = ownMessagesSince(person.slackId, await workspace.all(), oldest);
       const context = [
         threads.length > 0 ? `Threads that mention them with no reply from them since:\n${await describeThreads(threads)}` : "",
         promised ? `Notes from your memory that may be their commitments:\n${promised}` : "",
+        own.length > 0 ? `Their own latest messages in any channel or thread, newest first:\n${describeOwnMessages(own)}` : "",
       ]
         .filter(Boolean)
         .join("\n\n");
