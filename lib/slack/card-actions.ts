@@ -53,8 +53,22 @@ const escapeMrkdwn = (value: string) => value.replaceAll("&", "&amp;").replaceAl
 
 const blocksOf = (message: SlackBody): SlackBody[] => (Array.isArray(message.blocks) ? message.blocks : []);
 
-const elementsOf = (block: SlackBody): SlackBody[] =>
-  block?.type === "actions" && Array.isArray(block.elements) ? (block.elements as SlackBody[]) : [];
+function elementsOf(block: SlackBody): SlackBody[] {
+  if (block?.type === "actions" && Array.isArray(block.elements)) return block.elements as SlackBody[];
+  if (block?.type === "section" && block.accessory) return [block.accessory as SlackBody];
+  return [];
+}
+
+function withoutReplyButtons(block: SlackBody): SlackBody[] | null {
+  if (block.type === "section" && isReplyButton(block.accessory)) {
+    const { accessory: _, ...section } = block;
+    return [section];
+  }
+  if (block.type !== "actions" || !Array.isArray(block.elements)) return null;
+  const elements = (block.elements as SlackBody[]).filter((element) => !isReplyButton(element));
+  if (elements.length === block.elements.length) return null;
+  return elements.length > 0 ? [{ ...block, elements }] : [];
+}
 
 const collapseWhitespace = (value: string) => value.replace(/\s+/g, " ").trim();
 
@@ -66,12 +80,11 @@ export function answeredBlocks(blocks: SlackBody[], note: string): SlackBody[] |
   const noteBlock = { type: "context", block_id: ANSWERED_BLOCK_ID, elements: [{ type: "mrkdwn", text: note }] };
   let answered = false;
   const result = blocks.flatMap((block) => {
-    if (block.type !== "actions" || !Array.isArray(block.elements)) return [block];
-    const elements = (block.elements as SlackBody[]).filter((element) => !isReplyButton(element));
-    if (elements.length === block.elements.length) return [block];
+    const kept = withoutReplyButtons(block);
+    if (kept === null) return [block];
     const placed = answered ? [] : [noteBlock];
     answered = true;
-    return elements.length > 0 ? [{ ...block, elements }, ...placed] : placed;
+    return [...kept, ...placed];
   });
   return answered ? result : null;
 }

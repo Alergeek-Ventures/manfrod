@@ -1,6 +1,6 @@
 import { logger } from "../log.ts";
 import { appendStream, deleteMessage, setStatus, startStream, stopStream, type SlackBody, type SlackResult } from "./api.ts";
-import { CARD_LIMITS } from "./cards.ts";
+import { blocksWeight, CARD_LIMITS, countCharts, countTables } from "./cards.ts";
 import { toBlocks, withoutTableSeparators } from "./mrkdwn.ts";
 import { shared, TtlMap } from "./state.ts";
 
@@ -43,8 +43,6 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-const countTables = (blocks: Record<string, unknown>[]) => blocks.filter((block) => block.type === "table").length;
-
 const hasTextTable = (text: string) => toBlocks(text).blocks?.some((block) => block.type === "table") ?? false;
 
 const refused: BlockDelivery = { delivered: Promise.resolve(false), waitingForStream: () => false, cancel: () => false };
@@ -80,6 +78,7 @@ class StreamSession {
   private heldLine = "";
   private cardBlocks = 0;
   private cardTables = 0;
+  private cardCharts = 0;
   private startFailures = 0;
   planTitle: string | null = null;
   private tasks = new Map<string, Task>();
@@ -134,8 +133,9 @@ class StreamSession {
       if (!resolve) continue;
       this.deliveries.delete(chunk);
       if (!delivered) {
-        this.cardBlocks -= chunk.blocks.length;
+        this.cardBlocks -= blocksWeight(chunk.blocks);
         this.cardTables -= countTables(chunk.blocks);
+        this.cardCharts -= countCharts(chunk.blocks);
       }
       resolve(delivered);
     }
@@ -254,11 +254,15 @@ class StreamSession {
 
   blocks(blocks: Record<string, unknown>[]): BlockDelivery {
     if (this.closed || this.stalled()) return refused;
+    const weight = blocksWeight(blocks);
     const tables = countTables(blocks);
-    if (this.cardBlocks + blocks.length > MESSAGE_CARD_BLOCKS) return refused;
+    const charts = countCharts(blocks);
+    if (this.cardBlocks + weight > MESSAGE_CARD_BLOCKS) return refused;
     if (tables > 0 && (this.cardTables + tables > CARD_LIMITS.maxTables || hasTextTable(this.streamedText))) return refused;
-    this.cardBlocks += blocks.length;
+    if (this.cardCharts + charts > CARD_LIMITS.maxCharts) return refused;
+    this.cardBlocks += weight;
     this.cardTables += tables;
+    this.cardCharts += charts;
     const chunk: Chunk = { type: "blocks", blocks };
     const { promise, resolve } = deferred<boolean>();
     this.deliveries.set(chunk, resolve);
