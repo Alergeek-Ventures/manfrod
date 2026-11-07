@@ -1,13 +1,13 @@
 # PLAN: live generative cards in Manfrod (Slack)
 
-Status (2026-11-07): stages 1–3 (code) implemented on `feat/card-stream`, reviewed APPROVE and QA PASS. Blocked on the user: merging spike PR #181 / this feature PR to `main` (production deploy) and the manual Slack test. "Spike results" and the Stage 3 manual test are still open.
+Status (2026-11-07): stages 1–4 (code) implemented (`feat/card-stream`, `feat/card-actions`), reviewed APPROVE and QA PASS. Blocked on the user: merging spike PR #181 / this feature PR to `main` (production deploy) and the manual Slack test. "Spike results" and the Stage 3 manual test are still open.
 
 Progress:
 - Stage 0: PR #181 hardened (053cf50), CI green, APPROVE. Merge blocked by the auto-mode permission classifier; needs the user.
 - Stage 1: done on `feat/card-core` (catalog, converter, `createCardBuilder`, `cardToBlocks` with `dropped`/`warnings`, linear stack scanner, `tableBlock` padding). APPROVE.
 - Stage 2: done on `feat/card-stream` (`show-card` tool, `card-stream` hook, per-turn pending buffer, `chat.postMessage` fallback without duplicates, per-message block/table limits, retry without cards on rejected batches, `card_link_*` ack). Two review rounds, APPROVE; adversarial QA PASS, both QA bugs fixed.
 - Stage 3: `agent/instructions.md` rule and AGENTS.md layout note done; manual Slack test pending (needs deploy).
-- Stage 4: not started (separate PR by design).
+- Stage 4: done on `feat/card-actions` (stacked on `feat/card-stream`): reply buttons `{ text, reply: true, style? }`; a click is dispatched through the normal inbound path as `[clicked card button] <label>` from the clicker, with the label read from the card on Slack by block_id + action_id (payload value never trusted); buttons removed only after a successful dispatch; ephemerals for streaming, answered, kicked and unreadable cards. Three review rounds (HIGH hidden-reply and duplicate action_id issues fixed), final APPROVE; adversarial QA bug fixed.
 
 Additional decisions:
 - Spike tool and hook removed in Stage 2; `show-card` is blocked in self-review and task runs.
@@ -16,7 +16,7 @@ Additional decisions:
 - Once a card table is in the message, later markdown tables in the text lose their separator line so Slack does not build a second table block.
 - Broadcast mentions are neutralized in card text only.
 
-Follow-ups: `<!subteam^…>` mentions in cards still ping; try `chat.update` before reposting after a failed `stopStream`; renderer `"error"` path has no unit test (needs eve runtime); unify the 2900/3000 section limits in `lib/slack/mrkdwn.ts`.
+Follow-ups: two reply cards in one message share the per-message claim (a click on one removes reply buttons from both); click claims are per process; `<!subteam^…>` mentions in cards still ping; try `chat.update` before reposting after a failed `stopStream`; renderer `"error"` path has no unit test (needs eve runtime); unify the 2900/3000 section limits in `lib/slack/mrkdwn.ts`.
 
 ## Goal
 
