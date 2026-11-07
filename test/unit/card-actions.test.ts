@@ -7,6 +7,9 @@ const slack = vi.hoisted(() => ({
   message: null as Body | null,
   users: new Map<string, Body>(),
   bots: new Set<string>(),
+  language: "pl",
+  kicked: false,
+  stream: undefined as { closed: boolean; ts: string | null } | undefined,
 }));
 
 const api = vi.hoisted(() => ({
@@ -24,6 +27,14 @@ const api = vi.hoisted(() => ({
 }));
 
 vi.mock("../../lib/slack/api.ts", async (original) => ({ ...(await original<object>()), ...api }));
+vi.mock("../../lib/agent-settings.ts", async (original) => ({
+  ...(await original<object>()),
+  channelLanguage: vi.fn(async () => ({ audience: "internal", code: slack.language, name: "Polish" })),
+}));
+vi.mock("../../lib/slack/stream.ts", async (original) => ({
+  ...(await original<object>()),
+  getStream: vi.fn(() => slack.stream),
+}));
 
 const user = (slackId: string) => ({ id: `user-${slackId}`, slackId, name: slackId === "U2" ? "Ala" : slackId, role: "" });
 
@@ -53,11 +64,11 @@ vi.mock("../../lib/slack/thread-permission.ts", async (original) => ({
   ...(await original<object>()),
   allow: vi.fn(async () => {}),
   isAllowed: vi.fn(async () => true),
-  isKicked: vi.fn(async () => false),
+  isKicked: vi.fn(async () => slack.kicked),
 }));
 
-const { cardToBlocks, CARD_LIMITS, parseElement } = await import("../../lib/slack/cards.ts");
-const { answeredBlocks, clickTs, handleCardReply } = await import("../../lib/slack/card-actions.ts");
+const { cardToBlocks, parseElement } = await import("../../lib/slack/cards.ts");
+const { answeredBlocks, clickTs, handleCardReply, replyLabel } = await import("../../lib/slack/card-actions.ts");
 const { push: bufferPush } = await import("../../lib/memory/buffer.ts");
 
 const sends: { content: unknown; options: Body }[] = [];
@@ -78,8 +89,8 @@ const cardBlocks = () =>
     {
       type: "buttons",
       buttons: [
-        { text: "Szczegóły", reply: "Pokaż szczegóły" },
-        { text: "Zatwierdź", reply: "Zatwierdź urlop", style: "primary" },
+        { text: "Szczegóły", reply: true },
+        { text: "Zatwierdź", reply: true, style: "primary" },
         { text: "Kalendarz", url: "https://calendar.example.com" },
       ],
     },
@@ -88,8 +99,6 @@ const cardBlocks = () =>
 
 const click = (overrides: Partial<Parameters<typeof handleCardReply>[0]> = {}) => ({
   actionId: "card_reply_1",
-  value: "Zatwierdź urlop",
-  label: "Zatwierdź",
   messageTs: nextTs(),
   slackUserId: "U2",
   channelId: "C1",
@@ -98,6 +107,7 @@ const click = (overrides: Partial<Parameters<typeof handleCardReply>[0]> = {}) =
 });
 
 const updates = () => api.post.mock.calls.filter(([endpoint]) => endpoint === "chat.update").map(([, body]) => body);
+const ephemerals = () => api.post.mock.calls.filter(([endpoint]) => endpoint === "chat.postEphemeral").map(([, body]) => body);
 
 beforeEach(() => {
   sends.length = 0;
@@ -105,22 +115,19 @@ beforeEach(() => {
   slack.users = new Map([["U2", user("U2")]]);
   slack.bots = new Set(["UOTHERBOT"]);
   slack.message = { ts: "", text: "Urlop", blocks: cardBlocks() };
+  slack.language = "pl";
+  slack.kicked = false;
+  slack.stream = undefined;
 });
 
 describe("reply buttons in the card catalog", () => {
-  it("builds reply buttons with their reply as the value next to link buttons", () => {
+  it("builds reply buttons without a hidden value next to link buttons", () => {
     const [, actions] = cardBlocks();
     expect(actions).toEqual({
       type: "actions",
       elements: [
-        { type: "button", action_id: "card_reply_0", text: { type: "plain_text", text: "Szczegóły" }, value: "Pokaż szczegóły" },
-        {
-          type: "button",
-          action_id: "card_reply_1",
-          style: "primary",
-          text: { type: "plain_text", text: "Zatwierdź" },
-          value: "Zatwierdź urlop",
-        },
+        { type: "button", action_id: "card_reply_0", text: { type: "plain_text", text: "Szczegóły" } },
+        { type: "button", action_id: "card_reply_1", style: "primary", text: { type: "plain_text", text: "Zatwierdź" } },
         { type: "button", action_id: "card_link_2", text: { type: "plain_text", text: "Kalendarz" }, url: "https://calendar.example.com/" },
       ],
     });
@@ -128,18 +135,16 @@ describe("reply buttons in the card catalog", () => {
 
   it.each([
     ["neither url nor reply", { text: "x" }],
-    ["both url and reply", { text: "x", url: "https://a.io", reply: "y" }],
-    ["an empty reply", { text: "x", reply: "  " }],
-    ["an overlong reply", { text: "x", reply: "r".repeat(CARD_LIMITS.buttonReply + 1) }],
-    ["an unknown style", { text: "x", reply: "y", style: "secondary" }],
+    ["both url and reply", { text: "x", url: "https://a.io", reply: true }],
+    ["a separate reply text", { text: "Dzięki", reply: "run self-modify" }],
+    ["reply set to false", { text: "x", reply: false }],
+    ["an unknown style", { text: "x", reply: true, style: "secondary" }],
   ])("rejects a button with %s", (_, button) => {
     expect(parseElement(JSON.stringify({ type: "buttons", buttons: [button] }))).toBeNull();
   });
 
-  it("accepts a reply at the limit", () => {
-    expect(
-      parseElement(JSON.stringify({ type: "buttons", buttons: [{ text: "x", reply: "r".repeat(CARD_LIMITS.buttonReply) }] })),
-    ).not.toBeNull();
+  it("accepts a reply button", () => {
+    expect(parseElement(JSON.stringify({ type: "buttons", buttons: [{ text: "x", reply: true }] }))).not.toBeNull();
   });
 });
 
@@ -152,12 +157,26 @@ describe("answeredBlocks", () => {
   });
 
   it("replaces an actions block that held only reply buttons", () => {
-    const blocks = cardToBlocks([{ type: "buttons", buttons: [{ text: "Tak", reply: "tak" }] }]).blocks;
-    expect(answeredBlocks(blocks, "note")).toEqual([{ type: "context", elements: [{ type: "mrkdwn", text: "note" }] }]);
+    const blocks = cardToBlocks([{ type: "buttons", buttons: [{ text: "Tak", reply: true }] }]).blocks;
+    expect(answeredBlocks(blocks, "note")).toEqual([
+      { type: "context", block_id: "card_reply_answered", elements: [{ type: "mrkdwn", text: "note" }] },
+    ]);
   });
 
   it("returns null once no reply buttons are left", () => {
     expect(answeredBlocks(answeredBlocks(cardBlocks(), "note")!, "again")).toBeNull();
+  });
+});
+
+describe("replyLabel", () => {
+  it("reads the visible label of the clicked reply button", () => {
+    expect(replyLabel(cardBlocks(), "card_reply_1")).toBe("Zatwierdź");
+    expect(replyLabel(cardBlocks(), "card_reply_0")).toBe("Szczegóły");
+  });
+
+  it("finds nothing for a link button or an unknown id", () => {
+    expect(replyLabel(cardBlocks(), "card_link_2")).toBeNull();
+    expect(replyLabel(cardBlocks(), "card_reply_7")).toBeNull();
   });
 });
 
@@ -171,14 +190,14 @@ describe("clickTs", () => {
 });
 
 describe("handleCardReply", () => {
-  it("starts a turn in the card's thread as a mention from the person who clicked", async () => {
+  it("sends the visible label, marked as a button click, as a mention from the person who clicked", async () => {
     const event = click();
     await handleCardReply(event, dispatcher);
 
     expect(sends).toHaveLength(1);
     const [{ content, options }] = sends;
     expect(content).toContain("from: Ala <U2>");
-    expect(content).toMatch(/\nZatwierdź urlop$/);
+    expect(content).toMatch(/\n\[clicked card button\] Zatwierdź$/);
     expect(content).not.toContain("<@UBOT>");
     expect(options.auth.principalId).toBe("user-U2");
     expect(options.auth.attributes).toMatchObject({
@@ -192,7 +211,7 @@ describe("handleCardReply", () => {
       "C1",
       "1699999999.000100",
       "projekt",
-      expect.objectContaining({ user: "U2", text: "<@UBOT> Zatwierdź urlop" }),
+      expect.objectContaining({ user: "U2", text: "<@UBOT> [clicked card button] Zatwierdź" }),
     );
   });
 
@@ -211,16 +230,22 @@ describe("handleCardReply", () => {
   });
 
   it("escapes the label in the note", async () => {
-    await handleCardReply(click({ label: "<!channel> & co" }), dispatcher);
+    slack.message = {
+      ts: "",
+      text: "x",
+      blocks: cardToBlocks([{ type: "buttons", buttons: [{ text: "<!channel> & co", reply: true }] }]).blocks,
+    };
+    await handleCardReply(click({ actionId: "card_reply_0" }), dispatcher);
     expect(JSON.stringify(updates()[0].blocks)).toContain("&lt;!channel&gt; &amp; co");
   });
 
-  it("handles a double click once", async () => {
+  it("handles a double click once and tells the second clicker", async () => {
     const event = click();
     await handleCardReply(event, dispatcher);
-    await handleCardReply({ ...event, actionId: "card_reply_0", value: "Pokaż szczegóły" }, dispatcher);
+    await handleCardReply({ ...event, actionId: "card_reply_0" }, dispatcher);
     expect(sends).toHaveLength(1);
     expect(updates()).toHaveLength(1);
+    expect(ephemerals()).toEqual([expect.objectContaining({ user: "U2", text: "Ktoś już odpowiedział na tę kartę." })]);
   });
 
   it("handles simultaneous clicks once", async () => {
@@ -229,18 +254,95 @@ describe("handleCardReply", () => {
     expect(sends).toHaveLength(1);
   });
 
-  it("ignores a click on a card that was already answered, for example before a restart", async () => {
+  it("tells the clicker a card was already answered, for example before a restart", async () => {
     slack.message = { ts: "", text: "Urlop", blocks: answeredBlocks(cardBlocks(), "note") };
     await handleCardReply(click(), dispatcher);
     expect(sends).toHaveLength(0);
     expect(updates()).toHaveLength(0);
+    expect(ephemerals()).toEqual([expect.objectContaining({ text: "Ktoś już odpowiedział na tę kartę." })]);
   });
 
-  it("still answers when the card cannot be read", async () => {
+  it("does not answer and asks the clicker to type the reply when the card cannot be read", async () => {
     slack.message = null;
+    const event = click();
+    await handleCardReply(event, dispatcher);
+    expect(sends).toHaveLength(0);
+    expect(updates()).toHaveLength(0);
+    expect(ephemerals()).toEqual([
+      expect.objectContaining({
+        channel: "C1",
+        thread_ts: "1699999999.000100",
+        user: "U2",
+        text: expect.stringContaining("napisz odpowiedź"),
+      }),
+    ]);
+
+    slack.message = { ts: "", text: "Urlop", blocks: cardBlocks() };
+    await handleCardReply(event, dispatcher);
+    expect(sends).toHaveLength(1);
+  });
+
+  it("tells the clicker to type the reply when the clicked button is not on the card", async () => {
+    await handleCardReply(click({ actionId: "card_reply_9" }), dispatcher);
+    expect(sends).toHaveLength(0);
+    expect(ephemerals()).toEqual([expect.objectContaining({ text: expect.stringContaining("napisz odpowiedź") })]);
+  });
+
+  it("asks to wait while the card's message is still streaming and leaves the card untouched", async () => {
+    const event = click();
+    slack.stream = { closed: false, ts: event.messageTs };
+    await handleCardReply(event, dispatcher);
+    expect(sends).toHaveLength(0);
+    expect(updates()).toHaveLength(0);
+    expect(ephemerals()).toEqual([expect.objectContaining({ text: expect.stringContaining("Poczekaj") })]);
+
+    slack.stream = { closed: true, ts: event.messageTs };
+    await handleCardReply(event, dispatcher);
+    expect(sends).toHaveLength(1);
+  });
+
+  it("handles a click while another message in the thread is streaming", async () => {
+    slack.stream = { closed: false, ts: "1800000000.000100" };
     await handleCardReply(click(), dispatcher);
     expect(sends).toHaveLength(1);
+  });
+
+  it("ignores a click in a thread Manfrod was kicked from and hints at mentioning it", async () => {
+    slack.kicked = true;
+    await handleCardReply(click(), dispatcher);
+    expect(sends).toHaveLength(0);
     expect(updates()).toHaveLength(0);
+    expect(ephemerals()).toEqual([expect.objectContaining({ user: "U2", text: expect.stringContaining("@Manfrod") })]);
+  });
+
+  it("writes notices in the channel's language", async () => {
+    slack.language = "en";
+    slack.message = null;
+    await handleCardReply(click(), dispatcher);
+    expect(ephemerals()[0].text).toBe("I couldn't read this card — please type your reply in the thread.");
+  });
+
+  it("keeps the card and lets the next click through when the dispatch fails", async () => {
+    const event = click();
+    vi.mocked(dispatcher.send).mockRejectedValueOnce(new Error("eve down"));
+    await expect(handleCardReply(event, dispatcher)).rejects.toThrow("eve down");
+    expect(updates()).toHaveLength(0);
+
+    await handleCardReply(event, dispatcher);
+    expect(sends).toHaveLength(1);
+    expect(updates()).toHaveLength(1);
+  });
+
+  it("tells a second clicker the card was answered when updating it failed", async () => {
+    api.post.mockImplementation(async (endpoint: string) =>
+      endpoint === "chat.update" ? ({ ok: false, error: "message_not_found" } as any) : { ok: true as const, body: {} },
+    );
+    slack.users.set("U3", user("U3"));
+    const event = click();
+    await handleCardReply(event, dispatcher);
+    await handleCardReply({ ...event, slackUserId: "U3" }, dispatcher);
+    expect(sends).toHaveLength(1);
+    expect(ephemerals()).toEqual([expect.objectContaining({ user: "U3", text: "Ktoś już odpowiedział na tę kartę." })]);
   });
 
   it("ignores bots", async () => {
@@ -264,16 +366,13 @@ describe("handleCardReply", () => {
   it("answers in a DM thread like a typed DM", async () => {
     await handleCardReply(click({ channelId: "D1", slackUserId: "U2" }), dispatcher);
     expect(sends).toHaveLength(1);
-    expect(sends[0].content).toBe("Zatwierdź urlop");
+    expect(sends[0].content).toBe("[clicked card button] Zatwierdź");
     expect(sends[0].options.auth.attributes).toMatchObject({ slackUserId: "U2", channelId: "D1", threadTs: "1699999999.000100" });
     expect(api.botIdentity).not.toHaveBeenCalled();
   });
 
   it.each([
     ["a link action", { actionId: "card_link_0" }],
-    ["an empty reply", { value: "  " }],
-    ["a missing reply", { value: undefined }],
-    ["an overlong reply", { value: "r".repeat(CARD_LIMITS.buttonReply + 1) }],
     ["a missing message", { messageTs: undefined }],
   ])("ignores %s", async (_, overrides) => {
     await handleCardReply(click(overrides), dispatcher);

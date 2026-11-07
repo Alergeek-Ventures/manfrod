@@ -8,7 +8,6 @@ export const CARD_LIMITS = {
   contextText: 3000,
   buttonText: 75,
   buttonUrl: 3000,
-  buttonReply: 200,
   minFields: 1,
   maxFields: 10,
   maxButtons: 5,
@@ -50,15 +49,15 @@ const button = z
       })
       .optional()
       .describe("Link button: https link the button opens"),
-    reply: text
-      .max(CARD_LIMITS.buttonReply)
+    reply: z
+      .literal(true)
       .optional()
-      .describe("Reply button: short message the person who clicks sends you in this thread, e.g. Show details"),
+      .describe("Reply button: set to true and the click sends you exactly the button text as a message from whoever clicks it"),
     style: z.enum(["primary", "danger"]).optional().describe("Optional color: primary (green) or danger (red)"),
   })
   .superRefine((value, ctx) => {
     if ((value.url === undefined) === (value.reply === undefined))
-      ctx.addIssue({ code: "custom", message: "a button needs exactly one of url or reply" });
+      ctx.addIssue({ code: "custom", message: "a button needs exactly one of url or reply: true" });
   });
 
 export const cardElementSchema = z.discriminatedUnion("type", [
@@ -139,7 +138,7 @@ function buttonBlock(button: CardButton, index: number): Block {
     text: plainText(button.text, CARD_LIMITS.buttonText),
     ...(button.style ? { style: button.style } : {}),
   };
-  if (button.reply !== undefined) return { ...base, action_id: `${CARD_REPLY_ACTION_PREFIX}${index}`, value: button.reply };
+  if (button.reply) return { ...base, action_id: `${CARD_REPLY_ACTION_PREFIX}${index}` };
   const url = button.url ?? "";
   return { ...base, action_id: `${CARD_LINK_ACTION_PREFIX}${index}`, url: httpsHref(url) ?? url };
 }
