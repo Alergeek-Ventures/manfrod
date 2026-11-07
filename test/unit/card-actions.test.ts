@@ -66,6 +66,10 @@ vi.mock("../../lib/slack/thread-permission.ts", async (original) => ({
   isAllowed: vi.fn(async () => true),
   isKicked: vi.fn(async () => slack.kicked),
 }));
+vi.mock("../../lib/security/secrets.ts", async (original) => ({
+  ...(await original<object>()),
+  secretWarning: vi.fn(async () => "secret warning"),
+}));
 
 const { cardToBlocks, parseElement } = await import("../../lib/slack/cards.ts");
 const { answeredBlocks, clickTs, handleCardReply, replyLabel } = await import("../../lib/slack/card-actions.ts");
@@ -95,16 +99,23 @@ const cardBlocks = () =>
       ],
     },
     { type: "context", text: "stopka" },
-  ]).blocks;
+  ]).blocks as Body[];
 
-const click = (overrides: Partial<Parameters<typeof handleCardReply>[0]> = {}) => ({
-  actionId: "card_reply_1",
-  messageTs: nextTs(),
-  slackUserId: "U2",
-  channelId: "C1",
-  threadTs: "1699999999.000100",
-  ...overrides,
-});
+const blockIdFor = (actionId: string): string | undefined =>
+  (slack.message?.blocks as Body[] | undefined)?.find((block) => block.elements?.some((element: Body) => element.action_id === actionId))
+    ?.block_id;
+
+const click = (overrides: Partial<Parameters<typeof handleCardReply>[0]> = {}) => {
+  const base = {
+    actionId: "card_reply_1",
+    messageTs: nextTs(),
+    slackUserId: "U2",
+    channelId: "C1",
+    threadTs: "1699999999.000100",
+    ...overrides,
+  };
+  return { blockId: blockIdFor(base.actionId), ...base };
+};
 
 const updates = () => api.post.mock.calls.filter(([endpoint]) => endpoint === "chat.update").map(([, body]) => body);
 const ephemerals = () => api.post.mock.calls.filter(([endpoint]) => endpoint === "chat.postEphemeral").map(([, body]) => body);
@@ -125,6 +136,7 @@ describe("reply buttons in the card catalog", () => {
     const [, actions] = cardBlocks();
     expect(actions).toEqual({
       type: "actions",
+      block_id: expect.stringMatching(/^card_buttons_\w+_0$/),
       elements: [
         { type: "button", action_id: "card_reply_0", text: { type: "plain_text", text: "Szczegóły" } },
         { type: "button", action_id: "card_reply_1", style: "primary", text: { type: "plain_text", text: "Zatwierdź" } },
@@ -170,13 +182,74 @@ describe("answeredBlocks", () => {
 
 describe("replyLabel", () => {
   it("reads the visible label of the clicked reply button", () => {
-    expect(replyLabel(cardBlocks(), "card_reply_1")).toBe("Zatwierdź");
-    expect(replyLabel(cardBlocks(), "card_reply_0")).toBe("Szczegóły");
+    const blocks = cardBlocks();
+    expect(replyLabel(blocks, blocks[1].block_id, "card_reply_1")).toBe("Zatwierdź");
+    expect(replyLabel(blocks, blocks[1].block_id, "card_reply_0")).toBe("Szczegóły");
   });
 
-  it("finds nothing for a link button or an unknown id", () => {
-    expect(replyLabel(cardBlocks(), "card_link_2")).toBeNull();
-    expect(replyLabel(cardBlocks(), "card_reply_7")).toBeNull();
+  it("finds nothing for a link button, an unknown id or another block", () => {
+    const blocks = cardBlocks();
+    expect(replyLabel(blocks, blocks[1].block_id, "card_link_2")).toBeNull();
+    expect(replyLabel(blocks, blocks[1].block_id, "card_reply_7")).toBeNull();
+    expect(replyLabel(blocks, blocks[0].block_id, "card_reply_0")).toBeNull();
+    expect(replyLabel(blocks, "card_buttons_other_0", "card_reply_0")).toBeNull();
+    expect(replyLabel(blocks, undefined, "card_reply_0")).toBeNull();
+  });
+
+  it("collapses whitespace in the label", () => {
+    const blocks = [
+      {
+        type: "actions",
+        block_id: "b",
+        elements: [{ type: "button", action_id: "card_reply_0", text: { type: "plain_text", text: " Tak\n\t teraz " } }],
+      },
+    ];
+    expect(replyLabel(blocks, "b", "card_reply_0")).toBe("Tak teraz");
+  });
+});
+
+const twoRowCard = () =>
+  cardToBlocks([
+    { type: "header", text: "Zadanie" },
+    { type: "buttons", buttons: [{ text: "Pokaż szczegóły", reply: true }] },
+    { type: "section", text: "albo" },
+    { type: "buttons", buttons: [{ text: "Usuń zadanie", reply: true, style: "danger" }] },
+  ]).blocks as Body[];
+
+describe("cards with several button rows", () => {
+  it("gives every button an action_id and every row a block_id unique across the card", () => {
+    const rows = twoRowCard().filter((block) => block.type === "actions");
+    expect(rows.flatMap((block) => block.elements.map((e: Body) => e.action_id))).toEqual(["card_reply_0", "card_reply_1"]);
+    expect(new Set(rows.map((block) => block.block_id)).size).toBe(2);
+    expect(rows.every((block) => typeof block.block_id === "string")).toBe(true);
+  });
+
+  it.each([
+    ["the first row", 1, "Pokaż szczegóły"],
+    ["the second row", 3, "Usuń zadanie"],
+  ])("dispatches the label of the button clicked in %s", async (_, row, label) => {
+    const blocks = twoRowCard();
+    slack.message = { ts: "", text: "Zadanie", blocks };
+    const [button] = blocks[row].elements;
+    await handleCardReply(click({ actionId: button.action_id, blockId: blocks[row].block_id }), dispatcher);
+    expect(sends).toHaveLength(1);
+    expect(sends[0].content).toMatch(new RegExp(`\\n\\[clicked card button\\] ${label}$`));
+    expect(JSON.stringify(updates()[0].blocks)).toContain(`:point_right: <@U2>: ${label}`);
+  });
+
+  it("does not dispatch when the clicked action_id is in another row than the block_id says", async () => {
+    const blocks = twoRowCard();
+    slack.message = { ts: "", text: "Zadanie", blocks };
+    await handleCardReply(click({ actionId: "card_reply_0", blockId: blocks[3].block_id }), dispatcher);
+    expect(sends).toHaveLength(0);
+    expect(updates()).toHaveLength(0);
+    expect(ephemerals()).toEqual([expect.objectContaining({ text: expect.stringContaining("napisz odpowiedź") })]);
+  });
+
+  it("does not dispatch a click without a block_id", async () => {
+    await handleCardReply(click({ blockId: undefined }), dispatcher);
+    expect(sends).toHaveLength(0);
+    expect(ephemerals()).toEqual([expect.objectContaining({ text: expect.stringContaining("napisz odpowiedź") })]);
   });
 });
 
@@ -239,6 +312,29 @@ describe("handleCardReply", () => {
     expect(JSON.stringify(updates()[0].blocks)).toContain("&lt;!channel&gt; &amp; co");
   });
 
+  it("collapses whitespace in the label before sending it and in the note", async () => {
+    slack.message = {
+      ts: "",
+      text: "x",
+      blocks: cardToBlocks([{ type: "buttons", buttons: [{ text: "Tak,\n\n  teraz", reply: true }] }]).blocks,
+    };
+    await handleCardReply(click({ actionId: "card_reply_0" }), dispatcher);
+    expect(sends[0].content).toMatch(/\n\[clicked card button\] Tak, teraz$/);
+    expect(JSON.stringify(updates()[0].blocks)).toContain(":point_right: <@U2>: Tak, teraz");
+  });
+
+  it("keeps the card usable when the label is withheld as a secret", async () => {
+    const label = "token=Zm9vYmFyLXJhbmRvbS1sb29raW5nLXRlc3QtdG9rZW4tMTIzNDU";
+    slack.message = { ts: "", text: "x", blocks: cardToBlocks([{ type: "buttons", buttons: [{ text: label, reply: true }] }]).blocks };
+    const event = click({ actionId: "card_reply_0" });
+    await handleCardReply(event, dispatcher);
+    expect(sends).toHaveLength(0);
+    expect(updates()).toHaveLength(0);
+    expect(api.post).toHaveBeenCalledWith("chat.postMessage", expect.objectContaining({ text: "secret warning" }));
+    await handleCardReply(event, dispatcher);
+    expect(ephemerals()).toHaveLength(0);
+  });
+
   it("handles a double click once and tells the second clicker", async () => {
     const event = click();
     await handleCardReply(event, dispatcher);
@@ -263,8 +359,9 @@ describe("handleCardReply", () => {
   });
 
   it("does not answer and asks the clicker to type the reply when the card cannot be read", async () => {
+    const card = cardBlocks();
     slack.message = null;
-    const event = click();
+    const event = click({ blockId: card[1].block_id });
     await handleCardReply(event, dispatcher);
     expect(sends).toHaveLength(0);
     expect(updates()).toHaveLength(0);
@@ -277,7 +374,7 @@ describe("handleCardReply", () => {
       }),
     ]);
 
-    slack.message = { ts: "", text: "Urlop", blocks: cardBlocks() };
+    slack.message = { ts: "", text: "Urlop", blocks: card };
     await handleCardReply(event, dispatcher);
     expect(sends).toHaveLength(1);
   });

@@ -19,6 +19,7 @@ export const CARD_LIMITS = {
 
 export const CARD_LINK_ACTION_PREFIX = "card_link_";
 export const CARD_REPLY_ACTION_PREFIX = "card_reply_";
+export const CARD_BUTTONS_BLOCK_PREFIX = "card_buttons_";
 
 const ELLIPSIS = "…";
 
@@ -143,7 +144,12 @@ function buttonBlock(button: CardButton, index: number): Block {
   return { ...base, action_id: `${CARD_LINK_ACTION_PREFIX}${index}`, url: httpsHref(url) ?? url };
 }
 
-export function elementToBlock(element: CardElement): Block {
+export interface ButtonIds {
+  blockId?: string;
+  firstButton?: number;
+}
+
+export function elementToBlock(element: CardElement, ids: ButtonIds = {}): Block {
   switch (element.type) {
     case "header":
       return { type: "header", text: plainText(element.text, CARD_LIMITS.headerText) };
@@ -160,7 +166,8 @@ export function elementToBlock(element: CardElement): Block {
     case "buttons":
       return {
         type: "actions",
-        elements: element.buttons.map(buttonBlock),
+        ...(ids.blockId ? { block_id: ids.blockId } : {}),
+        elements: element.buttons.map((button, index) => buttonBlock(button, (ids.firstButton ?? 0) + index)),
       };
   }
 }
@@ -188,8 +195,19 @@ function tableWarning(rows: string[][]): string | undefined {
 }
 
 export function createCardBuilder() {
+  const card = crypto.randomUUID().slice(0, 8);
   let blocks = 0;
   let tables = 0;
+  let rows = 0;
+  let buttons = 0;
+
+  const toBlock = (element: CardElement): Block => {
+    if (element.type !== "buttons") return elementToBlock(element);
+    const block = elementToBlock(element, { blockId: `${CARD_BUTTONS_BLOCK_PREFIX}${card}_${rows}`, firstButton: buttons });
+    rows += 1;
+    buttons += element.buttons.length;
+    return block;
+  };
 
   return function add(value: unknown): CardStep {
     const parsed = cardElementSchema.safeParse(value);
@@ -201,7 +219,8 @@ export function createCardBuilder() {
     }
     blocks += 1;
     const warning = parsed.data.type === "table" ? tableWarning(parsed.data.rows) : undefined;
-    return warning ? { block: elementToBlock(parsed.data), warning } : { block: elementToBlock(parsed.data) };
+    const block = toBlock(parsed.data);
+    return warning ? { block, warning } : { block };
   };
 }
 

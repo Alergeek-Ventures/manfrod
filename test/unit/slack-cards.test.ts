@@ -126,6 +126,7 @@ describe("card elements", () => {
       }),
     ).toEqual({
       type: "actions",
+      block_id: expect.stringMatching(/^card_buttons_\w+_0$/),
       elements: [
         { type: "button", action_id: "card_link_0", text: { type: "plain_text", text: "PR" }, url: "https://github.com/a/b/pull/1" },
         { type: "button", action_id: "card_link_1", text: { type: "plain_text", text: "Linear" }, url: "https://linear.app/x" },

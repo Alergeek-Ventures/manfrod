@@ -1,6 +1,7 @@
 import { getUserBySlackId } from "../accounts.ts";
 import { channelLanguage } from "../agent-settings.ts";
 import { logger } from "../log.ts";
+import { containsSecret } from "../security/secrets.ts";
 import { botIdentity, getThreadMessage, isBotUser, post, type SlackBody } from "./api.ts";
 import { CARD_REPLY_ACTION_PREFIX } from "./cards.ts";
 import { handleMessage, type Dispatcher, type Inbound } from "./routing.ts";
@@ -16,6 +17,7 @@ const CLICK_PREFIX = "[clicked card button]";
 
 export interface CardReplyClick {
   actionId: string;
+  blockId: string | undefined;
   messageTs: string | undefined;
   slackUserId: string;
   channelId: string;
@@ -54,8 +56,10 @@ const blocksOf = (message: SlackBody): SlackBody[] => (Array.isArray(message.blo
 const elementsOf = (block: SlackBody): SlackBody[] =>
   block?.type === "actions" && Array.isArray(block.elements) ? (block.elements as SlackBody[]) : [];
 
+const collapseWhitespace = (value: string) => value.replace(/\s+/g, " ").trim();
+
 export function answeredNote(slackUserId: string, label: string): string {
-  return `:point_right: <@${slackUserId}>: ${escapeMrkdwn(label)}`;
+  return `:point_right: <@${slackUserId}>: ${escapeMrkdwn(collapseWhitespace(label))}`;
 }
 
 export function answeredBlocks(blocks: SlackBody[], note: string): SlackBody[] | null {
@@ -72,13 +76,14 @@ export function answeredBlocks(blocks: SlackBody[], note: string): SlackBody[] |
   return answered ? result : null;
 }
 
-export function replyLabel(blocks: SlackBody[], actionId: string): string | null {
-  for (const element of blocks.flatMap(elementsOf)) {
-    if (!isReplyButton(element) || element.action_id !== actionId) continue;
-    const label = element.text?.text;
-    return typeof label === "string" && label.trim() !== "" ? label.trim() : null;
-  }
-  return null;
+export function replyLabel(blocks: SlackBody[], blockId: string | undefined, actionId: string): string | null {
+  if (!blockId) return null;
+  const block = blocks.find((candidate) => candidate?.block_id === blockId);
+  const element = (block ? elementsOf(block) : []).find((candidate) => isReplyButton(candidate) && candidate.action_id === actionId);
+  const label = element?.text?.text;
+  if (typeof label !== "string") return null;
+  const collapsed = collapseWhitespace(label);
+  return collapsed === "" ? null : collapsed;
 }
 
 const wasAnswered = (blocks: SlackBody[]) => blocks.some((block) => block?.block_id === ANSWERED_BLOCK_ID);
@@ -140,16 +145,17 @@ async function readLabel(click: CardReplyClick, messageTs: string): Promise<{ ca
     log.warn(`Slack CardActions could not read card ${click.channelId}/${messageTs}`);
     return "unreadable";
   }
-  const label = replyLabel(blocksOf(card), click.actionId);
+  const label = replyLabel(blocksOf(card), click.blockId, click.actionId);
   if (label !== null) return { card, label };
   if (wasAnswered(blocksOf(card))) return "answered";
   log.warn(`Slack CardActions found no reply button ${click.actionId} on ${click.channelId}/${messageTs}`);
   return "unreadable";
 }
 
-async function dispatch(click: CardReplyClick, label: string, dispatcher: Dispatcher): Promise<void> {
+async function dispatch(click: CardReplyClick, label: string, dispatcher: Dispatcher): Promise<boolean> {
   const { inbound, asMention } = await inboundFor(click, label);
   await handleMessage(inbound, dispatcher, asMention);
+  return !containsSecret(inbound.text);
 }
 
 export async function handleCardReply(click: CardReplyClick, dispatcher: Dispatcher): Promise<void> {
@@ -166,16 +172,18 @@ export async function handleCardReply(click: CardReplyClick, dispatcher: Dispatc
   if (!canTalk) {
     const read = await readLabel(click, messageTs);
     if (typeof read === "string") return notify(click, read);
-    return dispatch(click, read.label, dispatcher);
+    await dispatch(click, read.label, dispatcher);
+    return;
   }
 
   const key = `${click.channelId}:${messageTs}`;
   if (claims.has(key)) return notify(click, "answered");
   claims.set(key, true);
   let read: Awaited<ReturnType<typeof readLabel>>;
+  let dispatched = false;
   try {
     read = await readLabel(click, messageTs);
-    if (typeof read !== "string") await dispatch(click, read.label, dispatcher);
+    if (typeof read !== "string") dispatched = await dispatch(click, read.label, dispatcher);
   } catch (error) {
     claims.delete(key);
     throw error;
@@ -183,6 +191,10 @@ export async function handleCardReply(click: CardReplyClick, dispatcher: Dispatc
   if (typeof read === "string") {
     claims.delete(key);
     return notify(click, read);
+  }
+  if (!dispatched) {
+    claims.delete(key);
+    return;
   }
   await markAnswered(click, messageTs, read.card, read.label);
 }

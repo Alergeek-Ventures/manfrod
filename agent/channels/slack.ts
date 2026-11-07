@@ -67,6 +67,7 @@ async function onInteraction(action: SlackInteractionAction, ctx: SlackInteracti
   await handleCardReply(
     {
       actionId: action.actionId,
+      blockId: action.blockId,
       messageTs: action.messageTs,
       slackUserId: action.user.id,
       channelId: ctx.slack.channelId,

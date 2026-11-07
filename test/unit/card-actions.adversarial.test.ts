@@ -95,16 +95,23 @@ const cardBlocks = () =>
       ],
     },
     { type: "context", text: "stopka" },
-  ]).blocks;
+  ]).blocks as Body[];
 
-const click = (overrides: Partial<Parameters<typeof handleCardReply>[0]> = {}) => ({
-  actionId: "card_reply_1",
-  messageTs: nextTs(),
-  slackUserId: "U2",
-  channelId: "C1",
-  threadTs: "1699999999.000100",
-  ...overrides,
-});
+const blockIdFor = (actionId: string): string | undefined =>
+  (slack.message?.blocks as Body[] | undefined)?.find((block) => block.elements?.some((element: Body) => element.action_id === actionId))
+    ?.block_id;
+
+const click = (overrides: Partial<Parameters<typeof handleCardReply>[0]> = {}) => {
+  const base = {
+    actionId: "card_reply_1",
+    messageTs: nextTs(),
+    slackUserId: "U2",
+    channelId: "C1",
+    threadTs: "1699999999.000100",
+    ...overrides,
+  };
+  return { blockId: blockIdFor(base.actionId), ...base };
+};
 
 const updates = () => api.post.mock.calls.filter(([endpoint]) => endpoint === "chat.update").map(([, body]) => body);
 const ephemerals = () => api.post.mock.calls.filter(([endpoint]) => endpoint === "chat.postEphemeral").map(([, body]) => body);
@@ -247,7 +254,7 @@ describe("adversarial: clickTs", () => {
 const cardWith = (label: string) => ({
   ts: "",
   text: "x",
-  blocks: cardToBlocks([{ type: "buttons", buttons: [{ text: label, reply: true }] }]).blocks,
+  blocks: cardToBlocks([{ type: "buttons", buttons: [{ text: label, reply: true }] }]).blocks as Body[],
 });
 
 describe("adversarial: forged and odd clicks", () => {
@@ -327,15 +334,17 @@ describe("adversarial: forged and odd clicks", () => {
   });
 
   it("does not dispatch a button whose label is blank and keeps the card usable", async () => {
-    const event = click({ actionId: "card_reply_0" });
+    const card = cardWith("ok");
+    const event = click({ actionId: "card_reply_0", blockId: card.blocks[0].block_id });
     slack.message = {
-      ts: "",
-      text: "x",
-      blocks: [{ type: "actions", elements: [{ type: "button", action_id: "card_reply_0", text: { type: "plain_text", text: " " } }] }],
+      ...card,
+      blocks: [
+        { ...card.blocks[0], elements: [{ type: "button", action_id: "card_reply_0", text: { type: "plain_text", text: " \n\t" } }] },
+      ],
     };
     await handleCardReply(event, dispatcher);
     expect(sends).toHaveLength(0);
-    slack.message = cardWith("ok");
+    slack.message = card;
     await handleCardReply(event, dispatcher);
     expect(sends).toHaveLength(1);
   });
@@ -410,11 +419,12 @@ describe("adversarial: Slack failures", () => {
   });
 
   it("does not dispatch and releases the card when getThreadMessage returns null", async () => {
+    const card = cardBlocks();
     slack.message = null;
-    const event = click();
+    const event = click({ blockId: card[1].block_id });
     await handleCardReply(event, dispatcher);
     expect(sends).toHaveLength(0);
-    slack.message = { ts: "", text: "Urlop", blocks: cardBlocks() };
+    slack.message = { ts: "", text: "Urlop", blocks: card };
     await handleCardReply(event, dispatcher);
     expect(sends).toHaveLength(1);
   });
