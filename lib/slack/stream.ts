@@ -140,6 +140,12 @@ class StreamSession {
     this.maybeFlush();
   }
 
+  blocks(blocks: Record<string, unknown>[]) {
+    this.enqueue({ type: "blocks", blocks });
+    this.touch();
+    this.maybeFlush();
+  }
+
   plan(title: string) {
     if (title === this.planTitle) return;
     this.planTitle = title;
