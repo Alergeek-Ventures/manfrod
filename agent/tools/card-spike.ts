@@ -16,6 +16,6 @@ export default defineManfrodTool({
       .describe("Card elements in display order"),
   }),
   async execute() {
-    return "Card rendered in the thread.";
+    return "Card elements received.";
   },
 });

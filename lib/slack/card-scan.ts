@@ -31,6 +31,7 @@ export function createElementScanner() {
         if (depth === 0) elementStart = position;
         depth += 1;
       } else if (char === "}") {
+        if (depth === 0) continue;
         depth -= 1;
         if (depth === 0) completed.push(buffer.slice(elementStart, position + 1));
       } else if (char === "]" && depth === 0) {

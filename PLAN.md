@@ -1,6 +1,6 @@
 # PLAN: live generative cards in Manfrod (Slack)
 
-Status: stage 0 (spike) in progress. Branch `spike/card-stream`, nothing committed or pushed yet.
+Status: stage 0 (spike) committed on `spike/card-stream` in PR #181; being hardened after review (input limits, DM-only, safe logging) before merge and the Slack test.
 
 ## Goal
 
