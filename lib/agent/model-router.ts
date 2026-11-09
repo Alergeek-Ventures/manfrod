@@ -2,7 +2,7 @@ import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { experimental_decide as decide, wrapLanguageModel, type ModelMessage } from "ai";
 import { config } from "../config.ts";
 import { AGENT_MODEL, BRAIN_MODEL, openrouterProvider } from "../llm/index.ts";
-import { retryUpstreamErrors } from "../llm/retryable.ts";
+import { singleToolResultBreakpoint } from "../llm/cache-breakpoints.ts";
 import { logger } from "../log.ts";
 import { TIME_NOTE_HEADER } from "./prompts.ts";
 
@@ -105,7 +105,7 @@ export async function routeStep(sessionId: string, messages: readonly ModelMessa
         usage: { include: true },
         models: [ROUTES[current.route].fallback],
       }),
-      middleware: retryUpstreamErrors,
+      middleware: singleToolResultBreakpoint,
     }),
     modelContextWindowTokens: CONTEXT_WINDOW_TOKENS,
     modelOptions: { promptCache: { anthropic: {} } },
