@@ -3,8 +3,11 @@ import type { User } from "../db/schema.ts";
 import { AGENT_MODEL, FALLBACK_CHAIN, generateText, system, user } from "../llm/index.ts";
 import { internalLanguage } from "../agent-settings.ts";
 import { deliverProactive } from "../proactive.ts";
+import { logger } from "../log.ts";
 import { localIsoWithOffset } from "../time.ts";
 import { NUDGE_KINDS, recordDelivery, type NudgeKind } from "./store.ts";
+
+const log = logger("Nudges.Compose");
 
 const CHAIN = [{ provider: "openrouter" as const, model: AGENT_MODEL, tier: "paid" as const }, ...FALLBACK_CHAIN];
 
@@ -29,17 +32,39 @@ const decisionSchema = z.object({
 
 export type Decision = { send: true; reason: string; message: string } | { send: false; reason: string };
 
-export function parseDecision(raw: string): Decision | null {
-  const cleaned = raw
-    .replace(/```json\s*/gi, "")
-    .replaceAll("```", "")
-    .trim();
-  let value: unknown;
-  try {
-    value = JSON.parse(cleaned);
-  } catch {
-    return null;
+const CONTROL_ESCAPES: Record<string, string> = { "\n": "\\n", "\r": "\\r", "\t": "\\t" };
+
+function escapeControlCharsInStrings(json: string): string {
+  let inString = false;
+  let escaped = false;
+  let out = "";
+  for (const char of json) {
+    if (inString && !escaped && CONTROL_ESCAPES[char]) {
+      out += CONTROL_ESCAPES[char];
+      continue;
+    }
+    if (char === '"' && !escaped) inString = !inString;
+    escaped = inString && char === "\\" && !escaped;
+    out += char;
   }
+  return out;
+}
+
+function parseJson(text: string): unknown {
+  for (const candidate of [text, escapeControlCharsInStrings(text)]) {
+    try {
+      return JSON.parse(candidate);
+    } catch {}
+  }
+  return undefined;
+}
+
+export function parseDecision(raw: string): Decision | null {
+  const start = raw.indexOf("{");
+  const end = raw.lastIndexOf("}");
+  if (start === -1 || end < start) return null;
+  const value = parseJson(raw.slice(start, end + 1));
+  if (value === undefined) return null;
   const parsed = decisionSchema.safeParse(value);
   if (!parsed.success) return null;
   const { send, reason, message } = parsed.data;
@@ -80,7 +105,9 @@ ${brief.context}
     chain: CHAIN,
     userId: brief.userId ?? null,
   });
-  return parseDecision(result.text);
+  const decision = parseDecision(result.text);
+  if (!decision) log.warn(`Nudges.Compose: could not parse the ${brief.kind} decision: ${result.text.slice(0, 1500)}`);
+  return decision;
 }
 
 function agentPrompt(nudge: Nudge, message: string): string {
