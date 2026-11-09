@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { parseDecision } from "../../lib/nudges/compose.ts";
 import { sessionsOn, slackActivity } from "../../lib/nudges/hours.ts";
 import { linkIssues } from "../../lib/nudges/projects.ts";
-import { waitingFor } from "../../lib/nudges/waiting.ts";
+import { ownMessagesSince, waitingFor } from "../../lib/nudges/waiting.ts";
 import { weekLog } from "../../lib/nudges/weekly.ts";
 
 const NOW = Date.parse("2026-10-27T09:00:00Z");
@@ -39,6 +39,46 @@ describe("waitingFor", () => {
       Date.parse("2026-10-28T08:00:00Z"),
     );
     expect(found).toEqual([]);
+  });
+});
+
+describe("ownMessagesSince", () => {
+  it("lists the person's own later messages from every thread, newest first", () => {
+    const found = ownMessagesSince(
+      "U1",
+      [
+        { channelId: "C1", channelName: "onside", messages: [{ user: "U1", ts: ts("2026-10-26T10:00:00Z"), text: "stare" }] },
+        {
+          channelId: "C2",
+          channelName: "manfrod",
+          messages: [
+            { user: "U2", ts: ts("2026-10-26T12:00:00Z"), text: "pytanie" },
+            { user: "U1", ts: ts("2026-10-26T13:00:00Z"), text: "zrobione" },
+          ],
+        },
+        { channelId: "C3", channelName: "general", messages: [{ user: "U1", ts: ts("2026-10-26T14:00:00Z"), text: "wysłałem" }] },
+      ],
+      ts("2026-10-26T11:00:00Z"),
+    );
+    expect(found.map((message) => [message.channelName, message.text])).toEqual([
+      ["general", "wysłałem"],
+      ["manfrod", "zrobione"],
+    ]);
+  });
+
+  it("skips system and empty messages so they don't take slots", () => {
+    const messages = [
+      { user: "U1", ts: ts("2026-10-26T15:00:00Z"), text: "<@U1> has joined the channel", subtype: "channel_join" },
+      { user: "U1", ts: ts("2026-10-26T14:30:00Z"), text: "  " },
+      ...Array.from({ length: 16 }, (_, index) => ({
+        user: "U1",
+        ts: ts(`2026-10-26T${String(12 + Math.floor(index / 6)).padStart(2, "0")}:${String((index % 6) * 10).padStart(2, "0")}:00Z`),
+        text: `msg ${index}`,
+      })),
+    ];
+    const found = ownMessagesSince("U1", [{ channelId: "C1", channelName: "general", messages }], ts("2026-10-26T11:00:00Z"));
+    expect(found).toHaveLength(15);
+    expect(found.every((message) => message.text.startsWith("msg "))).toBe(true);
   });
 });
 
