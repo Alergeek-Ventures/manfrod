@@ -65,6 +65,21 @@ describe("ownMessagesSince", () => {
       ["manfrod", "zrobione"],
     ]);
   });
+
+  it("skips system and empty messages so they don't take slots", () => {
+    const messages = [
+      { user: "U1", ts: ts("2026-10-26T15:00:00Z"), text: "<@U1> has joined the channel", subtype: "channel_join" },
+      { user: "U1", ts: ts("2026-10-26T14:30:00Z"), text: "  " },
+      ...Array.from({ length: 16 }, (_, index) => ({
+        user: "U1",
+        ts: ts(`2026-10-26T${String(12 + Math.floor(index / 6)).padStart(2, "0")}:${String((index % 6) * 10).padStart(2, "0")}:00Z`),
+        text: `msg ${index}`,
+      })),
+    ];
+    const found = ownMessagesSince("U1", [{ channelId: "C1", channelName: "general", messages }], ts("2026-10-26T11:00:00Z"));
+    expect(found).toHaveLength(15);
+    expect(found.every((message) => message.text.startsWith("msg "))).toBe(true);
+  });
 });
 
 describe("weekLog", () => {

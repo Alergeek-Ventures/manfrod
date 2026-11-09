@@ -80,7 +80,14 @@ export function ownMessagesSince(slackUserId: string, threads: SlackThread[], si
   return threads
     .flatMap((thread) =>
       thread.messages
-        .filter((message) => message.user === slackUserId && typeof message.text === "string" && Number(message.ts) > Number(since))
+        .filter(
+          (message) =>
+            message.user === slackUserId &&
+            message.subtype === undefined &&
+            typeof message.text === "string" &&
+            message.text.trim() !== "" &&
+            Number(message.ts) > Number(since),
+        )
         .map((message) => ({ channelName: thread.channelName, ts: String(message.ts), text: message.text as string })),
     )
     .sort((a, b) => Number(b.ts) - Number(a.ts))
