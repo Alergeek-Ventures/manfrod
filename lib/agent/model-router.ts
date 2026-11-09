@@ -1,7 +1,8 @@
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
-import { experimental_decide as decide, type ModelMessage } from "ai";
+import { experimental_decide as decide, wrapLanguageModel, type ModelMessage } from "ai";
 import { config } from "../config.ts";
 import { AGENT_MODEL, BRAIN_MODEL, openrouterProvider } from "../llm/index.ts";
+import { retryUpstreamErrors } from "../llm/retryable.ts";
 import { logger } from "../log.ts";
 import { TIME_NOTE_HEADER } from "./prompts.ts";
 
@@ -99,9 +100,12 @@ export async function routeStep(sessionId: string, messages: readonly ModelMessa
   if (current.steps === STEP_WARNING_AT)
     log.warn(`ModelRouter: ${sessionId} is at step ${STEP_WARNING_AT} of this turn on ${current.route}`);
   return {
-    model: openrouterProvider().chat(ROUTES[current.route].model, {
-      usage: { include: true },
-      models: [ROUTES[current.route].fallback],
+    model: wrapLanguageModel({
+      model: openrouterProvider().chat(ROUTES[current.route].model, {
+        usage: { include: true },
+        models: [ROUTES[current.route].fallback],
+      }),
+      middleware: retryUpstreamErrors,
     }),
     modelContextWindowTokens: CONTEXT_WINDOW_TOKENS,
     modelOptions: { promptCache: { anthropic: {} } },

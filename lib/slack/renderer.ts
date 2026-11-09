@@ -277,6 +277,12 @@ export const manfrodRenderer = defineSlackRenderer({
       await next();
     },
 
+    async "turn.failed"(_event, channel, ctx, next) {
+      const at = where(channel, ctx);
+      if (at?.threadTs) await getStream(at.channel, at.threadTs)?.abort();
+      await next();
+    },
+
     "session.waiting"() {},
   },
 });

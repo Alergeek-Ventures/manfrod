@@ -68,6 +68,26 @@ describe("parseDecision", () => {
     expect(parseDecision('{"send": false, "reason": "r"}')).toEqual({ send: false, reason: "r" });
     expect(parseDecision("nope")).toBeNull();
   });
+
+  it("finds the decision inside surrounding prose and code fences", () => {
+    expect(parseDecision('Here is my decision:\n```json\n{"send": false, "reason": "r"}\n```\nDone.')).toEqual({
+      send: false,
+      reason: "r",
+    });
+  });
+
+  it("accepts raw newlines inside the message", () => {
+    expect(parseDecision('{"send": true, "reason": "r", "message": "hej\n\ndopisać AV - HR 12:27-13:00?\t\\"ok\\""}')).toEqual({
+      send: true,
+      reason: "r",
+      message: 'hej\n\ndopisać AV - HR 12:27-13:00?\t"ok"',
+    });
+  });
+
+  it("rejects invalid JSON and wrong shapes", () => {
+    expect(parseDecision('{"send": true, "reason": ')).toBeNull();
+    expect(parseDecision('{"send": "yes"}')).toBeNull();
+  });
 });
 
 describe("linkIssues", () => {
