@@ -29,6 +29,7 @@ const ACCESS_TABS: Record<string, string> = {
   cron: "Cron skills",
   reminders: "Reminders",
   linear: "Linear",
+  github: "GitHub",
   agent: "Agent",
 };
 

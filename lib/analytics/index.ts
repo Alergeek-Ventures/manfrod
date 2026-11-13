@@ -24,6 +24,7 @@ const INTENT_TOOLS = new Set([
   "escalate-note",
   "find-meeting-time",
   "leave-thread",
+  "link-github",
   "link-notes",
   "list-desk-reservations",
   "list-desks",

@@ -37,13 +37,15 @@ import {
   type Result,
 } from "./actions.ts";
 import { AgentTab } from "./agent-tab.tsx";
+import type { GithubData } from "./github-data.ts";
+import { GithubTab } from "./github-tab.tsx";
 import type { Tab } from "./tabs.ts";
 
 export type Run = (action: () => Promise<Result>, onSuccess?: () => void) => void;
 
 const formatStamp = (value: string | null | undefined) => (value ? value.slice(0, 16).replace("T", " ") : "–");
 
-function Section({
+export function Section({
   title,
   description,
   action,
@@ -81,7 +83,7 @@ function Section({
   );
 }
 
-function FormDialog({
+export function FormDialog({
   trigger,
   title,
   description,
@@ -778,11 +780,13 @@ function LinearTab({ data, run }: { data: AccessData; run: Run }) {
 export function AccessClient({
   tab,
   data,
+  github,
   flash,
   currentUserId,
 }: {
   tab: Tab;
   data: AccessData;
+  github?: GithubData;
   flash: { error?: string; info?: string };
   currentUserId: string;
 }) {
@@ -819,6 +823,7 @@ export function AccessClient({
       {tab === "cron" && <CronTab data={data} run={run} />}
       {tab === "reminders" && <RemindersTab data={data} run={run} />}
       {tab === "linear" && <LinearTab data={data} run={run} />}
+      {tab === "github" && github && <GithubTab data={github} run={run} pending={pending} />}
     </div>
   );
 }

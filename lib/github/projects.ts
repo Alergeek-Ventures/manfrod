@@ -71,3 +71,13 @@ export async function unlinkBoard(projectId: string, boardNodeId: string): Promi
     .returning();
   return removed.length > 0;
 }
+
+export const repositoryOwner = (fullName: string) => fullName.split("/")[0].toLowerCase();
+
+export function crossOwnerWarning(linked: string[], adding: string[]): string | null {
+  const owners = new Set(linked.map(repositoryOwner));
+  if (owners.size === 0 && adding.length > 0) owners.add(repositoryOwner(adding[0]));
+  const foreign = adding.filter((fullName) => !owners.has(repositoryOwner(fullName)));
+  if (foreign.length === 0) return null;
+  return `Warning: ${foreign.join(", ")} ${foreign.length === 1 ? "belongs" : "belong"} to a different owner than the project's other repositories (${[...owners].join(", ")}). This can expose an internal repository in the project's channels, client channels included; make sure it is intended.`;
+}

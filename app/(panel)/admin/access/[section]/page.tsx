@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { loadAccessData } from "@/lib/web/access-data.ts";
 import { requireAdmin } from "@/lib/web/session.ts";
 import { AccessClient } from "../access-client.tsx";
+import { loadGithubData } from "../github-data.ts";
 import { TABS, type Tab } from "../tabs.ts";
 
 export const dynamic = "force-dynamic";
@@ -17,5 +18,6 @@ export default async function AccessSectionPage({
   const { section } = await params;
   if (!TABS.includes(section as Tab)) notFound();
   const { error, info } = await searchParams;
-  return <AccessClient tab={section as Tab} data={await loadAccessData()} flash={{ error, info }} currentUserId={admin.id} />;
+  const [data, github] = await Promise.all([loadAccessData(), section === "github" ? loadGithubData() : undefined]);
+  return <AccessClient tab={section as Tab} data={data} github={github} flash={{ error, info }} currentUserId={admin.id} />;
 }
