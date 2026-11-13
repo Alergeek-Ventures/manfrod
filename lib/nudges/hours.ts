@@ -3,6 +3,10 @@ import { config } from "../config.ts";
 import { db, tables } from "../db/index.ts";
 import type { User } from "../db/schema.ts";
 import { extractRecords, fetchRecentSessions } from "../firmowid.ts";
+import { userRepositories } from "../github/access.ts";
+import { getAccount, userToken } from "../github/accounts.ts";
+import { listRepositoryLinks } from "../github/projects.ts";
+import { listCommits, listRepositories, type StoredCommit } from "../github/store.ts";
 import { listPublicHolidays, type CalendarEvent } from "../google.ts";
 import { listOfficeAccessLog, type AccessEntry } from "../kalafiornia.ts";
 import { teamActivity } from "../linear/calls.ts";
@@ -20,7 +24,7 @@ const SLACK_LOOKBACK_HOURS = 48;
 const { channelMappings, projectMemberships, projects } = tables;
 const log = logger("Nudges.Hours");
 
-const GUIDANCE = `It is the evening of a workday. Check whether this person's Firmowid sessions for today cover the work they apparently did. If they have no session today, ask whether to add today's hours: propose concrete entries (Firmowid project, start–end, short title) built from the signals below, or simply ask what they worked on if there are no signals. If they have sessions but the signals clearly show work that is missing (meetings or a stretch of activity for another project, or hours outside any session), propose adding just that. Use the Firmowid project names given. Keep it to a short question with the proposed entries, not a report of the signals. If today's sessions already cover the day, or the pattern shows they don't work on this weekday, do not send.`;
+const GUIDANCE = `It is the evening of a workday. Check whether this person's Firmowid sessions for today cover the work they apparently did. If they have no session today, ask whether to add today's hours: propose concrete entries (Firmowid project, start–end, short title) built from the signals below, or simply ask what they worked on if there are no signals. If they have sessions but the signals clearly show work that is missing (meetings, commits or a stretch of activity for another project, or hours outside any session), propose adding just that. Use the Firmowid project names given. Keep it to a short question with the proposed entries, not a report of the signals. If today's sessions already cover the day, or the pattern shows they don't work on this weekday, do not send.`;
 
 const FOLLOW_UP = `Gdy odpowie: najpierw ustal dokładnie, co wpisać (projekt, godziny, tytuł), jeśli czegoś brakuje. Potem dodaj wszystkie wpisy jednym wywołaniem firmowid__add_sessions: project_id z firmowid__list_projects, tytuł, is_remote (null, jeśli nie wiadomo) oraz start_datetime i end_datetime z offsetem strefy Europe/Warsaw (np. 2026-11-04T09:00:00+01:00). Wpisy nie mogą nachodzić na siebie ani na inne sesje z tego dnia; trwającej sesji nie ruszaj. Jeśli Firmowid odrzuci wpis (błąd wskazuje sessions.<index>), popraw go albo dopytaj. Na koniec potwierdź krótko, co wpisałeś. Jeśli napisze, że nie pracował albo że nic nie trzeba, przyjmij to i nie wracaj do tego.`;
 
@@ -141,6 +145,49 @@ function describeMeetings(events: CalendarEvent[]): string {
     .join("\n");
 }
 
+const COMMIT_MESSAGES_PER_REPOSITORY = 8;
+
+export function describeCommits(commits: StoredCommit[], projectByRepository: Map<string, string>): string {
+  const byRepository = new Map<string, StoredCommit[]>();
+  for (const commit of commits) byRepository.set(commit.repository, [...(byRepository.get(commit.repository) ?? []), commit]);
+  return [...byRepository.entries()]
+    .map(([repository, list]) => {
+      const sorted = [...list].sort((a, b) => a.authoredAt.getTime() - b.authoredAt.getTime());
+      const branches = [...new Set(sorted.flatMap((commit) => commit.branches))].join(", ");
+      const project = projectByRepository.get(repository);
+      const messages = sorted
+        .slice(-COMMIT_MESSAGES_PER_REPOSITORY)
+        .map((commit) => `  - ${time(commit.authoredAt)} ${commit.message.split("\n")[0].slice(0, 120)}`);
+      return [
+        `- ${repository}${project ? ` (project ${project})` : ""}: ${sorted.length} commit(s), ${span(sorted[0].authoredAt, sorted.at(-1)!.authoredAt)}${branches ? ` on ${branches}` : ""}`,
+        ...messages,
+      ].join("\n");
+    })
+    .join("\n");
+}
+
+async function repositoryProjects(): Promise<Map<string, string>> {
+  const [links, repositories, projectRows] = await Promise.all([listRepositoryLinks(), listRepositories(), db.select().from(projects)]);
+  const names = new Map(projectRows.map((project) => [project.id, project.name]));
+  const repositoryNames = new Map(repositories.map((repository) => [repository.id, repository.fullName]));
+  const result = new Map<string, string>();
+  for (const link of links) {
+    const repository = repositoryNames.get(link.repositoryId);
+    const project = names.get(link.projectId);
+    if (repository && project) result.set(repository, result.has(repository) ? `${result.get(repository)}, ${project}` : project);
+  }
+  return result;
+}
+
+async function commitsBetween(person: User, since: Date, until: Date): Promise<StoredCommit[]> {
+  const account = await getAccount(person.id);
+  if (!account || account.status !== "connected") return [];
+  const token = await userToken(person.id);
+  if (!token.ok) return [];
+  const readable = await userRepositories(person.id, token.value).catch(() => []);
+  return listCommits({ since, until, author: account, repositoryIds: readable.map((repository) => repository.id) });
+}
+
 function firstEntry(person: User, office: AccessEntry[]): Date | null {
   const name = person.name?.toLowerCase();
   if (!name) return null;
@@ -161,6 +208,7 @@ export async function runEveningHours(today = localToday()): Promise<number> {
   const office = await listOfficeAccessLog({ since: dayStart });
   const officeEntries = office.ok ? office.value : [];
   const channels = await channelProjects();
+  const repositories = await repositoryProjects();
   let sent = 0;
   for (const person of await nudgeablePeople()) {
     try {
@@ -183,6 +231,7 @@ export async function runEveningHours(today = localToday()): Promise<number> {
       const calendar = (await meetings(person.id, today, addDays(today, 1))) ?? [];
       const slack = slackActivity(person.slackId, await workspace.all(), dayStart);
       const issues = await linear.issuesFor(person);
+      const commits = await commitsBetween(person, dayStart, zonedToUtc(addDays(today, 1), "00:00"));
       const projectNames = await firmowidProjects(access.mcpUrl, access.token);
       const pattern = weekdayPattern(records.value, today);
       const context = [
@@ -203,6 +252,7 @@ export async function runEveningHours(today = localToday()): Promise<number> {
               .join("\n")}`
           : "",
         issues.length > 0 ? `Linear issues assigned to them and updated today:\n${issues.join("\n")}` : "",
+        commits.length > 0 ? `Their GitHub commits today (author time, all branches):\n${describeCommits(commits, repositories)}` : "",
       ]
         .filter(Boolean)
         .join("\n\n");

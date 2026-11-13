@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseDecision } from "../../lib/nudges/compose.ts";
-import { sessionsOn, slackActivity } from "../../lib/nudges/hours.ts";
+import { describeCommits, sessionsOn, slackActivity } from "../../lib/nudges/hours.ts";
 import { linkIssues } from "../../lib/nudges/projects.ts";
 import { ownMessagesSince, waitingFor } from "../../lib/nudges/waiting.ts";
 import { weekLog } from "../../lib/nudges/weekly.ts";
@@ -183,5 +183,39 @@ describe("slackActivity", () => {
         last: new Date("2026-11-03T16:00:00Z"),
       },
     ]);
+  });
+});
+
+describe("describeCommits", () => {
+  const commit = (repository: string, at: string, message: string, branches: string[]) => ({
+    sha: at,
+    authorLogin: "ann",
+    authorEmail: null,
+    authorName: null,
+    authoredAt: new Date(at),
+    message,
+    url: "",
+    repository,
+    branches,
+  });
+
+  it("groups commits per repository with the span, branches and project", () => {
+    const text = describeCommits(
+      [
+        commit("av/app", "2026-11-13T15:40:00Z", "fix: login\n\nlong body", ["feat/x"]),
+        commit("av/app", "2026-11-13T09:12:00Z", "feat: start", ["feat/x", "main"]),
+        commit("av/site", "2026-11-13T12:00:00Z", "chore: bump", []),
+      ],
+      new Map([["av/app", "Apka"]]),
+    );
+    expect(text).toBe(
+      [
+        "- av/app (project Apka): 2 commit(s), 10:12–16:40 on feat/x, main",
+        "  - 10:12 feat: start",
+        "  - 16:40 fix: login",
+        "- av/site: 1 commit(s), 13:00–13:00",
+        "  - 13:00 chore: bump",
+      ].join("\n"),
+    );
   });
 });
