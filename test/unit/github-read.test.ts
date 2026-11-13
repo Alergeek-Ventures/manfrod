@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { GithubRepository } from "../../lib/db/schema.ts";
 import {
-  allowsPersonal,
   decideBoard,
   decideRepository,
   deniedMessage,
   encodePath,
   type GithubScope,
+  isInternal,
   isRepositoryName,
   userCanRead,
 } from "../../lib/github/access.ts";
@@ -46,7 +46,6 @@ const board = (title: string, number = 1): LinkedBoard => ({
 const scope = (overrides: Partial<GithubScope> = {}): GithubScope => ({
   userId: "u1",
   audience: "internal",
-  mapped: true,
   background: false,
   projectId: "p1",
   repositories: [repo(10, "acme/app")],
@@ -62,23 +61,38 @@ describe("GitHub access decisions", () => {
     expect(decideRepository(scope({ background: true }), "acme/app").use).toBe("installation");
   });
 
-  it("falls back to the person's own token only in DMs and internal channels", () => {
-    expect(decideRepository(scope({ audience: "dm", projectId: null, repositories: [] }), "acme/other")).toEqual({ use: "user" });
-    expect(decideRepository(scope(), "acme/other")).toEqual({ use: "user" });
-    expect(decideRepository(scope({ audience: "external" }), "acme/other")).toEqual({ use: "denied", reason: "outside_project" });
-    expect(decideRepository(scope({ background: true }), "acme/other")).toEqual({ use: "denied", reason: "outside_project" });
+  it("reads every installed repository in DMs and internal channels, with or without a project", () => {
+    const other = repo(11, "acme/other");
+    expect(decideRepository(scope(), "acme/other", other)).toEqual({ use: "installation", repository: other });
+    expect(decideRepository(scope({ projectId: null, repositories: [], boards: [] }), "acme/other", other)).toEqual({
+      use: "installation",
+      repository: other,
+    });
+    expect(decideRepository(scope({ audience: "dm", projectId: null, repositories: [] }), "acme/other", other)).toMatchObject({
+      use: "installation",
+    });
+  });
+
+  it("falls back to the person's own token for repositories outside the GitHub App", () => {
+    expect(decideRepository(scope(), "someone/private")).toEqual({ use: "user" });
+    expect(decideRepository(scope({ projectId: null, repositories: [] }), "someone/private")).toEqual({ use: "user" });
+  });
+
+  it("keeps client channels and background runs to the project's repositories", () => {
+    const other = repo(11, "acme/other");
+    expect(decideRepository(scope({ audience: "external" }), "acme/other", other)).toEqual({ use: "denied", reason: "outside_project" });
+    expect(decideRepository(scope({ background: true }), "acme/other", other)).toEqual({ use: "denied", reason: "outside_project" });
     expect(decideRepository(scope({ audience: "dm", background: true, projectId: null, repositories: [] }), "acme/app")).toEqual({
       use: "denied",
       reason: "no_project",
     });
   });
 
-  it("allows personal access only in DMs and mapped internal channels, never in background runs", () => {
-    expect(allowsPersonal({ audience: "dm", mapped: false, background: false })).toBe(true);
-    expect(allowsPersonal({ audience: "internal", mapped: true, background: false })).toBe(true);
-    expect(allowsPersonal({ audience: "internal", mapped: false, background: false })).toBe(false);
-    expect(allowsPersonal({ audience: "external", mapped: true, background: false })).toBe(false);
-    expect(allowsPersonal({ audience: "dm", mapped: false, background: true })).toBe(false);
+  it("treats DMs and every internal channel as internal, never client channels or background runs", () => {
+    expect(isInternal({ audience: "dm", background: false })).toBe(true);
+    expect(isInternal({ audience: "internal", background: false })).toBe(true);
+    expect(isInternal({ audience: "external", background: false })).toBe(false);
+    expect(isInternal({ audience: "dm", background: true })).toBe(false);
   });
 
   it("rejects dot segments in repository names and paths", () => {
