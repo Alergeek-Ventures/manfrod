@@ -24,7 +24,7 @@ const env = {
 };
 
 const children = [
-  spawn("node_modules/.bin/eve", ["dev", "--port", EVE_PORT, "--no-ui", "--no-default-extensions", "--resume"], { env, stdio: "inherit" }),
+  spawn("node_modules/.bin/eve", ["dev", "--port", EVE_PORT, "--no-ui", "--no-default-extensions"], { env, stdio: "inherit" }),
   spawn("node_modules/.bin/next", ["dev", "--port", APP_PORT], { env, stdio: "inherit" }),
 ];
 
