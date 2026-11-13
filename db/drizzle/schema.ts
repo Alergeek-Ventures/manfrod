@@ -730,3 +730,94 @@ export const sandboxFiles = pgTable("sandbox_files", {
 	index("sandbox_files_inserted_at_index").using("btree", table.insertedAt.asc().nullsLast().op("timestamp_ops")),
 	primaryKey({ columns: [table.sessionId, table.path], name: "sandbox_files_pkey"}),
 ]);
+
+export const githubInstallations = pgTable("github_installations", {
+	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
+	id: bigint({ mode: "number" }).primaryKey().notNull(),
+	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
+	accountId: bigint("account_id", { mode: "number" }).notNull(),
+	accountLogin: text("account_login").notNull(),
+	accountType: text("account_type").notNull(),
+	repositorySelection: text("repository_selection").notNull(),
+	suspendedAt: timestamp("suspended_at", { mode: 'date' }),
+	installedByUserId: uuid("installed_by_user_id"),
+	syncedAt: timestamp("synced_at", { mode: 'date' }),
+	insertedAt: timestamp("inserted_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
+	updatedAt: timestamp("updated_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
+}, (table) => [
+]);
+
+export const githubRepositories = pgTable("github_repositories", {
+	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
+	id: bigint({ mode: "number" }).primaryKey().notNull(),
+	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
+	installationId: bigint("installation_id", { mode: "number" }).notNull(),
+	fullName: text("full_name").notNull(),
+	private: boolean().notNull(),
+	defaultBranch: text("default_branch").notNull(),
+	archived: boolean().default(false).notNull(),
+	backfilledAt: timestamp("backfilled_at", { mode: 'date' }),
+	insertedAt: timestamp("inserted_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
+	updatedAt: timestamp("updated_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
+}, (table) => [
+	uniqueIndex("github_repositories_full_name_index").using("btree", sql`lower(full_name)`),
+	index().using("btree", table.installationId.asc().nullsLast().op("int8_ops")),
+]);
+
+export const githubAccounts = pgTable("github_accounts", {
+	userId: uuid("user_id").primaryKey().notNull(),
+	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
+	githubUserId: bigint("github_user_id", { mode: "number" }).notNull(),
+	login: text().notNull(),
+	emails: text().array().default(sql`ARRAY[]::text[]`).notNull(),
+	accessToken: bytea("access_token").notNull(),
+	refreshToken: bytea("refresh_token"),
+	expiresAt: timestamp("expires_at", { mode: 'date' }),
+	refreshExpiresAt: timestamp("refresh_expires_at", { mode: 'date' }),
+	status: text().default('connected').notNull(),
+	insertedAt: timestamp("inserted_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
+	updatedAt: timestamp("updated_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
+}, (table) => [
+	uniqueIndex().using("btree", table.githubUserId.asc().nullsLast().op("int8_ops")),
+]);
+
+export const githubCommits = pgTable("github_commits", {
+	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
+	repositoryId: bigint("repository_id", { mode: "number" }).notNull(),
+	sha: text().notNull(),
+	branches: text().array().default(sql`ARRAY[]::text[]`).notNull(),
+	authorLogin: text("author_login"),
+	authorEmail: text("author_email"),
+	authorName: text("author_name"),
+	authoredAt: timestamp("authored_at", { mode: 'date' }).notNull(),
+	message: text().notNull(),
+	url: text().notNull(),
+	insertedAt: timestamp("inserted_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
+}, (table) => [
+	index("github_commits_author_email_index").using("btree", sql`lower(author_email)`, sql`authored_at`),
+	index("github_commits_author_login_index").using("btree", sql`lower(author_login)`, sql`authored_at`),
+	index().using("btree", table.authoredAt.asc().nullsLast().op("timestamp_ops")),
+	primaryKey({ columns: [table.repositoryId, table.sha], name: "github_commits_pkey"}),
+]);
+
+export const projectGithubRepositories = pgTable("project_github_repositories", {
+	projectId: uuid("project_id").notNull(),
+	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
+	repositoryId: bigint("repository_id", { mode: "number" }).notNull(),
+	linkedByUserId: uuid("linked_by_user_id"),
+	insertedAt: timestamp("inserted_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
+}, (table) => [
+	primaryKey({ columns: [table.projectId, table.repositoryId], name: "project_github_repositories_pkey"}),
+]);
+
+export const projectGithubBoards = pgTable("project_github_boards", {
+	projectId: uuid("project_id").notNull(),
+	boardNodeId: text("board_node_id").notNull(),
+	ownerLogin: text("owner_login").notNull(),
+	number: integer().notNull(),
+	title: text().notNull(),
+	linkedByUserId: uuid("linked_by_user_id"),
+	insertedAt: timestamp("inserted_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
+}, (table) => [
+	primaryKey({ columns: [table.projectId, table.boardNodeId], name: "project_github_boards_pkey"}),
+]);

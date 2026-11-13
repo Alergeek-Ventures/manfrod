@@ -13,6 +13,8 @@ export const EVENTS = {
   absenceShared: "manfrod/absence.shared",
   capabilityApproved: "manfrod/capability.approved",
   mcpTokenUnavailable: "manfrod/mcp.token.unavailable",
+  githubInstallationChanged: "manfrod/github.installation.changed",
+  githubPushTruncated: "manfrod/github.push.truncated",
 } as const;
 
 export interface JobScheduledData {
@@ -45,6 +47,19 @@ export interface AbsenceRecordedData {
 export interface McpTokenUnavailableData {
   userId: string;
   providerId: string;
+}
+
+export interface GithubInstallationChangedData {
+  installationId: number;
+}
+
+export interface GithubPushTruncatedData {
+  installationId: number;
+  repositoryId: number;
+  fullName: string;
+  branch: string;
+  before: string;
+  after: string;
 }
 
 export const ROOT_THREAD_KEY = "root";

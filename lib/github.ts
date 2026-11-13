@@ -1,5 +1,5 @@
-import { createSign } from "node:crypto";
 import { config } from "./config.ts";
+import { appJwt } from "./github/api.ts";
 
 const API = "https://api.github.com";
 
@@ -20,16 +20,6 @@ export interface TreeEntry {
 let cached: { token: string; expiresAt: number } | null = null;
 
 const repository = () => config.githubRepository;
-
-function appJwt(): string {
-  const appId = config.githubAppId;
-  const privateKey = config.githubAppPrivateKey;
-  if (!appId || !privateKey) throw new Error("GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY must be set.");
-  const now = Math.floor(Date.now() / 1000);
-  const encode = (value: object) => Buffer.from(JSON.stringify(value)).toString("base64url");
-  const unsigned = `${encode({ alg: "RS256", typ: "JWT" })}.${encode({ iat: now - 60, exp: now + 540, iss: appId })}`;
-  return `${unsigned}.${createSign("RSA-SHA256").update(unsigned).sign(privateKey, "base64url")}`;
-}
 
 async function call(token: string, method: string, path: string, body?: unknown): Promise<Response> {
   const response = await fetch(`${API}${path}`, {

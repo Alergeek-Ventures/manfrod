@@ -12,6 +12,10 @@ import {
   deskReservations,
   desks,
   facts,
+  githubAccounts,
+  githubCommits,
+  githubInstallations,
+  githubRepositories,
   googleIdentities,
   jobs,
   kalafiorniaConnections,
@@ -79,3 +83,7 @@ export type AgentTask = typeof agentTasks.$inferSelect;
 export type AgentTaskUpdate = typeof agentTaskUpdates.$inferSelect;
 export type SentDm = typeof sentDms.$inferSelect;
 export type CapabilityRequest = typeof capabilityRequests.$inferSelect;
+export type GithubInstallation = typeof githubInstallations.$inferSelect;
+export type GithubRepository = typeof githubRepositories.$inferSelect;
+export type GithubAccount = typeof githubAccounts.$inferSelect;
+export type GithubCommit = typeof githubCommits.$inferSelect;
