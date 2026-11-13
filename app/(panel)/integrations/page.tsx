@@ -1,6 +1,9 @@
 import { after } from "next/server";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { getGoogleAccount } from "@/lib/accounts.ts";
+import { getAccount as getGithubAccount } from "@/lib/github/accounts.ts";
+import { accountStatus } from "@/lib/github/connect.ts";
+import { listInstallations, listRepositories } from "@/lib/github/store.ts";
 import { calendarStatus } from "@/lib/google.ts";
 import { getConnection as getKalafiornia } from "@/lib/kalafiornia.ts";
 import { discoverMissingLogos, listConnections, providersForUser } from "@/lib/mcp/index.ts";
@@ -19,6 +22,22 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
   );
   const kalafiornia = await getKalafiornia(user.id);
   const calendar = await calendarStatus(await getGoogleAccount(user.id));
+  const [githubAccount, installations, repositories] = await Promise.all([
+    getGithubAccount(user.id),
+    listInstallations(),
+    listRepositories(),
+  ]);
+  const github = {
+    status: accountStatus(githubAccount),
+    login: githubAccount?.login ?? null,
+    installations: installations.map((installation) => ({
+      id: installation.id,
+      login: installation.accountLogin,
+      organization: installation.accountType === "Organization",
+      suspended: installation.suspendedAt !== null,
+      repositories: repositories.filter((repository) => repository.installationId === installation.id).length,
+    })),
+  };
 
   return (
     <div className="flex flex-col gap-6 p-4 lg:p-6">
@@ -42,6 +61,7 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
         connections={connections}
         kalafiornia={kalafiornia ? { email: kalafiornia.email } : null}
         calendar={{ status: calendar, email: user.email }}
+        github={github}
         defaultEmail={kalafiornia?.email ?? user.email ?? ""}
       />
     </div>
