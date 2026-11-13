@@ -8,6 +8,17 @@ import { auth } from "@/lib/auth.ts";
 import { db, tables } from "@/lib/db/index.ts";
 import { isLanguageCode, setLanguages } from "@/lib/agent-settings.ts";
 import { setFact } from "@/lib/facts.ts";
+import { availableBoards, boardLabel } from "@/lib/github/boards.ts";
+import {
+  crossOwnerWarning,
+  linkBoard,
+  linkRepository,
+  listProjectRepositories,
+  unlinkBoard,
+  unlinkRepository,
+} from "@/lib/github/projects.ts";
+import { getRepository } from "@/lib/github/store.ts";
+import { syncAll } from "@/lib/github/sync.ts";
 import { cancelJob } from "@/lib/jobs/index.ts";
 import { disconnect as disconnectLinear } from "@/lib/linear/index.ts";
 import { addMembership, removeMembership } from "@/lib/memory/access.ts";
@@ -177,4 +188,46 @@ export async function saveLanguages(internal: string, external: string): Promise
   if (!isLanguageCode(internal) || !isLanguageCode(external)) return { ok: false, message: "Error: unknown language" };
   await setLanguages({ internal, external }, admin.id);
   return done("Languages saved");
+}
+
+export async function linkGithubRepository(projectId: string, repositoryId: number): Promise<Result> {
+  const admin = await requireAdmin();
+  const repository = await getRepository(repositoryId);
+  if (!repository) return { ok: false, message: "Repository not found" };
+  const linked = await listProjectRepositories(projectId);
+  await linkRepository(projectId, repository.id, admin.id);
+  const warning = crossOwnerWarning(
+    linked.map((row) => row.fullName),
+    [repository.fullName],
+  );
+  return done(warning ? `Linked ${repository.fullName}. ${warning}` : `Linked ${repository.fullName}`);
+}
+
+export async function unlinkGithubRepository(projectId: string, repositoryId: number): Promise<Result> {
+  await requireAdmin();
+  return (await unlinkRepository(projectId, repositoryId)) ? done("Repository unlinked") : { ok: false, message: "Link not found" };
+}
+
+export async function linkGithubBoard(projectId: string, boardNodeId: string): Promise<Result> {
+  const admin = await requireAdmin();
+  const board = (await availableBoards()).find((candidate) => candidate.nodeId === boardNodeId);
+  if (!board) return { ok: false, message: "Board not found" };
+  await linkBoard({ projectId, boardNodeId, ownerLogin: board.ownerLogin, number: board.number, title: board.title }, admin.id);
+  return done(`Linked ${boardLabel(board)}`);
+}
+
+export async function unlinkGithubBoard(projectId: string, boardNodeId: string): Promise<Result> {
+  await requireAdmin();
+  return (await unlinkBoard(projectId, boardNodeId)) ? done("Board unlinked") : { ok: false, message: "Link not found" };
+}
+
+export async function syncGithub(): Promise<Result> {
+  await requireAdmin();
+  try {
+    const result = await syncAll();
+    await availableBoards({ fresh: true });
+    return done(`Synced ${result.installations} installations and ${result.repositories} repositories`);
+  } catch (error) {
+    return { ok: false, message: `Error: ${errorText(error)}` };
+  }
 }
