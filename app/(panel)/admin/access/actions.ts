@@ -18,7 +18,7 @@ import {
   unlinkRepository,
 } from "@/lib/github/projects.ts";
 import { getRepository } from "@/lib/github/store.ts";
-import { syncAll } from "@/lib/github/sync.ts";
+import { queueBackfills, syncAll } from "@/lib/github/sync.ts";
 import { cancelJob } from "@/lib/jobs/index.ts";
 import { disconnect as disconnectLinear } from "@/lib/linear/index.ts";
 import { addMembership, removeMembership } from "@/lib/memory/access.ts";
@@ -225,8 +225,10 @@ export async function syncGithub(): Promise<Result> {
   await requireAdmin();
   try {
     const result = await syncAll();
+    const backfilling = await queueBackfills();
     await availableBoards({ fresh: true });
-    return done(`Synced ${result.installations} installations and ${result.repositories} repositories`);
+    const history = backfilling > 0 ? "; loading the last 30 days of commits in the background" : "";
+    return done(`Synced ${result.installations} installations and ${result.repositories} repositories${history}`);
   } catch (error) {
     return { ok: false, message: `Error: ${errorText(error)}` };
   }
