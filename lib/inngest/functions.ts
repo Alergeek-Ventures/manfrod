@@ -11,6 +11,8 @@ import { flush, staleKeys } from "../memory/buffer.ts";
 import { extractSession } from "../memory/extractor.ts";
 import { sweep } from "../memory/pending.ts";
 import { processAllBuckets, reviewProcessedGraph } from "../memory/retrospector.ts";
+import { deleteCommitsBefore } from "../github/store.ts";
+import { backfillRepository, COMMIT_RETENTION_DAYS, completePush, pendingBackfills, syncAll, syncInstallation } from "../github/sync.ts";
 import { runHolidayCheck } from "../holidays.ts";
 import { deleteSandboxFilesOlderThan } from "../sandbox-files.ts";
 import { cleanUpClosedPulls } from "../self-modify-pulls.ts";
@@ -30,6 +32,8 @@ import {
   ROOT_THREAD_KEY,
   type AbsenceRecordedData,
   type BufferPushedData,
+  type GithubInstallationChangedData,
+  type GithubPushTruncatedData,
   type JobScheduledData,
   type McpTokenUnavailableData,
   type SessionActivityData,
@@ -185,6 +189,42 @@ const mcpTokenRetry = inngest.createFunction(
   },
 );
 
+const githubInstallationSync = inngest.createFunction(
+  {
+    id: "github-installation-sync",
+    triggers: [{ event: EVENTS.githubInstallationChanged }],
+    debounce: { key: "event.data.installationId", period: "30s" },
+    retries: 3,
+  },
+  async ({ event, step }) => {
+    const { installationId } = event.data as GithubInstallationChangedData;
+    const repositories = await step.run("sync", () => syncInstallation(installationId));
+    const pending = new Set(await step.run("pending", () => pendingBackfills()));
+    for (const id of repositories.filter((repository) => pending.has(repository))) {
+      await step.run(`backfill-${id}`, () => backfillRepository(id));
+    }
+    return { repositories: repositories.length };
+  },
+);
+
+const githubPushComplete = inngest.createFunction(
+  { id: "github-push-complete", triggers: [{ event: EVENTS.githubPushTruncated }], retries: 3 },
+  async ({ event, step }) => step.run("compare", () => completePush(event.data as GithubPushTruncatedData)),
+);
+
+const githubSync = inngest.createFunction(
+  { id: "github-sync", triggers: [{ cron: tz("40 4 * * *") }], retries: 2, concurrency: 1 },
+  async ({ step }) => {
+    const synced = await step.run("sync", () => syncAll());
+    for (const id of await step.run("pending", () => pendingBackfills())) {
+      await step.run(`backfill-${id}`, () => backfillRepository(id));
+    }
+    await step.run("retention", () => deleteCommitsBefore(new Date(Date.now() - COMMIT_RETENTION_DAYS * 86_400_000)));
+    return synced;
+  },
+);
+cronFunctions.add(githubSync);
+
 const maintenance = cronFunction("maintenance", "*/5 * * * *", async () => {
   const dispatched = await dispatchUndispatched();
   const stale = await staleKeys(120);
@@ -208,6 +248,9 @@ const allFunctions = [
   absenceUnansweredFollowUp,
   capabilityBuild,
   mcpTokenRetry,
+  githubInstallationSync,
+  githubPushComplete,
+  githubSync,
   extractSessionFn,
   flushBuffer,
   cronFunction("retrospection", "5 */3 * * *", async () => {

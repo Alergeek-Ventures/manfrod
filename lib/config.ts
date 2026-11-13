@@ -97,6 +97,15 @@ export const config = {
   get githubAppPrivateKey() {
     return env("GITHUB_APP_PRIVATE_KEY")?.replaceAll("\\n", "\n");
   },
+  get githubAppClientId() {
+    return env("GITHUB_APP_CLIENT_ID");
+  },
+  get githubAppClientSecret() {
+    return env("GITHUB_APP_CLIENT_SECRET");
+  },
+  get githubWebhookSecret() {
+    return env("GITHUB_WEBHOOK_SECRET");
+  },
   get selfReviewChannelId() {
     return env("SELF_REVIEW_CHANNEL_ID");
   },
