@@ -1,15 +1,17 @@
 "use client";
 
 import { useState } from "react";
-import { PlusIcon, RefreshCwIcon, XIcon } from "lucide-react";
+import { CheckIcon, ChevronsUpDownIcon, PlusIcon, RefreshCwIcon, XIcon } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Field, FieldLabel } from "@/components/ui/field";
-import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { cn } from "@/lib/utils";
 import { FormDialog, type Run, Section } from "./access-client.tsx";
 import { linkGithubBoard, linkGithubRepository, syncGithub, unlinkGithubBoard, unlinkGithubRepository } from "./actions.ts";
 import type { GithubData } from "./github-data.ts";
@@ -36,24 +38,41 @@ function GroupedSelect({
   placeholder: string;
   onChange: (value: string) => void;
 }) {
+  const [open, setOpen] = useState(false);
+  const selected = options.find((option) => option.value === value);
   return (
-    <Select items={options} value={value || null} onValueChange={(next) => onChange((next as string) ?? "")}>
-      <SelectTrigger className="w-full">
-        <SelectValue placeholder={placeholder} />
-      </SelectTrigger>
-      <SelectContent>
-        {groupBy(options).map(([group, items]) => (
-          <SelectGroup key={group}>
-            <SelectLabel>{group}</SelectLabel>
-            {items.map((item) => (
-              <SelectItem key={item.value} value={item.value}>
-                {item.label}
-              </SelectItem>
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger render={<Button variant="outline" className="w-full justify-between font-normal" />}>
+        <span className={cn("truncate", !selected && "text-muted-foreground")}>{selected?.label ?? placeholder}</span>
+        <ChevronsUpDownIcon className="opacity-50" />
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-(--anchor-width) p-0">
+        <Command>
+          <CommandInput placeholder="Search…" />
+          <CommandList>
+            <CommandEmpty>No matches.</CommandEmpty>
+            {groupBy(options).map(([group, items]) => (
+              <CommandGroup key={group} heading={group}>
+                {items.map((item) => (
+                  <CommandItem
+                    key={item.value}
+                    value={item.value}
+                    keywords={[item.label, group]}
+                    onSelect={() => {
+                      onChange(item.value);
+                      setOpen(false);
+                    }}
+                  >
+                    <span className="truncate">{item.label}</span>
+                    {item.value === value && <CheckIcon className="ml-auto" />}
+                  </CommandItem>
+                ))}
+              </CommandGroup>
             ))}
-          </SelectGroup>
-        ))}
-      </SelectContent>
-    </Select>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
   );
 }
 
