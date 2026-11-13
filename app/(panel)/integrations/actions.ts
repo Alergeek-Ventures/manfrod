@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { disconnectAccount as disconnectGithub } from "@/lib/github/accounts.ts";
 import { disconnect as disconnectKalafiornia, loginWithPin, requestPin } from "@/lib/kalafiornia.ts";
 import {
   createCustomProvider,
@@ -103,4 +104,11 @@ export async function kalafiorniaDisconnect(): Promise<ActionResult> {
   await disconnectKalafiornia(user.id);
   revalidatePath("/integrations");
   return { ok: true, message: "Kalafiornia disconnected" };
+}
+
+export async function githubDisconnect(): Promise<ActionResult> {
+  const user = await requireUser();
+  if (!(await disconnectGithub(user.id))) return { ok: false, message: "GitHub is not connected" };
+  revalidatePath("/integrations");
+  return { ok: true, message: "GitHub disconnected" };
 }

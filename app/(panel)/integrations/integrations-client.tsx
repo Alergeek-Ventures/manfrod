@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { CalendarIcon, PlusIcon, SlidersHorizontalIcon } from "lucide-react";
+import { CalendarIcon, GitBranchIcon, PlusIcon, SlidersHorizontalIcon } from "lucide-react";
 import { toast } from "sonner";
 import { ConfirmAction } from "@/components/confirm-action";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -15,11 +15,13 @@ import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { authClient } from "@/lib/auth-client";
+import type { AccountStatus as GithubStatus } from "@/lib/github/connect.ts";
 import type { CalendarStatus } from "@/lib/google.ts";
 import type { ChannelAudience } from "@/lib/memory/access.ts";
 import {
   addCustomProvider,
   disconnectProvider,
+  githubDisconnect,
   kalafiorniaDisconnect,
   kalafiorniaSendPin,
   kalafiorniaVerifyPin,
@@ -573,6 +575,100 @@ function GoogleCalendarCard({ status, email }: { status: CalendarStatus; email: 
   );
 }
 
+interface GithubInstallationView {
+  id: number;
+  login: string;
+  organization: boolean;
+  suspended: boolean;
+  repositories: number;
+}
+
+interface GithubView {
+  status: GithubStatus;
+  login: string | null;
+  installations: GithubInstallationView[];
+}
+
+const GITHUB_STATES: Record<GithubStatus, { badge: React.ReactNode; description: (login: string | null) => string }> = {
+  connected: { badge: <Badge>Connected</Badge>, description: (login) => `Connected as @${login}` },
+  expired: {
+    badge: <Badge variant="destructive">Expired</Badge>,
+    description: () => "Access expired, reconnect to keep it working",
+  },
+  not_connected: {
+    badge: <Badge variant="outline">Not connected</Badge>,
+    description: () => "Lets Manfrod see your commits and repositories",
+  },
+};
+
+const repositoryCount = (count: number) => `${count} ${count === 1 ? "repository" : "repositories"}`;
+
+function GithubCard({ github, run }: { github: GithubView; run: Run }) {
+  const state = GITHUB_STATES[github.status];
+  return (
+    <Card>
+      <CardHeader className="flex items-center gap-3">
+        <Avatar className="size-10 rounded-lg">
+          {github.login && <AvatarImage src={`https://github.com/${github.login}.png?size=80`} alt="" />}
+          <AvatarFallback className="rounded-lg">
+            <GitBranchIcon />
+          </AvatarFallback>
+        </Avatar>
+        <div className="flex min-w-0 flex-col gap-1">
+          <CardTitle>GitHub</CardTitle>
+          <CardDescription className="truncate" title={state.description(github.login)}>
+            {state.description(github.login)}
+          </CardDescription>
+        </div>
+        <CardAction className="ml-auto shrink-0">{state.badge}</CardAction>
+      </CardHeader>
+      <CardFooter className="mt-auto flex-col items-stretch gap-4">
+        {github.installations.length > 0 ? (
+          <ul className="flex flex-col gap-1 text-sm">
+            {github.installations.map((installation) => (
+              <li key={installation.id} className="flex items-center justify-between gap-2">
+                <span className="truncate">
+                  {installation.login}
+                  <span className="text-muted-foreground"> · {installation.organization ? "Organization" : "Account"}</span>
+                </span>
+                {installation.suspended ? (
+                  <Badge variant="outline">Suspended</Badge>
+                ) : (
+                  <span className="shrink-0 text-muted-foreground">{repositoryCount(installation.repositories)}</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-sm text-muted-foreground">The Manfrod app isn&apos;t installed on any GitHub account yet.</p>
+        )}
+        <div className="flex flex-wrap gap-2">
+          <Button
+            size="sm"
+            variant={github.status === "connected" ? "outline" : "default"}
+            nativeButton={false}
+            render={<a href="/github/connect" />}
+          >
+            {github.status === "not_connected" ? "Connect" : "Reconnect"}
+          </Button>
+          <Button size="sm" variant="outline" nativeButton={false} render={<a href="/github/install" />}>
+            Add repositories
+          </Button>
+          {github.status !== "not_connected" && (
+            <ConfirmAction
+              label="Disconnect"
+              title="Disconnect GitHub?"
+              description="Manfrod will no longer link your commits to you until you connect again."
+              confirmLabel="Disconnect"
+              onConfirm={() => run(githubDisconnect)}
+            />
+          )}
+        </div>
+      </CardFooter>
+    </Card>
+  );
+}
+
 function SectionTitle({ title, description }: { title: string; description?: string }) {
   return (
     <div className="flex flex-col gap-1">
@@ -588,6 +684,7 @@ export function IntegrationsClient({
   connections,
   kalafiornia,
   calendar,
+  github,
   defaultEmail,
 }: {
   builtin: ProviderView[];
@@ -595,6 +692,7 @@ export function IntegrationsClient({
   connections: Record<string, string>;
   kalafiornia: { email: string } | null;
   calendar: { status: CalendarStatus; email: string | null };
+  github: GithubView;
   defaultEmail: string;
 }) {
   const [pending, startTransition] = useTransition();
@@ -640,6 +738,7 @@ export function IntegrationsClient({
         <SectionTitle title="Other integrations" />
         <div className="grid grid-cols-1 gap-4 @xl/main:grid-cols-2 @4xl/main:grid-cols-3">
           <GoogleCalendarCard status={calendar.status} email={calendar.email} />
+          <GithubCard github={github} run={run} />
           <KalafiorniaCard connection={kalafiornia} defaultEmail={defaultEmail} run={run} pending={pending} />
         </div>
       </section>
