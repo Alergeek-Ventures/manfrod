@@ -1,6 +1,7 @@
 import { getUser } from "../accounts.ts";
 import { languageInstructions } from "../agent-settings.ts";
 import { healthy } from "../db/index.ts";
+import { githubPrompt } from "../github/prompt.ts";
 import { getSoulAnchor, type SoulAnchor } from "../memory/nodes.ts";
 import { secretsPrompt } from "../secrets.ts";
 import { tasksPrompt } from "../tasks/index.ts";
@@ -59,7 +60,8 @@ export async function buildSystemPrompt(userId: string, sessionKey: string | nul
   const language = await languageInstructions(sessionKey?.split(":")[0] ?? null);
   const secrets = await secretsPrompt(userId);
   const tasks = await tasksPrompt(sessionKey);
-  return sections(CONVERSATION_PROMPT, identity, context, language, secrets, tasks);
+  const github = await githubPrompt(sessionKey?.split(":")[0] ?? null);
+  return sections(CONVERSATION_PROMPT, identity, context, language, github, secrets, tasks);
 }
 
 export async function skillRunnerPrompt(channelId: string | null, userId: string | null): Promise<string> {

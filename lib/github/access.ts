@@ -7,12 +7,11 @@ import { userToken } from "./accounts.ts";
 import { github, GithubError, installationToken, paginate, repositoryReadToken } from "./api.ts";
 import { type BoardRef, parseBoardRef } from "./boards.ts";
 import { type LinkedBoard, listProjectBoards, listProjectRepositories } from "./projects.ts";
-import { listInstallations } from "./store.ts";
+import { getRepository, listInstallations } from "./store.ts";
 
 export interface GithubScope {
   userId: string;
   audience: ChannelAudience;
-  mapped: boolean;
   background: boolean;
   projectId: string | null;
   repositories: GithubRepository[];
@@ -37,26 +36,27 @@ const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 export const isRepositoryName = (value: string) =>
   REPOSITORY_NAME.test(value) && value.split("/").every((part) => part !== "." && part !== "..");
 
-export const allowsPersonal = (scope: Pick<GithubScope, "audience" | "background" | "mapped">) =>
-  !scope.background && (scope.audience === "dm" || (scope.audience === "internal" && scope.mapped));
+export const isInternal = (scope: Pick<GithubScope, "audience" | "background">) => !scope.background && scope.audience !== "external";
 
-export function decideRepository(scope: GithubScope, fullName: string): RepositoryDecision {
+export function decideRepository(scope: GithubScope, fullName: string, installed: GithubRepository | null = null): RepositoryDecision {
   const linked = scope.repositories.find((repository) => same(repository.fullName, fullName));
   if (linked) return { use: "installation", repository: linked };
-  if (allowsPersonal(scope)) return { use: "user" };
-  return { use: "denied", reason: scope.projectId ? "outside_project" : "no_project" };
+  if (!isInternal(scope)) return { use: "denied", reason: scope.projectId ? "outside_project" : "no_project" };
+  return installed ? { use: "installation", repository: installed } : { use: "user" };
 }
 
-const boardMatches = (board: LinkedBoard, ref: BoardRef) =>
+type BoardLike = Pick<LinkedBoard, "ownerLogin" | "number" | "title">;
+
+const boardMatches = (board: BoardLike, ref: BoardRef) =>
   "title" in ref ? same(board.title, ref.title) : same(board.ownerLogin, ref.ownerLogin) && board.number === ref.number;
 
-export function decideBoard(scope: GithubScope, value: string | undefined, knownBoards: LinkedBoard[] = []): BoardDecision {
+export function decideBoard(scope: GithubScope, value: string | undefined, knownBoards: BoardLike[] = []): BoardDecision {
   if (!value?.trim())
     return scope.boards.length > 0 ? { use: "installation", boards: scope.boards } : { use: "denied", reason: "no_board" };
   const ref = parseBoardRef(value);
   const linked = scope.boards.filter((board) => boardMatches(board, ref));
   if (linked.length > 0) return { use: "installation", boards: linked };
-  if (!allowsPersonal(scope)) return { use: "denied", reason: scope.projectId ? "outside_project" : "no_project" };
+  if (!isInternal(scope)) return { use: "denied", reason: scope.projectId ? "outside_project" : "no_project" };
   if (!("title" in ref)) return { use: "user", owner: ref.ownerLogin, number: ref.number };
   const known = knownBoards.find((board) => boardMatches(board, ref));
   return known ? { use: "user", owner: known.ownerLogin, number: known.number } : { use: "denied", reason: "unknown_board" };
@@ -66,7 +66,7 @@ export const integrationsUrl = () => `${config.appUrl}/integrations`;
 
 export function connectionMessage(error: string): string {
   if (error === "not_connected") {
-    return `ERROR: The user has not connected their GitHub account, so only repositories linked to this channel's project are available. They can connect it at ${integrationsUrl()}`;
+    return `ERROR: This is outside the repositories the GitHub App can read, and the user has not connected their own GitHub account. They can connect it at ${integrationsUrl()}`;
   }
   if (error === "expired") return `ERROR: The user's GitHub connection has expired. They can reconnect it at ${integrationsUrl()}`;
   return `ERROR: Could not use the user's GitHub connection (${error}).`;
@@ -96,7 +96,6 @@ export async function resolveScope(ctx: ToolCtx): Promise<GithubScope> {
   return {
     userId: ctx.userId,
     audience,
-    mapped: mapping !== null,
     background: isBackgroundKind(ctx.kind),
     projectId,
     repositories,
@@ -120,7 +119,7 @@ export async function personalToken(userId: string): Promise<TokenResult> {
 
 export async function repositoryToken(scope: GithubScope, fullName: string): Promise<TokenResult> {
   if (!isRepositoryName(fullName)) return { ok: false, message: `ERROR: Pass the repository as owner/name, got "${fullName}".` };
-  const decision = decideRepository(scope, fullName);
+  const decision = decideRepository(scope, fullName, isInternal(scope) ? await getRepository(fullName) : null);
   if (decision.use === "denied") return { ok: false, message: deniedMessage(scope, decision.reason) };
   if (decision.use === "installation") {
     const { installationId, fullName: linkedName } = decision.repository;
@@ -133,7 +132,7 @@ export async function boardToken(scope: GithubScope, owner: string, via: "instal
   if (via === "installation") {
     const installation = (await listInstallations()).find((entry) => same(entry.accountLogin, owner) && !entry.suspendedAt);
     if (installation) return appToken(() => installationToken(installation.id));
-    if (!allowsPersonal(scope)) return { ok: false, message: `ERROR: The GitHub App is not installed on ${owner}.` };
+    if (!isInternal(scope)) return { ok: false, message: `ERROR: The GitHub App is not installed on ${owner}.` };
   }
   return personalToken(scope.userId);
 }

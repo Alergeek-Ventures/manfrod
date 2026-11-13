@@ -1,17 +1,14 @@
 import { z } from "zod";
 import { getAccount, listAccounts } from "../../lib/github/accounts.ts";
 import {
-  allowsPersonal,
   connectionMessage,
   decideRepository,
   deniedMessage,
   githubErrorMessage,
   type GithubScope,
+  isInternal,
   isRepositoryName,
-  personalToken,
   resolveScope,
-  userCanRead,
-  userRepositories,
 } from "../../lib/github/access.ts";
 import { commitWindow, formatCommits } from "../../lib/github/format.ts";
 import { getRepository, listCommits } from "../../lib/github/store.ts";
@@ -22,32 +19,20 @@ type Resolved<T> = { ok: true; value: T } | { ok: false; message: string };
 async function repositoryIds(scope: GithubScope, repository: string | undefined, mine: boolean): Promise<Resolved<number[] | undefined>> {
   if (repository) {
     if (!isRepositoryName(repository)) return { ok: false, message: `ERROR: Pass the repository as owner/name, got "${repository}".` };
-    const decision = decideRepository(scope, repository);
+    const decision = decideRepository(scope, repository, isInternal(scope) ? await getRepository(repository) : null);
     if (decision.use === "denied") return { ok: false, message: deniedMessage(scope, decision.reason) };
-    if (decision.use === "installation") return { ok: true, value: [decision.repository.id] };
-    const stored = await getRepository(repository);
-    if (!stored) return { ok: false, message: `No commits are stored for ${repository}: the GitHub App is not installed on it.` };
-    const token = await personalToken(scope.userId);
-    if (!token.ok) return token;
-    if (!(await userCanRead(scope.userId, token.token, stored.fullName))) {
-      return { ok: false, message: `ERROR: The person's GitHub account cannot read ${repository}.` };
-    }
-    return { ok: true, value: [stored.id] };
+    if (decision.use === "user")
+      return { ok: false, message: `No commits are stored for ${repository}: the GitHub App is not installed on it.` };
+    return { ok: true, value: [decision.repository.id] };
   }
-  if (!mine && scope.repositories.length > 0) return { ok: true, value: scope.repositories.map((entry) => entry.id) };
-  if (!allowsPersonal(scope)) {
-    return scope.repositories.length > 0
-      ? { ok: true, value: scope.repositories.map((entry) => entry.id) }
-      : { ok: false, message: deniedMessage(scope, "no_project") };
-  }
-  const token = await personalToken(scope.userId);
-  if (!token.ok) return token;
-  return { ok: true, value: (await userRepositories(scope.userId, token.token)).map((entry) => entry.id) };
+  const project = scope.repositories.map((entry) => entry.id);
+  if (isInternal(scope)) return { ok: true, value: !mine && project.length > 0 ? project : undefined };
+  return project.length > 0 ? { ok: true, value: project } : { ok: false, message: deniedMessage(scope, "no_project") };
 }
 
 export default defineManfrodTool({
   description:
-    "List recent GitHub commits from every branch (default: the last 7 days). In a project channel it covers the project's linked repositories; author \"me\" in a DM or internal channel covers the person's own commits in all repositories. One line per commit: time (Europe/Warsaw), repository, branches, short sha, first line of the message, author.",
+    "List recent GitHub commits from every branch (default: the last 7 days). Without a repository it covers this channel's project repositories when it has any, otherwise (and for author \"me\") every repository in DMs and internal channels; client channels only see the project's repositories. One line per commit: time (Europe/Warsaw), repository, branches, short sha, first line of the message, author.",
   inputSchema: z.object({
     repository: z
       .string()
