@@ -6,7 +6,8 @@ if (enabled) process.env.DATABASE_URL = process.env.TEST_DATABASE_URL;
 
 const { db, tables } = await import("../../lib/db/index.ts");
 const store = await import("../../lib/github/store.ts");
-const { syncAll } = await import("../../lib/github/sync.ts");
+const { queueBackfills, syncAll } = await import("../../lib/github/sync.ts");
+const { inngest } = await import("../../lib/inngest/client.ts");
 const { inArray } = await import("drizzle-orm");
 
 const base = 960_000_000 + Math.floor(Math.random() * 1_000_000);
@@ -51,5 +52,13 @@ describe.skipIf(!enabled)("GitHub full sync", () => {
     const ids = (await store.listInstallations()).map((row) => row.id);
     expect(ids).not.toContain(gone);
     expect(ids).toContain(flaky);
+  });
+
+  it("queues a sync for installations whose repositories still need their history", async () => {
+    await store.upsertRepositories(flaky, [{ id: flaky + 100, full_name: `org-${flaky}/app`, private: true, default_branch: "main" }]);
+    const send = vi.spyOn(inngest, "send").mockResolvedValue({ ids: [] } as never);
+    await queueBackfills();
+    expect(send).toHaveBeenCalledWith({ name: "manfrod/github.installation.changed", data: { installationId: flaky } });
+    send.mockRestore();
   });
 });

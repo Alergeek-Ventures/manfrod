@@ -1,3 +1,4 @@
+import { EVENTS, sendEvent } from "../inngest/client.ts";
 import { logger } from "../log.ts";
 import { appJwt, github, installationToken, paginate } from "./api.ts";
 import {
@@ -113,4 +114,10 @@ export async function completePush(push: {
     40,
   );
   return storeCommits(push.repositoryId, push.branch, commits.map(fromApiCommit));
+}
+
+export async function queueBackfills(): Promise<number> {
+  const pending = new Set((await repositoriesToBackfill()).map((repository) => repository.installationId));
+  for (const installationId of pending) await sendEvent(EVENTS.githubInstallationChanged, { installationId });
+  return pending.size;
 }
