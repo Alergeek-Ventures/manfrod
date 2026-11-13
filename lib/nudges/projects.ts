@@ -1,5 +1,6 @@
 import { and, eq, isNotNull, isNull } from "drizzle-orm";
 import { db, tables } from "../db/index.ts";
+import { projectGithubWeek } from "../github/activity.ts";
 import { describePeriod, upcomingPeriods } from "../holidays.ts";
 import { teamActivity } from "../linear/calls.ts";
 import type { TeamActivity } from "../linear/client.ts";
@@ -28,6 +29,7 @@ const GUIDANCE = `It is Friday afternoon. Write this project's weekly summary fo
 What goes in:
 - Only what happened this week: work finished, decisions made, what is in progress or blocked, and what is planned for next week. People often repeat the status of older work; list as done only what you can tell was finished this week.
 - Only this project. Notes and messages about other projects or products end up here too, e.g. a wish about another app posted in this channel; leave them out.
+- GitHub commits and pull requests from the project's repositories show the code work: a pull request merged this week is done, an open one is in progress. Summarize what the work achieved rather than listing commits, and mention a pull request as a Markdown link titled repo#number.
 - The channel messages are the most reliable source. Linear issues are listed only when the team keeps Linear up to date; when one disagrees with what people wrote, trust the messages and leave the issue out, and never list backlog issues nobody worked on.
 - Leave out small talk, gossip, private remarks, access and account chores, and anything already obsolete.
 - Credit people with <@SLACK_ID> where it helps. Refer to a Linear issue by its identifier, e.g. ABC-12; it becomes a link on its own.
@@ -110,7 +112,8 @@ export async function runProjectSummaries(today = localToday()): Promise<number>
         order: "asc",
       });
       const activity = await channelActivity(channel.channelId, monday);
-      if (notes.length === 0 && !activity) {
+      const code = await projectGithubWeek(channel.projectId!, weekStart);
+      if (notes.length === 0 && !activity && !code.commits && !code.pulls) {
         await markSummarized(channel.channelId, period);
         continue;
       }
@@ -124,6 +127,8 @@ export async function runProjectSummaries(today = localToday()): Promise<number>
           : "",
         activity ? `Channel messages this week:\n${activity}` : "",
         issues ? `Linear issues updated this week:\n${issues}` : "",
+        code.commits ? `GitHub commits this week (all branches):\n${code.commits}` : "",
+        code.pulls ? `GitHub pull requests updated this week:\n${code.pulls}` : "",
         nextWeek,
       ]
         .filter(Boolean)
