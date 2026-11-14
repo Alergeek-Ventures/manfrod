@@ -2,6 +2,7 @@ import { and, cosineDistance, eq, inArray, isNotNull, lt, ne, or, sql, type SQL 
 import { db, tables } from "../db/index.ts";
 import type { Node } from "../db/schema.ts";
 import { emit } from "../events/index.ts";
+import { logger } from "../log.ts";
 import { embed, rerank } from "../voyage.ts";
 import { accessOverlaps } from "./access.ts";
 import { getSoulAnchor } from "./nodes.ts";
@@ -14,6 +15,20 @@ export const RERANK_THRESHOLD = 0.25;
 const NOTE_CONTEXT_CHARS = 6_000;
 const NOTE_CHARS = 600;
 const RRF_K = 60;
+export const MAX_LINKED_NOTES = 3;
+
+const log = logger("Memory.Search");
+
+export type SearchStage = "embed" | "bm25" | "rerank" | "expand";
+
+class Degradation {
+  readonly stages = new Set<SearchStage>();
+
+  fail(stage: SearchStage, error: Error) {
+    if (!this.stages.has(stage)) log.warn(`Memory.Search: ${stage} failed, results are degraded: ${error.message}`);
+    this.stages.add(stage);
+  }
+}
 
 type Scored = { node: Node; distance: number };
 
@@ -21,11 +36,12 @@ function projectBound(projectId: string | null | undefined): SQL | undefined {
   return projectId ? eq(nodes.projectId, projectId) : undefined;
 }
 
-async function embedQueries(queries: string[]): Promise<(number[] | null)[]> {
+async function embedQueries(queries: string[], degradation: Degradation): Promise<(number[] | null)[]> {
   if (queries.length === 0) return [];
   try {
     return await embed(queries, { inputType: "query" });
-  } catch {
+  } catch (error) {
+    degradation.fail("embed", error as Error);
     return queries.map(() => null);
   }
 }
@@ -51,6 +67,7 @@ export async function searchBm25(
   queryText: string,
   limit = 10,
   projectId: string | null = null,
+  degradation?: Degradation,
 ): Promise<Node[]> {
   const score = sql<number>`paradedb.score(${nodes.id})`;
   try {
@@ -67,7 +84,8 @@ export async function searchBm25(
       .orderBy(sql`${score} DESC`)
       .limit(limit);
     return rows.map((row) => row.node);
-  } catch {
+  } catch (error) {
+    degradation?.fail("bm25", error as Error);
     return [];
   }
 }
@@ -108,7 +126,7 @@ export function rrfMerge(rankedLists: (Node | Scored)[][]): Node[] {
   return [...scores.values()].sort((a, b) => b.score - a.score).map((entry) => entry.node);
 }
 
-async function rerankNodes(query: string, candidatesIn: Node[], topK: number) {
+async function rerankNodes(query: string, candidatesIn: Node[], topK: number, degradation: Degradation) {
   const candidates = candidatesIn.slice(0, topK);
   try {
     const rankings = await rerank(
@@ -125,32 +143,54 @@ async function rerankNodes(query: string, candidatesIn: Node[], topK: number) {
         content_preview: (item.node.content ?? "").slice(0, 60),
       })),
     };
-  } catch {
+  } catch (error) {
+    degradation.fail("rerank", error as Error);
     return { nodes: candidates, scores: [] };
   }
 }
 
-async function expandWithLinks(found: Node[], readableLevels: string[], max: number): Promise<Node[]> {
+export function pickLinkedNotes(found: Node[], links: { node: Node; sourceId: string }[], max = MAX_LINKED_NOTES): Node[] {
+  const foundIds = new Set(found.map((node) => node.id));
+  const rank = new Map(found.map((node, index) => [node.id, index]));
+  const candidates = new Map<string, { node: Node; sources: number; best: number }>();
+  for (const { node, sourceId } of links) {
+    if (foundIds.has(node.id)) continue;
+    const entry = candidates.get(node.id) ?? { node, sources: 0, best: Infinity };
+    entry.sources += 1;
+    entry.best = Math.min(entry.best, rank.get(sourceId) ?? Infinity);
+    candidates.set(node.id, entry);
+  }
+  return [...candidates.values()]
+    .sort((a, b) => b.sources - a.sources || a.best - b.best)
+    .slice(0, max)
+    .map((entry) => entry.node);
+}
+
+async function expandWithLinks(found: Node[], readableLevels: string[]): Promise<Node[]> {
   if (found.length === 0) return [];
   const ids = found.map((node) => node.id);
-  const linked = await db
-    .select({ node: nodes })
+  const rows = await db
+    .select({ node: nodes, a: links.nodeAId, b: links.nodeBId })
     .from(nodes)
     .innerJoin(
       links,
       or(and(inArray(links.nodeAId, ids), eq(links.nodeBId, nodes.id)), and(inArray(links.nodeBId, ids), eq(links.nodeAId, nodes.id))),
     )
     .where(accessOverlaps(nodes.access, readableLevels));
-
-  const seen = new Set<string>();
-  const all = [...found, ...linked.map((row) => row.node)].filter((node) => (seen.has(node.id) ? false : (seen.add(node.id), true)));
-  return all.slice(0, max);
+  const linked = rows.map((row) => ({ node: row.node, sourceId: row.a === row.node.id ? row.b : row.a }));
+  return [...found, ...pickLinkedNotes(found, linked)];
 }
 
-async function retrieveLists(readableLevels: string[], queries: string[], limit: number, projectId: string | null) {
+async function retrieveLists(
+  readableLevels: string[],
+  queries: string[],
+  limit: number,
+  projectId: string | null,
+  degradation: Degradation,
+) {
   const [embeddings, bm25] = await Promise.all([
-    embedQueries(queries),
-    Promise.all(queries.map((query) => searchBm25(readableLevels, query, limit, projectId))),
+    embedQueries(queries, degradation),
+    Promise.all(queries.map((query) => searchBm25(readableLevels, query, limit, projectId, degradation))),
   ]);
   const vector = await Promise.all(
     embeddings.map((embedding) => (embedding ? vectorSearchWithDistance(readableLevels, embedding, limit, projectId) : [])),
@@ -176,8 +216,12 @@ export async function search(
   const rerankEnabled = opts.rerank ?? true;
   const projectId = opts.projectId ?? null;
 
-  const retrieve = (batch: string[]) => retrieveLists(readableLevels, batch, limit, projectId);
-  const [original, queries] = await Promise.all([retrieve([queryText]), expandQuery ? expand(queryText) : [queryText]]);
+  const degradation = new Degradation();
+  const retrieve = (batch: string[]) => retrieveLists(readableLevels, batch, limit, projectId, degradation);
+  const [original, queries] = await Promise.all([
+    retrieve([queryText]),
+    expandQuery ? expand(queryText, { onError: (error) => degradation.fail("expand", error) }) : [queryText],
+  ]);
   const expanded = await retrieve(queries.filter((query) => query !== queryText));
 
   const vectorLists = [...original.vector, ...expanded.vector];
@@ -188,7 +232,7 @@ export async function search(
 
   const rerankRan = rerankEnabled && merged.length > 1;
   const { nodes: reranked, scores: rerankScores } = rerankRan
-    ? await rerankNodes(queryText, merged, limit * 2)
+    ? await rerankNodes(queryText, merged, limit * 2, degradation)
     : { nodes: merged, scores: [] as { node_id: string; score: number; content_preview: string }[] };
 
   const minDistances = new Map<string, number>();
@@ -205,7 +249,7 @@ export async function search(
   };
   const filtered = reranked.filter(relevant).slice(0, limit);
 
-  const results = await expandWithLinks(filtered, readableLevels, limit * 2);
+  const results = await expandWithLinks(filtered, readableLevels);
 
   emit("memory_searched", {
     userId,
@@ -226,6 +270,8 @@ export async function search(
         rerank_enabled: rerankEnabled,
         rerank_ran: rerankRan,
         expand_query_enabled: expandQuery,
+        linked: results.length - filtered.length,
+        degraded: [...degradation.stages],
       },
     },
   });

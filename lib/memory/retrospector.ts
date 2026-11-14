@@ -54,7 +54,7 @@ const LIKELY_DUPLICATE_DISTANCE = 0.15;
 const MAX_ITERATIONS = 40;
 const RUN_ITERATION_BUDGET = 200;
 const COMPACT_EVERY = 10;
-const HEALTHY_LINK_RATIO = 3;
+const MAX_WEAK_SHARE = 0.1;
 const MIN_REVIEW_NODES = 5;
 
 interface RunBudget {
@@ -66,7 +66,7 @@ const newBudget = (): RunBudget => ({ iterations: RUN_ITERATION_BUDGET });
 async function graphHealthy(bucket: string[]): Promise<boolean> {
   const stats = await graphStatsByAccess(bucket);
   if (stats.total_nodes < MIN_REVIEW_NODES) return true;
-  return stats.orphan_count === 0 && stats.link_to_note_ratio >= HEALTHY_LINK_RATIO;
+  return stats.orphan_count === 0 && stats.weakly_connected_count <= stats.total_nodes * MAX_WEAK_SHARE;
 }
 
 const SYSTEM_PROMPT_HEAD = `You are iteratively building a zettelkasten - a personal knowledge graph for
@@ -87,8 +87,9 @@ and link candidates. Use them; don't rediscover them with blind searches.
 ## First Step
 
 Always call graph_stats first. This tells you the current state of the graph:
-how many orphans need connecting, how many weakly connected nodes need
-strengthening, and whether the link-to-note ratio is healthy (aim for > 3.0).
+how many orphans need connecting and how many notes hang on a single link.
+The link-to-note ratio is only a symptom of those: never add a link just to
+raise it.
 
 ## Deduplication
 
@@ -148,7 +149,8 @@ Don't just process the slipbox - tend to the garden. Each session, go deeper:
   bar in "Links", create the link rather than leaving the orphan
   unconnected. Only leave an orphan alone when none of its neighbors do —
   never because you didn't check.
-- Strengthen weakly connected nodes (1 link) with additional connections
+- Give weakly connected nodes (1 link) another connection when a neighbor
+  meets the bar in "Links"; one strong link is better than a vague second one
 - Notice patterns emerging and create new linking opportunities
 - Consolidate near-duplicates you discover while exploring (find_similar on
   any node you touch is a cheap check)
@@ -293,7 +295,7 @@ export async function reviewProcessedGraph(opts: { reviewBudget?: number } = {})
     const healthy = await graphHealthy(bucket);
     if (healthy && timeBound.length === 0) {
       log.info(
-        `Retrospector: bucket ${JSON.stringify(bucket)} needs no review (no orphans and link ratio ≥ ${HEALTHY_LINK_RATIO}, or under ${MIN_REVIEW_NODES} notes)`,
+        `Retrospector: bucket ${JSON.stringify(bucket)} needs no review (no orphans and at most ${MAX_WEAK_SHARE * 100}% weakly connected notes, or under ${MIN_REVIEW_NODES} notes)`,
       );
       continue;
     }

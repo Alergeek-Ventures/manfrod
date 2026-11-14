@@ -33,14 +33,15 @@ export function parseExpansion(response: string, original: string): string[] {
   return ordered.slice(0, 3);
 }
 
-export async function expand(query: string, opts: { timeoutMs?: number } = {}): Promise<string[]> {
+export async function expand(query: string, opts: { timeoutMs?: number; onError?: (error: Error) => void } = {}): Promise<string[]> {
   try {
     const response = await generateSimple(PRIMARY_MODEL, [system(SYSTEM_MESSAGE), user(EXPANSION_PROMPT.replace("{{QUERY}}", query))], {
       purpose: "query_expansion",
       timeoutMs: opts.timeoutMs ?? 10_000,
     });
     return parseExpansion(response, query);
-  } catch {
+  } catch (error) {
+    opts.onError?.(error as Error);
     return [query];
   }
 }

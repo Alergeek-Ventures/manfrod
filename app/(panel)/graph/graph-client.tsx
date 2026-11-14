@@ -404,7 +404,11 @@ export function GraphClient({
       <div className="flex flex-wrap items-center gap-1 border-b px-3 py-1.5 lg:px-5">
         <Stat value={stats.total_nodes} label="notes" hint="Notes visible with the current filters" />
         <Stat value={stats.total_links} label="links" hint="Links between the visible notes" />
-        <Stat value={stats.link_to_note_ratio} label="links / note" hint="A well-connected memory stays around 3 or more" />
+        <Stat
+          value={stats.link_to_note_ratio}
+          label="links / note"
+          hint="Links between the visible notes per note. Orphans and single-link notes say more about memory health than this number"
+        />
         <Stat
           value={stats.slipbox_count}
           label="slipbox"
