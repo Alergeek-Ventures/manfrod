@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { getNodeLinksAccessible } from "../../lib/memory/nodes.ts";
-import { search } from "../../lib/memory/search.ts";
+import { recordMemoryContext, search } from "../../lib/memory/search.ts";
 import { PROJECT_DOC, noteDate, unknownProject, resolveProject } from "../lib/notes.ts";
 import { defineManfrodTool } from "../lib/define-tool.ts";
 
@@ -15,8 +15,20 @@ export default defineManfrodTool({
   async execute({ query, project }, ctx) {
     const resolved = await resolveProject(project, ctx.msgCtx);
     if (!resolved.ok) return unknownProject(project);
-    const found = await search(ctx.userId, ctx.readableLevels, query, { limit: 10, projectId: resolved.id });
+    const found = await search(ctx.userId, ctx.readableLevels, query, {
+      limit: 10,
+      projectId: resolved.id,
+      sessionKey: ctx.sessionKey,
+      purpose: "tool",
+    });
     if (found.length === 0) return `No relevant notes found for: ${query}`;
+    recordMemoryContext({
+      userId: ctx.userId,
+      sessionKey: ctx.sessionKey,
+      readableLevels: ctx.readableLevels,
+      noteIds: found.map((node) => node.id),
+      kind: "tool",
+    });
     const lines = await Promise.all(
       found.map(async (node) => {
         const linked = (await getNodeLinksAccessible(ctx.readableLevels, node.id)).map((other) => other.id).join(", ");

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { getNodeAccessible, getNodeLinksAccessible } from "../../lib/memory/nodes.ts";
+import { recordMemoryContext } from "../../lib/memory/search.ts";
 import { noteDate } from "../lib/notes.ts";
 import { defineManfrodTool } from "../lib/define-tool.ts";
 
@@ -13,6 +14,13 @@ export default defineManfrodTool({
     const node = await getNodeAccessible(ctx.readableLevels, id);
     if (!node) return `Note not found: ${id}`;
     const linked = await getNodeLinksAccessible(ctx.readableLevels, node.id);
+    recordMemoryContext({
+      userId: ctx.userId,
+      sessionKey: ctx.sessionKey,
+      readableLevels: ctx.readableLevels,
+      noteIds: [node.id, ...linked.map((other) => other.id)],
+      kind: "tool",
+    });
     const linkedContent =
       linked.length === 0
         ? "No linked notes."

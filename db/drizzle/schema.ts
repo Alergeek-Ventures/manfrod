@@ -66,6 +66,7 @@ export const auditEvents = pgTable("audit_events", {
 	insertedAt: timestamp("inserted_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
 	userId: uuid("user_id"),
 }, (table) => [
+	index("audit_events_memory_context_index").using("btree", sql`(meta ->> 'session_key'::text)`, table.timestamp.asc().nullsLast().op("timestamp_ops")).where(sql`((type)::text = 'memory_context'::text)`),
 	index().using("btree", table.timestamp.asc().nullsLast().op("timestamp_ops")),
 	index().using("btree", table.userId.asc().nullsLast().op("uuid_ops")),
 ]);
@@ -585,11 +586,13 @@ export const selfReviewCases = pgTable("self_review_cases", {
 	askedAt: timestamp("asked_at", { mode: 'date' }),
 	insertedAt: timestamp("inserted_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
 	updatedAt: timestamp("updated_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
+	memory: text(),
 }, (table) => [
 	uniqueIndex("self_review_cases_feedback_index").using("btree", table.feedbackId.asc().nullsLast().op("uuid_ops")),
 	index("self_review_cases_finding_index").using("btree", table.findingId.asc().nullsLast().op("uuid_ops")),
 	index().using("btree", table.status.asc().nullsLast().op("text_ops")),
 	check("self_review_cases_status", sql`status = ANY (ARRAY['linked'::text, 'not_actionable'::text, 'needs_input'::text, 'asked'::text, 'expired'::text])`),
+	check("self_review_cases_memory", sql`(memory IS NULL) OR (memory = ANY (ARRAY['helped'::text, 'wrong'::text, 'missing'::text, 'unrelated'::text]))`),
 ]);
 
 export const nudgeDeliveries = pgTable("nudge_deliveries", {

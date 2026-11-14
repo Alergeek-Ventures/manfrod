@@ -15,6 +15,7 @@ export type ActivityType =
   | "feedback_received"
   | "log"
   | "memory_searched"
+  | "memory_context"
   | "memory_node_created"
   | "memory_node_updated"
   | "memory_node_deleted"

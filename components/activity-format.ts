@@ -20,6 +20,7 @@ export type BadgeVariant = "default" | "secondary" | "destructive" | "outline";
 
 const MEMORY_TYPES = new Set([
   "memory_searched",
+  "memory_context",
   "memory_node_created",
   "memory_link_created",
   "memory_node_processed",
@@ -56,6 +57,7 @@ const TYPE_LABELS: Record<string, string> = {
   plan_titled: "PLAN",
   idle: "IDLE",
   memory_searched: "MEMORY:SEARCH",
+  memory_context: "MEMORY:CONTEXT",
   memory_node_created: "MEMORY:CREATE",
   memory_link_created: "MEMORY:LINK",
   memory_node_processed: "MEMORY:PROCESS",
@@ -214,6 +216,8 @@ export function formatExpanded(event: ActivityView): string {
       return `Nodes processed: ${meta.nodes_processed}\nLinks created: ${meta.links_created}\nInsights created: ${meta.insights_created}\nNodes deleted: ${meta.nodes_deleted}\nLinks deleted: ${meta.links_deleted}\n`;
     case "memory_searched":
       return memorySearched(meta);
+    case "memory_context":
+      return `Notes in context: ${(meta.note_ids ?? []).length}`;
     case "memory_node_created":
       return `Node ID: ${meta.node_id}\nContent: ${meta.content_preview}\n`;
     case "memory_link_created":

@@ -47,19 +47,27 @@ describe("parseTriage", () => {
       verdict: "match",
       reason: "r",
       findingId: "f1",
+      memory: null,
     });
     expect(parseTriage(JSON.stringify({ verdict: "actionable", reason: "r", match: "zzz", finding }), ["f1"], false)).toEqual({
       verdict: "new",
       reason: "r",
       finding: { ...finding, summary: null },
+      memory: null,
     });
     expect(parseTriage(JSON.stringify({ verdict: "actionable", reason: "r", match: "zzz" }), ["f1"], false)).toBeNull();
   });
 
   it("does not ask twice", () => {
     const raw = "```json\n" + JSON.stringify({ verdict: "unclear", reason: "r", question: "Co było nie tak?" }) + "\n```";
-    expect(parseTriage(raw, [], false)).toEqual({ verdict: "unclear", reason: "r", question: "Co było nie tak?" });
-    expect(parseTriage(raw, [], true)).toEqual({ verdict: "not_actionable", reason: "r" });
+    expect(parseTriage(raw, [], false)).toEqual({ verdict: "unclear", reason: "r", question: "Co było nie tak?", memory: null });
+    expect(parseTriage(raw, [], true)).toEqual({ verdict: "not_actionable", reason: "r", memory: null });
+  });
+
+  it("keeps the memory verdict and drops unknown values", () => {
+    const parse = (memory: unknown) => parseTriage(JSON.stringify({ verdict: "not_actionable", reason: "r", memory }), [], false);
+    expect(parse("wrong")).toEqual({ verdict: "not_actionable", reason: "r", memory: "wrong" });
+    expect(parse("maybe")).toEqual({ verdict: "not_actionable", reason: "r", memory: null });
   });
 
   it("rejects malformed output", () => {

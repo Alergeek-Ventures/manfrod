@@ -61,6 +61,7 @@ export default async function SelfReviewPage({ searchParams }: { searchParams: P
   const waitingCases = data.cases.filter((row) => row.status === "needs_input" || row.status === "asked");
   const closedCases = data.cases.filter((row) => row.status === "not_actionable" || row.status === "expired").slice(0, 50);
   const verdict = (key: string) => data.verdicts[key] ?? 0;
+  const memory = (key: string) => data.memory[key] ?? 0;
 
   return (
     <div className="flex flex-col gap-6 py-4 md:py-6">
@@ -247,6 +248,10 @@ export default async function SelfReviewPage({ searchParams }: { searchParams: P
         <p className="text-sm text-muted-foreground">
           Conversations judged in the last {data.sessionWindowDays} days: {verdict("satisfied")} satisfied, {verdict("unsatisfied")}{" "}
           unhappy, {verdict("unclear")} unclear, {verdict("skipped")} skipped.
+        </p>
+        <p className="text-sm text-muted-foreground">
+          Memory in rated replies from the last {data.sessionWindowDays} days: {memory("helped")} helped, {memory("wrong")} had a wrong or
+          outdated note, {memory("missing")} missed something Manfrod should have remembered, {memory("unrelated")} unrelated.
         </p>
       </section>
     </div>

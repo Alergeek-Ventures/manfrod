@@ -203,6 +203,8 @@ export interface SearchOptions {
   expandQuery?: boolean;
   rerank?: boolean;
   projectId?: string | null;
+  sessionKey?: string | null;
+  purpose?: "context" | "tool" | "panel";
 }
 
 export async function search(
@@ -253,9 +255,11 @@ export async function search(
 
   emit("memory_searched", {
     userId,
+    sessionKey: opts.sessionKey ?? null,
     source: "memory",
     meta: {
       query: queryText,
+      purpose: opts.purpose ?? null,
       expanded_queries: queries,
       rerank_scores: rerankScores,
       stats: {
@@ -279,16 +283,39 @@ export async function search(
   return results;
 }
 
-export function buildContext(items: Node[], budget = NOTE_CONTEXT_CHARS): string {
+export function recordMemoryContext(attrs: {
+  userId: string | null;
+  sessionKey: string | null;
+  readableLevels: string[];
+  noteIds: string[];
+  kind: "turn" | "tool";
+}): void {
+  if (!attrs.sessionKey) return;
+  emit("memory_context", {
+    userId: attrs.userId,
+    sessionKey: attrs.sessionKey,
+    source: "memory",
+    meta: { kind: attrs.kind, note_ids: attrs.noteIds, readable_levels: attrs.readableLevels, at: new Date().toISOString() },
+  });
+}
+
+export function fitContext(items: Node[], budget = NOTE_CONTEXT_CHARS): { lines: string[]; notes: Node[] } {
   const lines: string[] = [];
+  const notes: Node[] = [];
   let used = 0;
   for (const node of items) {
     const content = node.content.length > NOTE_CHARS ? `${node.content.slice(0, NOTE_CHARS)}…` : node.content;
     const line = `- [${node.id}] ${content}`;
     if (used + line.length > budget) break;
     lines.push(line);
+    notes.push(node);
     used += line.length;
   }
+  return { lines, notes };
+}
+
+export function buildContext(items: Node[], budget = NOTE_CONTEXT_CHARS): string {
+  const { lines } = fitContext(items, budget);
   if (lines.length === 0) return "";
   return `Relevant memories, most relevant first (search-notes finds more, get-note shows a note in full):\n${lines.join("\n")}`;
 }
@@ -299,11 +326,20 @@ export async function getNoteContext(
   query: string,
   projectId: string | null = null,
   soulInPrompt = true,
+  sessionKey: string | null = null,
 ): Promise<string> {
   const [anchor, relevant] = await Promise.all([
     soulInPrompt ? getSoulAnchor(userId, readableLevels) : null,
-    search(userId, readableLevels, query, { limit: 10, projectId }),
+    search(userId, readableLevels, query, { limit: 10, projectId, sessionKey, purpose: "context" }),
   ]);
-  const inSystemPrompt = new Set(anchor ? [anchor.soul.id, ...anchor.linked.map((node) => node.id)] : []);
-  return buildContext(relevant.filter((node) => !inSystemPrompt.has(node.id)));
+  const inSystemPrompt = anchor ? [anchor.soul.id, ...anchor.linked.map((node) => node.id)] : [];
+  const items = relevant.filter((node) => !inSystemPrompt.includes(node.id));
+  recordMemoryContext({
+    userId,
+    sessionKey,
+    readableLevels,
+    noteIds: [...inSystemPrompt, ...fitContext(items).notes.map((node) => node.id)],
+    kind: "turn",
+  });
+  return buildContext(items);
 }
