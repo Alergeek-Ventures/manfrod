@@ -13,7 +13,7 @@ Rules:
 Query: {{QUERY}}
 `;
 
-export function parseExpansion(response: string, original: string): string[] {
+export function readExpansion(response: string, original: string): string[] | null {
   const cleaned = response
     .trim()
     .replace(/^```json\s*/, "")
@@ -24,13 +24,17 @@ export function parseExpansion(response: string, original: string): string[] {
   try {
     parsed = JSON.parse(cleaned);
   } catch {
-    return [original];
+    return null;
   }
-  if (!Array.isArray(parsed)) return [original];
+  if (!Array.isArray(parsed)) return null;
 
   const queries = parsed.filter((item): item is string => typeof item === "string").slice(0, 5);
   const ordered = queries.includes(original) ? [original, ...queries.filter((query) => query !== original)] : [original, ...queries];
   return ordered.slice(0, 3);
+}
+
+export function parseExpansion(response: string, original: string): string[] {
+  return readExpansion(response, original) ?? [original];
 }
 
 export async function expand(query: string, opts: { timeoutMs?: number; onError?: (error: Error) => void } = {}): Promise<string[]> {
@@ -39,7 +43,10 @@ export async function expand(query: string, opts: { timeoutMs?: number; onError?
       purpose: "query_expansion",
       timeoutMs: opts.timeoutMs ?? 10_000,
     });
-    return parseExpansion(response, query);
+    const queries = readExpansion(response, query);
+    if (queries) return queries;
+    opts.onError?.(new Error("the expansion response is not a JSON array"));
+    return [query];
   } catch (error) {
     opts.onError?.(error as Error);
     return [query];
