@@ -339,6 +339,9 @@ const REJECTED_TOKEN_ERRORS = new Set(["rejected", "no_token", "no_refresh_token
 
 export const isTokenRejected = (error: string) => REJECTED_TOKEN_ERRORS.has(error);
 
+export const awaitsReconnect = (connection: Pick<McpConnection, "status" | "notifiedExpiredAt">) =>
+  connection.status === "disconnected" || (connection.status === "expired" && connection.notifiedExpiredAt !== null);
+
 export async function ensureValidToken(connection: McpConnection): Promise<McpResult<string>> {
   if (connection.status === "disconnected") return { ok: false, error: "disconnected" };
   if (!connection.accessToken) return { ok: false, error: "no_token" };

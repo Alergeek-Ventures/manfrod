@@ -6,7 +6,7 @@ import { executeJob, JobError } from "../jobs/execute.ts";
 import { completeJob, dispatchUndispatched, failJob, getJob, markExecuting, pruneJobs } from "../jobs/index.ts";
 import { logger } from "../log.ts";
 import { giveUpOnToken, handleTokenFailure, retryToken, TOKEN_RETRY_DELAYS } from "../mcp/health.ts";
-import { ensureValidToken, listAllConnectionsWithProvider } from "../mcp/index.ts";
+import { awaitsReconnect, ensureValidToken, listAllConnectionsWithProvider } from "../mcp/index.ts";
 import { flush, staleKeys } from "../memory/buffer.ts";
 import { extractSession } from "../memory/extractor.ts";
 import { sweep } from "../memory/pending.ts";
@@ -162,7 +162,7 @@ const mcpExpiry = cronFunction("mcp-expiry", "15 * * * *", async () => {
   const all = await listAllConnectionsWithProvider();
   const failing: Record<string, string> = {};
   for (const { connection, provider } of all) {
-    if (provider.authHeader) continue;
+    if (provider.authHeader || awaitsReconnect(connection)) continue;
     const token = await ensureValidToken(connection);
     if (!token.ok) failing[`${provider.id}/${connection.userId}`] = await handleTokenFailure(connection.userId, provider, token.error);
   }
