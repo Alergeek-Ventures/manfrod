@@ -34,7 +34,14 @@ export default defineMemory({
         const query = text.length > NOTE_QUERY_CHARS ? text.slice(-NOTE_QUERY_CHARS) : text;
         try {
           const projectId = tool.msgCtx.channel ? await projectIdForChannel(tool.msgCtx.channel) : null;
-          const notes = await getNoteContext(tool.userId, tool.readableLevels, query, projectId, isDmSession(tool.sessionKey));
+          const notes = await getNoteContext(
+            tool.userId,
+            tool.readableLevels,
+            query,
+            projectId,
+            isDmSession(tool.sessionKey),
+            tool.sessionKey,
+          );
           return notes === "" ? null : { messages: [{ id: "note-context", content: `[Note context]\n${notes}` }] };
         } catch (error) {
           log.error(`Agent.Server: note context failed: ${(error as Error).message}`);

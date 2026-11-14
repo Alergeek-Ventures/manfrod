@@ -3,6 +3,7 @@ import { internalLanguage } from "../agent-settings.ts";
 import type { Message, SelfReviewFinding } from "../db/schema.ts";
 import type { CommitSummary } from "../github.ts";
 import { AGENT_MODEL, FALLBACK_CHAIN, generateText, system, user } from "../llm/index.ts";
+import { MEMORY_VERDICTS, type MemoryVerdict } from "./memory.ts";
 import { CATEGORIES, type Category } from "./rules.ts";
 
 const CHAIN = [{ provider: "openrouter" as const, model: AGENT_MODEL, tier: "paid" as const }, ...FALLBACK_CHAIN];
@@ -28,7 +29,16 @@ Write "title", "problem" and "expected" in English as a generic description of M
 Respond with only a JSON object:
 {"verdict": "actionable" | "unclear" | "not_actionable", "reason": "<one English sentence>", "match": "<finding id>" | null, "finding": {"title": "<under 80 characters>", "problem": "<what Manfrod does wrong>", "expected": "<what it should do instead>", "summary": "<for the admins' channel>", "category": "prompt" | "skill" | "routine" | "tool", "severity": 1 | 2 | 3} | null, "question": "<question>" | null}
 
-Severity: 3 = a wrong or harmful result, 2 = unhelpful or needed a retry, 1 = cosmetic.`;
+Severity: 3 = a wrong or harmful result, 2 = unhelpful or needed a retry, 1 = cosmetic.
+
+When a <memory> block is given, it lists the notes from Manfrod's memory that were in its context when it wrote the rated reply, as they read now. Judge separately from the verdict what part memory played and set "memory" to:
+- "helped": a note gave information the reply correctly relied on;
+- "wrong": the reply went wrong because a note was outdated, incorrect or about something else;
+- "missing": the reply needed something Manfrod should have remembered from earlier conversations, and no note gave it;
+- "unrelated": memory played no part in what went right or wrong.
+Without a <memory> block, set "memory" to null. A problem caused only by memory is still "not_actionable".
+
+Add the field to the JSON object: "memory": "helped" | "wrong" | "missing" | "unrelated" | null.`;
 
 const ANSWERED_NOTE = `The person was asked afterwards what was wrong; their answer is in the second conversation. Use it to decide. Do not answer "unclear" again: if it is still not clear, answer "not_actionable".`;
 
@@ -100,9 +110,10 @@ const triageSchema = z.object({
     })
     .nullish(),
   question: z.string().max(600).nullish(),
+  memory: z.enum(MEMORY_VERDICTS).nullish().catch(null),
 });
 
-export type Triage =
+export type Triage = { memory: MemoryVerdict | null } & (
   | { verdict: "match"; reason: string; findingId: string }
   | {
       verdict: "new";
@@ -110,7 +121,8 @@ export type Triage =
       finding: { title: string; problem: string; expected: string; summary: string | null; category: Category; severity: number };
     }
   | { verdict: "unclear"; reason: string; question: string }
-  | { verdict: "not_actionable"; reason: string };
+  | { verdict: "not_actionable"; reason: string }
+);
 
 export interface TranscriptInput {
   messages: Message[];
@@ -177,13 +189,14 @@ export function parseTriage(raw: string, findingIds: string[], answered: boolean
   const parsed = triageSchema.safeParse(json(raw));
   if (!parsed.success) return null;
   const { verdict, reason, match, finding, question } = parsed.data;
-  if (verdict === "not_actionable") return { verdict, reason };
+  const memory = parsed.data.memory ?? null;
+  if (verdict === "not_actionable") return { verdict, reason, memory };
   if (verdict === "unclear") {
-    if (answered || !question?.trim()) return { verdict: "not_actionable", reason };
-    return { verdict, reason, question: question.trim() };
+    if (answered || !question?.trim()) return { verdict: "not_actionable", reason, memory };
+    return { verdict, reason, question: question.trim(), memory };
   }
-  if (match && findingIds.includes(match)) return { verdict: "match", reason, findingId: match };
-  if (finding) return { verdict: "new", reason, finding: { ...finding, summary: finding.summary?.trim() || null } };
+  if (match && findingIds.includes(match)) return { verdict: "match", reason, findingId: match, memory };
+  if (finding) return { verdict: "new", reason, finding: { ...finding, summary: finding.summary?.trim() || null }, memory };
   return null;
 }
 
@@ -200,10 +213,12 @@ const describe = (finding: SelfReviewFinding) =>
 export async function triage(input: {
   transcript: string;
   clarification: string | null;
+  memory: string | null;
   findings: SelfReviewFinding[];
 }): Promise<Triage | null> {
   const existing = input.findings.length > 0 ? input.findings.map(describe).join("\n") : "(none)";
   const parts = [`Existing findings:\n${existing}`, `<conversation>\n${input.transcript}\n</conversation>`];
+  if (input.memory) parts.push(`<memory>\n${input.memory}\n</memory>`);
   if (input.clarification) parts.push(`<clarification>\n${input.clarification}\n</clarification>`);
   const base = TRIAGE_PROMPT.replace("{{LANGUAGE}}", await internalLanguage());
   const prompt = input.clarification ? `${base}\n\n${ANSWERED_NOTE}` : base;

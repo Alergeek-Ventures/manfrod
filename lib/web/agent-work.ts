@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, gte, inArray, isNull, or } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, inArray, isNotNull, isNull, or } from "drizzle-orm";
 import { db, tables } from "../db/index.ts";
 import { BAD_RATING, feedbackSince, INFERRED_RATING } from "../self-review/rules.ts";
 import { archiveLink, botIdentity } from "../slack/api.ts";
@@ -102,6 +102,11 @@ export async function loadSelfReview() {
     .where(gte(selfReviewSessions.updatedAt, daysAgo(SESSION_WINDOW_DAYS)))
     .groupBy(selfReviewSessions.verdict);
   const [openPulls] = await db.select({ count: count() }).from(selfModifyPulls).where(eq(selfModifyPulls.status, "open"));
+  const memory = await db
+    .select({ memory: selfReviewCases.memory, count: count() })
+    .from(selfReviewCases)
+    .where(and(isNotNull(selfReviewCases.memory), gte(selfReviewCases.updatedAt, daysAgo(SESSION_WINDOW_DAYS))))
+    .groupBy(selfReviewCases.memory);
 
   return {
     findings: findings.map((finding) => ({
@@ -126,6 +131,7 @@ export async function loadSelfReview() {
     untriaged: Number(untriaged?.count ?? 0),
     verdicts: Object.fromEntries(verdicts.map((row) => [row.verdict, Number(row.count)])) as Record<string, number>,
     openPulls: Number(openPulls?.count ?? 0),
+    memory: Object.fromEntries(memory.map((row) => [row.memory, Number(row.count)])) as Record<string, number>,
     sessionWindowDays: SESSION_WINDOW_DAYS,
   };
 }

@@ -51,7 +51,7 @@ export async function selectNode(accessLevel: string, nodeId: string) {
 export async function searchNodes(accessLevel: string, query: string): Promise<string[]> {
   await requireAdmin();
   if (query.length < 3) return [];
-  const found = await search(null, [accessLevel], query, { limit: 20, expandQuery: false });
+  const found = await search(null, [accessLevel], query, { limit: 20, expandQuery: false, purpose: "panel" });
   return found.map((node) => node.id);
 }
 

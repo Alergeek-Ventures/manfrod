@@ -48,7 +48,7 @@ export async function unreviewedFeedback(limit: number, excludeChannelId: string
 
 export async function insertCase(
   feedbackId: string,
-  attrs: { status: CaseStatus; findingId?: string | null; reason?: string | null; question?: string | null },
+  attrs: { status: CaseStatus; findingId?: string | null; reason?: string | null; question?: string | null; memory?: string | null },
 ): Promise<void> {
   await db
     .insert(selfReviewCases)
@@ -59,7 +59,10 @@ export async function insertCase(
 export async function updateCase(
   id: string,
   attrs: Partial<
-    Pick<SelfReviewCase, "status" | "findingId" | "reason" | "question" | "clarificationChannelId" | "clarificationThreadTs" | "askedAt">
+    Pick<
+      SelfReviewCase,
+      "status" | "findingId" | "reason" | "question" | "memory" | "clarificationChannelId" | "clarificationThreadTs" | "askedAt"
+    >
   >,
 ): Promise<void> {
   await db.update(selfReviewCases).set(attrs).where(eq(selfReviewCases.id, id));

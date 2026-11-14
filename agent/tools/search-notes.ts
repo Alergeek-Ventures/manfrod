@@ -15,7 +15,12 @@ export default defineManfrodTool({
   async execute({ query, project }, ctx) {
     const resolved = await resolveProject(project, ctx.msgCtx);
     if (!resolved.ok) return unknownProject(project);
-    const found = await search(ctx.userId, ctx.readableLevels, query, { limit: 10, projectId: resolved.id });
+    const found = await search(ctx.userId, ctx.readableLevels, query, {
+      limit: 10,
+      projectId: resolved.id,
+      sessionKey: ctx.sessionKey,
+      purpose: "tool",
+    });
     if (found.length === 0) return `No relevant notes found for: ${query}`;
     const lines = await Promise.all(
       found.map(async (node) => {

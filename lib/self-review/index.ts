@@ -37,6 +37,7 @@ import {
   updateCase,
   type CaseWithFeedback,
 } from "./store.ts";
+import { memoryShown } from "./memory.ts";
 import { reviewSatisfaction } from "./satisfaction.ts";
 import { alreadyFixed, describeCommits, formatTranscript, rank, slackTsToDate, triage, type Triage } from "./triage.ts";
 
@@ -79,21 +80,21 @@ async function reportDismissed(feedback: MessageFeedback, user: User | null, rea
   if (!result.ok) log.error(`SelfReview: failed to report dismissed feedback ${feedback.id}: ${result.error}`);
 }
 
-const UNPARSED = { status: "not_actionable" as const, reason: "The triage response could not be parsed." };
+const UNPARSED = { status: "not_actionable" as const, reason: "The triage response could not be parsed.", memory: null };
 
 async function apply(verdict: Triage, findings: SelfReviewFinding[]) {
   switch (verdict.verdict) {
     case "match":
-      return { status: "linked" as const, findingId: verdict.findingId, reason: verdict.reason };
+      return { status: "linked" as const, findingId: verdict.findingId, reason: verdict.reason, memory: verdict.memory };
     case "new": {
       const finding = await createFinding(verdict.finding);
       findings.push(finding);
-      return { status: "linked" as const, findingId: finding.id, reason: verdict.reason };
+      return { status: "linked" as const, findingId: finding.id, reason: verdict.reason, memory: verdict.memory };
     }
     case "unclear":
-      return { status: "needs_input" as const, reason: verdict.reason, question: verdict.question };
+      return { status: "needs_input" as const, reason: verdict.reason, question: verdict.question, memory: verdict.memory };
     case "not_actionable":
-      return { status: "not_actionable" as const, reason: verdict.reason };
+      return { status: "not_actionable" as const, reason: verdict.reason, memory: verdict.memory };
   }
 }
 
@@ -109,10 +110,11 @@ async function reviewNew(findings: SelfReviewFinding[]): Promise<number> {
         await reportDismissed(feedback, feedback.userId ? await getUser(feedback.userId) : null, reason);
         continue;
       }
-      const triaged = await triage({ transcript, clarification: null, findings });
+      const memory = await memoryShown(feedback, slackTsToDate(feedback.messageTs));
+      const triaged = await triage({ transcript, clarification: null, memory, findings });
       const verdict: Triage | null =
         triaged?.verdict === "unclear" && feedback.rating === INFERRED_RATING
-          ? { verdict: "not_actionable", reason: triaged.reason }
+          ? { verdict: "not_actionable", reason: triaged.reason, memory: triaged.memory }
           : triaged;
       const outcome = verdict ? await apply(verdict, findings) : UNPARSED;
       await insertCase(feedback.id, outcome);
@@ -137,7 +139,8 @@ async function reviewAnswered(findings: SelfReviewFinding[]): Promise<number> {
         continue;
       }
       const transcript = (await conversation(row.feedback)) ?? "(no messages)";
-      const verdict = await triage({ transcript, clarification: answer, findings });
+      const memory = await memoryShown(row.feedback, slackTsToDate(row.feedback.messageTs));
+      const verdict = await triage({ transcript, clarification: answer, memory, findings });
       const outcome = verdict ? await apply(verdict, findings) : UNPARSED;
       await updateCase(row.case.id, outcome);
       if (outcome.status === "not_actionable") await reportDismissed(row.feedback, row.user, outcome.reason);
