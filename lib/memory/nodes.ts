@@ -477,17 +477,19 @@ export async function getStalestNodesByAccess(access: string[], limit = 25): Pro
 
 export interface GraphNodeData {
   id: string;
-  content: string;
-  content_preview: string;
+  preview: string;
   processed: boolean;
-  link_count: number;
-  inserted_at: string;
+  projectId: string | null;
+  userId: string;
+  insertedAt: string;
 }
 
 export interface GraphData {
   nodes: GraphNodeData[];
-  edges: { source: string; target: string }[];
+  edges: [string, string][];
 }
+
+export const GRAPH_PREVIEW_LENGTH = 240;
 
 export async function getGraphData(
   opts: { filter?: "all" | "processed" | "slipbox"; accessLevel?: string | null; projectId?: string | null } = {},
@@ -497,30 +499,38 @@ export async function getGraphData(
   if (opts.filter === "slipbox") conditions.push(isNull(nodes.processedAt));
   if (opts.accessLevel) conditions.push(accessOverlaps(nodes.access, [opts.accessLevel]));
   if (opts.projectId) conditions.push(eq(nodes.projectId, opts.projectId));
+  const scope = conditions.length ? and(...conditions) : undefined;
+  const scoped = db.select({ id: nodes.id }).from(nodes).where(scope);
 
-  const rows = await db
-    .select()
-    .from(nodes)
-    .where(conditions.length ? and(...conditions) : undefined);
-  const ids = new Set(rows.map((row) => row.id));
-
-  const allLinks = await db.select({ a: links.nodeAId, b: links.nodeBId }).from(links);
-  const counts = new Map<string, number>();
-  for (const link of allLinks) {
-    counts.set(link.a, (counts.get(link.a) ?? 0) + 1);
-    counts.set(link.b, (counts.get(link.b) ?? 0) + 1);
-  }
+  const [rows, edges] = await Promise.all([
+    db
+      .select({
+        id: nodes.id,
+        preview: sql<string>`left(${nodes.content}, ${GRAPH_PREVIEW_LENGTH})`,
+        processedAt: nodes.processedAt,
+        projectId: nodes.projectId,
+        userId: nodes.userId,
+        insertedAt: nodes.insertedAt,
+      })
+      .from(nodes)
+      .where(scope)
+      .orderBy(desc(nodes.insertedAt)),
+    db
+      .select({ a: links.nodeAId, b: links.nodeBId })
+      .from(links)
+      .where(and(inArray(links.nodeAId, scoped), inArray(links.nodeBId, scoped))),
+  ]);
 
   return {
-    nodes: rows.map((node) => ({
-      id: node.id,
-      content: node.content,
-      content_preview: preview(node.content),
-      processed: node.processedAt !== null,
-      link_count: counts.get(node.id) ?? 0,
-      inserted_at: node.insertedAt.toISOString(),
+    nodes: rows.map((row) => ({
+      id: row.id,
+      preview: row.preview,
+      processed: row.processedAt !== null,
+      projectId: row.projectId,
+      userId: row.userId,
+      insertedAt: row.insertedAt.toISOString(),
     })),
-    edges: allLinks.filter((link) => ids.has(link.a) && ids.has(link.b)).map((link) => ({ source: link.a, target: link.b })),
+    edges: edges.map((edge) => [edge.a, edge.b]),
   };
 }
 
