@@ -2,11 +2,12 @@
 
 import { NetworkIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, SearchIcon, XIcon } from "lucide-react";
 import { useTheme } from "next-themes";
-import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from "@/components/ui/input-group";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -16,7 +17,7 @@ import type { GraphData } from "@/lib/memory/nodes.ts";
 import { cn } from "@/lib/utils";
 import { deleteNode, loadGraph, saveNode, searchNodes, selectNode, setNodeProject, type Filter, type SelectedNode } from "./actions.ts";
 import { GraphCanvas } from "./graph-canvas.tsx";
-import { NoteDetail, NoteDetailSkeleton } from "./note-detail.tsx";
+import { NoteDetail, NoteDetailSkeleton, NotePanel } from "./note-detail.tsx";
 import { NoteList, type NoteMeta } from "./note-list.tsx";
 import { graphTheme, SERIES_SLOTS, type ColorBy } from "./palette.ts";
 
@@ -125,6 +126,7 @@ export function GraphClient({
   const [query, setQuery] = useState("");
   const [semantic, setSemantic] = useState<string[]>([]);
   const [listOpen, setListOpen] = useState(true);
+  const [mobileListOpen, setMobileListOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selectedRef = useRef<string | null>(null);
   selectedRef.current = selectedId;
@@ -132,6 +134,7 @@ export function GraphClient({
   const [loadingGraph, startGraph] = useTransition();
   const [pending, startTransition] = useTransition();
   const detailRequest = useRef(0);
+  const graphRequest = useRef(0);
   const { resolvedTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
@@ -205,7 +208,8 @@ export function GraphClient({
     return map;
   }, [graph, colorOf, projectNames, userNames]);
 
-  const searching = query.trim().length >= 2;
+  const deferredQuery = useDeferredValue(query);
+  const searching = deferredQuery.trim().length >= 2;
 
   const visible = useMemo(() => {
     let notes = graph.nodes;
@@ -213,12 +217,12 @@ export function GraphClient({
     if (quick === "weak") notes = notes.filter((node) => node.processed && node.degree === 1);
     if (searching) {
       const rank = new Map(semantic.map((id, index) => [id, index]));
-      notes = notes.filter((node) => rank.has(node.id) || matchesQuery(node.preview, query));
+      notes = notes.filter((node) => rank.has(node.id) || matchesQuery(node.preview, deferredQuery));
       return [...notes].sort((a, b) => (rank.get(a.id) ?? Infinity) - (rank.get(b.id) ?? Infinity));
     }
     if (sort === "linked") return [...notes].sort((a, b) => b.degree - a.degree);
     return notes;
-  }, [graph, quick, searching, semantic, query, sort]);
+  }, [graph, quick, searching, semantic, deferredQuery, sort]);
 
   const matches = useMemo(() => (searching || quick ? new Set(visible.map((node) => node.id)) : null), [searching, quick, visible]);
 
@@ -259,13 +263,30 @@ export function GraphClient({
       });
   }, []);
 
-  const reload = (nextFilter: Filter, level: string, project: string) =>
+  const reload = (nextFilter: Filter, level: string, project: string) => {
+    const request = ++graphRequest.current;
     startGraph(async () => {
-      const next = await loadGraph(nextFilter, level, project === "all" ? null : project);
+      let next: GraphData;
+      try {
+        next = await loadGraph(nextFilter, level, project === "all" ? null : project);
+      } catch {
+        if (request === graphRequest.current) toast.error("Couldn't load the graph");
+        return;
+      }
+      if (request !== graphRequest.current) return;
       setGraph(next);
       const current = selectedRef.current;
       if (current && !next.nodes.some((node) => node.id === current)) select(null);
     });
+  };
+
+  const openFromMobileList = useCallback(
+    (id: string) => {
+      setMobileListOpen(false);
+      select(id);
+    },
+    [select],
+  );
 
   const changeAccess = (nextScope: Scope, nextTarget: string | null) => {
     let resolvedScope = nextScope;
@@ -312,6 +333,18 @@ export function GraphClient({
     { label: "Newest first", value: "recent" },
     { label: "Most linked", value: "linked" },
   ];
+
+  const listHeader = (action: React.ReactNode) => (
+    <div className="flex items-center justify-between gap-2 border-b px-3 py-2">
+      <span className="text-muted-foreground text-xs tabular-nums">
+        {visible.length === graph.nodes.length ? `${visible.length} notes` : `${visible.length} of ${graph.nodes.length} notes`}
+      </span>
+      <div className="flex items-center gap-1">
+        {!searching && <PlainSelect items={sortItems} value={sort} onChange={(value) => setSort(value as Sort)} className="h-7 text-xs" />}
+        {action}
+      </div>
+    </div>
+  );
 
   return (
     <div className="flex h-[calc(100svh-var(--header-height)-1rem)] min-h-0 flex-col">
@@ -407,29 +440,38 @@ export function GraphClient({
         <div className="flex min-h-0 flex-1">
           {listOpen && (
             <aside className="hidden w-80 shrink-0 flex-col border-r md:flex xl:w-96">
-              <div className="flex items-center justify-between gap-2 border-b px-3 py-2">
-                <span className="text-muted-foreground text-xs tabular-nums">
-                  {visible.length === graph.nodes.length ? `${visible.length} notes` : `${visible.length} of ${graph.nodes.length} notes`}
-                </span>
-                <div className="flex items-center gap-1">
-                  {!searching && (
-                    <PlainSelect items={sortItems} value={sort} onChange={(value) => setSort(value as Sort)} className="h-7 text-xs" />
-                  )}
-                  <Button size="icon-sm" variant="ghost" onClick={() => setListOpen(false)}>
-                    <PanelLeftCloseIcon />
-                    <span className="sr-only">Hide list</span>
-                  </Button>
-                </div>
-              </div>
+              {listHeader(
+                <Button size="icon-sm" variant="ghost" onClick={() => setListOpen(false)}>
+                  <PanelLeftCloseIcon />
+                  <span className="sr-only">Hide list</span>
+                </Button>,
+              )}
               <div className="min-h-0 flex-1 overflow-y-auto">
                 <NoteList notes={visible} metas={metas} selectedId={selectedId} onSelect={select} />
               </div>
             </aside>
           )}
 
+          <Sheet open={mobileListOpen} onOpenChange={setMobileListOpen}>
+            <SheetContent side="left" className="flex w-full flex-col gap-0 p-0 sm:max-w-sm">
+              <SheetHeader className="border-b">
+                <SheetTitle>Notes</SheetTitle>
+                <SheetDescription className="sr-only">Notes visible with the current filters</SheetDescription>
+              </SheetHeader>
+              {listHeader(null)}
+              <div className="min-h-0 flex-1 overflow-y-auto">
+                <NoteList notes={visible} metas={metas} selectedId={selectedId} onSelect={openFromMobileList} />
+              </div>
+            </SheetContent>
+          </Sheet>
+
           <div className="relative min-w-0 flex-1">
             <GraphCanvas graph={graph} colorOf={colorOf} theme={theme} selectedId={selectedId} matches={matches} onSelect={select} />
 
+            <Button size="sm" variant="outline" className="absolute top-3 left-3 md:hidden" onClick={() => setMobileListOpen(true)}>
+              <PanelLeftOpenIcon data-icon="inline-start" />
+              Notes
+            </Button>
             {!listOpen && (
               <Button size="sm" variant="outline" className="absolute top-3 left-3 hidden md:inline-flex" onClick={() => setListOpen(true)}>
                 <PanelLeftOpenIcon data-icon="inline-start" />
@@ -446,55 +488,57 @@ export function GraphClient({
               ))}
             </div>
 
-            {selectedId &&
-              (detail && detail.id === selectedId ? (
-                <NoteDetail
-                  key={detail.id}
-                  node={detail}
-                  author={userNames.get(detail.userId) ?? "Unknown"}
-                  isSoul={detail.id === soulId}
-                  projects={projects}
-                  colorOf={colorOf}
-                  pending={pending}
-                  onClose={() => select(null)}
-                  onOpen={select}
-                  onSave={(content) =>
-                    new Promise((resolve) =>
+            {selectedId && (
+              <NotePanel noteId={selectedId} onClose={() => select(null)}>
+                {detail && detail.id === selectedId ? (
+                  <NoteDetail
+                    key={detail.id}
+                    node={detail}
+                    author={userNames.get(detail.userId) ?? "Unknown"}
+                    isSoul={detail.id === soulId}
+                    projects={projects}
+                    colorOf={colorOf}
+                    pending={pending}
+                    onOpen={select}
+                    onSave={(content) =>
+                      new Promise((resolve) =>
+                        startTransition(async () => {
+                          const result = await saveNode(accessLevel, detail.id, content);
+                          notify(result);
+                          if (result.node) {
+                            setDetail(result.node);
+                            refresh();
+                          }
+                          resolve(Boolean(result.node));
+                        }),
+                      )
+                    }
+                    onDelete={() =>
                       startTransition(async () => {
-                        const result = await saveNode(accessLevel, detail.id, content);
+                        const result = await deleteNode(accessLevel, detail.id);
+                        notify(result);
+                        if (result.info) {
+                          select(null);
+                          refresh();
+                        }
+                      })
+                    }
+                    onProject={(projectId) =>
+                      startTransition(async () => {
+                        const result = await setNodeProject(accessLevel, detail.id, projectId);
                         notify(result);
                         if (result.node) {
                           setDetail(result.node);
                           refresh();
                         }
-                        resolve(Boolean(result.node));
-                      }),
-                    )
-                  }
-                  onDelete={() =>
-                    startTransition(async () => {
-                      const result = await deleteNode(accessLevel, detail.id);
-                      notify(result);
-                      if (result.info) {
-                        select(null);
-                        refresh();
-                      }
-                    })
-                  }
-                  onProject={(projectId) =>
-                    startTransition(async () => {
-                      const result = await setNodeProject(accessLevel, detail.id, projectId);
-                      notify(result);
-                      if (result.node) {
-                        setDetail(result.node);
-                        refresh();
-                      }
-                    })
-                  }
-                />
-              ) : (
-                <NoteDetailSkeleton onClose={() => select(null)} />
-              ))}
+                      })
+                    }
+                  />
+                ) : (
+                  <NoteDetailSkeleton />
+                )}
+              </NotePanel>
+            )}
           </div>
         </div>
       )}

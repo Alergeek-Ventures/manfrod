@@ -18,9 +18,14 @@ const DETAIL_PANEL_WIDTH = 412;
 
 type Positions = Record<string, [number, number]>;
 
+const isPosition = (value: unknown): value is [number, number] =>
+  Array.isArray(value) && value.length === 2 && value.every((coordinate) => typeof coordinate === "number" && Number.isFinite(coordinate));
+
 function loadPositions(): Positions {
   try {
-    return JSON.parse(localStorage.getItem(POSITIONS_KEY) ?? "{}") as Positions;
+    const parsed: unknown = JSON.parse(localStorage.getItem(POSITIONS_KEY) ?? "{}");
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    return Object.fromEntries(Object.entries(parsed).filter(([, value]) => isPosition(value))) as Positions;
   } catch {
     return {};
   }
@@ -38,7 +43,8 @@ function savePositions(graph: Graph) {
 
 const shortLabel = (text: string) => {
   const line = text.replace(/\s+/g, " ").trim();
-  return line.length > LABEL_LENGTH ? `${line.slice(0, LABEL_LENGTH).trimEnd()}…` : line;
+  const characters = Array.from(line);
+  return characters.length > LABEL_LENGTH ? `${characters.slice(0, LABEL_LENGTH).join("").trimEnd()}…` : line;
 };
 
 const nodeSize = (degree: number) => 2 + Math.sqrt(degree) * 1.6;

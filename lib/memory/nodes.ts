@@ -529,7 +529,7 @@ export async function getGraphData(
   const degrees = new Map<string, number>();
   for (const edge of readableEdges) {
     degrees.set(edge.a, (degrees.get(edge.a) ?? 0) + 1);
-    degrees.set(edge.b, (degrees.get(edge.b) ?? 0) + 1);
+    if (edge.b !== edge.a) degrees.set(edge.b, (degrees.get(edge.b) ?? 0) + 1);
   }
 
   return {
