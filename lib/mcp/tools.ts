@@ -4,6 +4,7 @@ import type { ChannelAudience } from "../memory/access.ts";
 import { callTool, formatResult, type McpAuth, type McpResult } from "./client.ts";
 import { handleTokenFailure } from "./health.ts";
 import {
+  awaitsReconnect,
   cachedTools,
   connectionHeaderAuth,
   ensureValidToken,
@@ -72,7 +73,7 @@ export async function listUserMcpTools(userId: string, audience: ChannelAudience
   for (const provider of await providersForUser(userId)) {
     if (provider.mock || !provider.availability.includes(audience)) continue;
     const connection = await getConnection(userId, provider.id);
-    if (!connection || connection.status === "disconnected") continue;
+    if (!connection || awaitsReconnect(connection)) continue;
     const remote = await withToken(provider, connection, (auth) => cachedTools(userId, provider, auth));
     if (!remote.ok) {
       log.warn(`Tools.Mcp: failed to list tools for ${provider.id}: ${remote.error}`);
