@@ -417,10 +417,6 @@ async function computeGraphStats(scope: SQL | undefined): Promise<GraphStats> {
   };
 }
 
-export function graphStats(userId: string | null = null): Promise<GraphStats> {
-  return computeGraphStats(userId ? eq(nodes.userId, userId) : undefined);
-}
-
 export function graphStatsByAccess(access: string[]): Promise<GraphStats> {
   return computeGraphStats(accessEquals(nodes.access, access));
 }
@@ -482,6 +478,7 @@ export interface GraphNodeData {
   projectId: string | null;
   userId: string;
   insertedAt: string;
+  degree: number;
 }
 
 export interface GraphData {
@@ -501,8 +498,12 @@ export async function getGraphData(
   if (opts.projectId) conditions.push(eq(nodes.projectId, opts.projectId));
   const scope = conditions.length ? and(...conditions) : undefined;
   const scoped = db.select({ id: nodes.id }).from(nodes).where(scope);
+  const readable = db
+    .select({ id: nodes.id })
+    .from(nodes)
+    .where(opts.accessLevel ? accessOverlaps(nodes.access, [opts.accessLevel]) : undefined);
 
-  const [rows, edges] = await Promise.all([
+  const [rows, edges, readableEdges] = await Promise.all([
     db
       .select({
         id: nodes.id,
@@ -519,7 +520,17 @@ export async function getGraphData(
       .select({ a: links.nodeAId, b: links.nodeBId })
       .from(links)
       .where(and(inArray(links.nodeAId, scoped), inArray(links.nodeBId, scoped))),
+    db
+      .select({ a: links.nodeAId, b: links.nodeBId })
+      .from(links)
+      .where(and(inArray(links.nodeAId, readable), inArray(links.nodeBId, readable))),
   ]);
+
+  const degrees = new Map<string, number>();
+  for (const edge of readableEdges) {
+    degrees.set(edge.a, (degrees.get(edge.a) ?? 0) + 1);
+    degrees.set(edge.b, (degrees.get(edge.b) ?? 0) + 1);
+  }
 
   return {
     nodes: rows.map((row) => ({
@@ -529,6 +540,7 @@ export async function getGraphData(
       projectId: row.projectId,
       userId: row.userId,
       insertedAt: row.insertedAt.toISOString(),
+      degree: degrees.get(row.id) ?? 0,
     })),
     edges: edges.map((edge) => [edge.a, edge.b]),
   };

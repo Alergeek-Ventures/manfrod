@@ -1,35 +1,33 @@
 import { describe, expect, it } from "vitest";
-import { matchesQuery, mostFrequent, nodeDegrees, viewStats } from "../../lib/memory/graph-view.ts";
+import { matchesQuery, mostFrequent, viewStats } from "../../lib/memory/graph-view.ts";
 import type { GraphData } from "../../lib/memory/nodes.ts";
 
-const note = (id: string, processed = true) => ({
+const note = (id: string, degree: number, processed = true) => ({
   id,
   preview: id,
   processed,
   projectId: null,
   userId: "u",
   insertedAt: "2026-11-14T10:00:00.000Z",
+  degree,
 });
 
 describe("graph view", () => {
   const graph: GraphData = {
-    nodes: [note("a"), note("b"), note("c"), note("orphan"), note("slipbox", false)],
+    nodes: [note("a", 2), note("b", 1), note("c", 3), note("orphan", 0), note("slipbox", 0, false)],
     edges: [
       ["a", "b"],
       ["a", "c"],
     ],
   };
 
-  it("counts degrees, orphans and weak notes among processed notes only", () => {
-    const degrees = nodeDegrees(graph);
-    expect(degrees.get("a")).toBe(2);
-    expect(degrees.get("slipbox")).toBe(0);
-    expect(viewStats(graph, degrees)).toEqual({
+  it("counts orphans and weak notes among processed notes by their real link count", () => {
+    expect(viewStats(graph)).toEqual({
       total_nodes: 5,
       total_links: 2,
       slipbox_count: 1,
       orphan_count: 1,
-      weakly_connected_count: 2,
+      weakly_connected_count: 1,
       link_to_note_ratio: 0.4,
     });
   });

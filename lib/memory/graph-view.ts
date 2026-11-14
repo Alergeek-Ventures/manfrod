@@ -1,15 +1,6 @@
 import type { GraphData, GraphStats } from "./nodes.ts";
 
-export function nodeDegrees(graph: GraphData): Map<string, number> {
-  const degrees = new Map<string, number>(graph.nodes.map((node) => [node.id, 0]));
-  for (const [a, b] of graph.edges) {
-    degrees.set(a, (degrees.get(a) ?? 0) + 1);
-    degrees.set(b, (degrees.get(b) ?? 0) + 1);
-  }
-  return degrees;
-}
-
-export function viewStats(graph: GraphData, degrees: Map<string, number>): GraphStats {
+export function viewStats(graph: GraphData): GraphStats {
   let slipbox = 0;
   let orphans = 0;
   let weak = 0;
@@ -18,9 +9,8 @@ export function viewStats(graph: GraphData, degrees: Map<string, number>): Graph
       slipbox += 1;
       continue;
     }
-    const degree = degrees.get(node.id) ?? 0;
-    if (degree === 0) orphans += 1;
-    if (degree === 1) weak += 1;
+    if (node.degree === 0) orphans += 1;
+    if (node.degree === 1) weak += 1;
   }
   const total = graph.nodes.length;
   return {

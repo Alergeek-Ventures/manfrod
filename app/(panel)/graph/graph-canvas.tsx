@@ -69,7 +69,6 @@ function hoverDrawer(theme: GraphTheme): NodeHoverDrawingFunction {
 
 export interface GraphCanvasProps {
   graph: GraphData;
-  degrees: Map<string, number>;
   colorOf: (id: string) => string;
   theme: GraphTheme;
   selectedId: string | null;
@@ -77,7 +76,7 @@ export interface GraphCanvasProps {
   onSelect: (id: string | null) => void;
 }
 
-export function GraphCanvas({ graph, degrees, colorOf, theme, selectedId, matches, onSelect }: GraphCanvasProps) {
+export function GraphCanvas({ graph, colorOf, theme, selectedId, matches, onSelect }: GraphCanvasProps) {
   const container = useRef<HTMLDivElement>(null);
   const renderer = useRef<Sigma | null>(null);
   const layout = useRef<{ run: (ms: number) => void; stop: () => void } | null>(null);
@@ -234,7 +233,7 @@ export function GraphCanvas({ graph, degrees, colorOf, theme, selectedId, matche
     const saved = loadPositions();
     let fresh = 0;
     graph.nodes.forEach((node, index) => {
-      const attributes = { size: nodeSize(degrees.get(node.id) ?? 0), label: shortLabel(node.preview) };
+      const attributes = { size: nodeSize(node.degree), label: shortLabel(node.preview) };
       if (graphology.hasNode(node.id)) {
         graphology.mergeNodeAttributes(node.id, attributes);
         return;
@@ -266,7 +265,7 @@ export function GraphCanvas({ graph, degrees, colorOf, theme, selectedId, matche
     refocus();
     if (fresh > 0) layout.current?.run(fresh > graph.nodes.length / 4 ? 4000 : 1200);
     else setSettling(false);
-  }, [graph, degrees, ready]);
+  }, [graph, ready]);
 
   useEffect(() => {
     const sigma = renderer.current;

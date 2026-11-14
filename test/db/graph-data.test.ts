@@ -17,10 +17,11 @@ describe.skipIf(!enabled)("getGraphData", () => {
   beforeAll(async () => {
     const uid = (await findOrCreateBySlackId(`U${randomUUID().slice(0, 10)}`, `D${randomUUID().slice(0, 10)}`)).id;
     level = privateLevel(uid);
-    const make = async (access: string[], content: string) => (await createNode(uid, access, { content, embedding: EMBEDDING })).id;
+    const make = async (access: string[], content: string, processedAt: Date | null = null) =>
+      (await createNode(uid, access, { content, embedding: EMBEDDING, processedAt })).id;
     ids = {
       long: await make([level], "x".repeat(GRAPH_PREVIEW_LENGTH + 500)),
-      short: await make([level], "short private note"),
+      short: await make([level], "short private note", new Date()),
       internal: await make(["internal"], "internal note linked to a private one"),
     };
     await createLink(uid, ids.long, ids.short);
@@ -32,5 +33,17 @@ describe.skipIf(!enabled)("getGraphData", () => {
     expect(graph.nodes.map((node) => node.id).sort()).toEqual([ids.long, ids.short].sort());
     expect(graph.nodes.find((node) => node.id === ids.long)?.preview).toHaveLength(GRAPH_PREVIEW_LENGTH);
     expect(graph.edges.map((edge) => [...edge].sort())).toEqual([[ids.long, ids.short].sort()]);
+    expect(graph.nodes.find((node) => node.id === ids.long)?.degree).toBe(1);
+  });
+
+  it("counts links to readable notes outside the current filter", async () => {
+    const graph = await getGraphData({ accessLevel: level, filter: "processed" });
+    expect(graph.nodes.map((node) => [node.id, node.degree])).toEqual([[ids.short, 1]]);
+    expect(graph.edges).toEqual([]);
+  });
+
+  it("does not count links to notes the reader cannot see", async () => {
+    const graph = await getGraphData({ accessLevel: "internal" });
+    expect(graph.nodes.find((node) => node.id === ids.internal)?.degree).toBe(0);
   });
 });

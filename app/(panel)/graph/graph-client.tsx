@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectVa
 import { Spinner } from "@/components/ui/spinner";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { matchesQuery, mostFrequent, nodeDegrees, viewStats } from "@/lib/memory/graph-view.ts";
+import { matchesQuery, mostFrequent, viewStats } from "@/lib/memory/graph-view.ts";
 import type { GraphData } from "@/lib/memory/nodes.ts";
 import { cn } from "@/lib/utils";
 import { deleteNode, loadGraph, saveNode, searchNodes, selectNode, setNodeProject, type Filter, type SelectedNode } from "./actions.ts";
@@ -126,6 +126,8 @@ export function GraphClient({
   const [semantic, setSemantic] = useState<string[]>([]);
   const [listOpen, setListOpen] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selectedRef = useRef<string | null>(null);
+  selectedRef.current = selectedId;
   const [detail, setDetail] = useState<SelectedNode | null>(null);
   const [loadingGraph, startGraph] = useTransition();
   const [pending, startTransition] = useTransition();
@@ -152,8 +154,7 @@ export function GraphClient({
   const projectNames = useMemo(() => new Map(projects.map((project) => [project.id, project.name])), [projects]);
   const userNames = useMemo(() => new Map(users.map((user) => [user.id, user.label])), [users]);
   const nodesById = useMemo(() => new Map(graph.nodes.map((node) => [node.id, node])), [graph]);
-  const degrees = useMemo(() => nodeDegrees(graph), [graph]);
-  const stats = useMemo(() => viewStats(graph, degrees), [graph, degrees]);
+  const stats = useMemo(() => viewStats(graph), [graph]);
 
   const slotColor = useCallback(
     (key: "project" | "author", value: string | null) => {
@@ -177,17 +178,17 @@ export function GraphClient({
   const legend = useMemo(() => {
     if (colorBy === "status")
       return [
-        { label: "Processed", color: theme.series[0] },
-        { label: "Slipbox", color: theme.series[3] },
+        { key: "processed", label: "Processed", color: theme.series[0] },
+        { key: "slipbox", label: "Slipbox", color: theme.series[3] },
       ];
     const key = colorBy;
     const present = new Set(graph.nodes.map((node) => (key === "project" ? node.projectId : node.userId)));
     const names = key === "project" ? projectNames : userNames;
     const entries = slots[key]
       .filter((id) => present.has(id))
-      .map((id) => ({ label: names.get(id) ?? "Unknown", color: slotColor(key, id) }));
+      .map((id) => ({ key: id, label: names.get(id) ?? "Unknown", color: slotColor(key, id) }));
     const hasOther = [...present].some((id) => id === null || !slots[key].includes(id));
-    if (hasOther) entries.push({ label: key === "project" ? "Other / none" : "Others", color: theme.other });
+    if (hasOther) entries.push({ key: "other", label: key === "project" ? "Other / none" : "Others", color: theme.other });
     return entries;
   }, [colorBy, graph, slots, projectNames, userNames, slotColor, theme]);
 
@@ -198,26 +199,26 @@ export function GraphClient({
         color: colorOf(node.id),
         project: node.projectId ? (projectNames.get(node.projectId) ?? null) : null,
         author: userNames.get(node.userId) ?? "Unknown",
-        degree: degrees.get(node.id) ?? 0,
+        degree: node.degree,
       });
     }
     return map;
-  }, [graph, colorOf, projectNames, userNames, degrees]);
+  }, [graph, colorOf, projectNames, userNames]);
 
   const searching = query.trim().length >= 2;
 
   const visible = useMemo(() => {
     let notes = graph.nodes;
-    if (quick === "orphans") notes = notes.filter((node) => node.processed && (degrees.get(node.id) ?? 0) === 0);
-    if (quick === "weak") notes = notes.filter((node) => node.processed && (degrees.get(node.id) ?? 0) === 1);
+    if (quick === "orphans") notes = notes.filter((node) => node.processed && node.degree === 0);
+    if (quick === "weak") notes = notes.filter((node) => node.processed && node.degree === 1);
     if (searching) {
       const rank = new Map(semantic.map((id, index) => [id, index]));
       notes = notes.filter((node) => rank.has(node.id) || matchesQuery(node.preview, query));
       return [...notes].sort((a, b) => (rank.get(a.id) ?? Infinity) - (rank.get(b.id) ?? Infinity));
     }
-    if (sort === "linked") return [...notes].sort((a, b) => (degrees.get(b.id) ?? 0) - (degrees.get(a.id) ?? 0));
+    if (sort === "linked") return [...notes].sort((a, b) => b.degree - a.degree);
     return notes;
-  }, [graph, quick, searching, semantic, query, sort, degrees]);
+  }, [graph, quick, searching, semantic, query, sort]);
 
   const matches = useMemo(() => (searching || quick ? new Set(visible.map((node) => node.id)) : null), [searching, quick, visible]);
 
@@ -262,7 +263,8 @@ export function GraphClient({
     startGraph(async () => {
       const next = await loadGraph(nextFilter, level, project === "all" ? null : project);
       setGraph(next);
-      if (selectedId && !next.nodes.some((node) => node.id === selectedId)) select(null);
+      const current = selectedRef.current;
+      if (current && !next.nodes.some((node) => node.id === current)) select(null);
     });
 
   const changeAccess = (nextScope: Scope, nextTarget: string | null) => {
@@ -426,15 +428,7 @@ export function GraphClient({
           )}
 
           <div className="relative min-w-0 flex-1">
-            <GraphCanvas
-              graph={graph}
-              degrees={degrees}
-              colorOf={colorOf}
-              theme={theme}
-              selectedId={selectedId}
-              matches={matches}
-              onSelect={select}
-            />
+            <GraphCanvas graph={graph} colorOf={colorOf} theme={theme} selectedId={selectedId} matches={matches} onSelect={select} />
 
             {!listOpen && (
               <Button size="sm" variant="outline" className="absolute top-3 left-3 hidden md:inline-flex" onClick={() => setListOpen(true)}>
@@ -445,7 +439,7 @@ export function GraphClient({
 
             <div className="pointer-events-none absolute bottom-3 left-3 flex max-w-[60%] flex-wrap gap-x-3 gap-y-1 rounded-lg border bg-background/80 px-3 py-2 text-xs shadow-sm backdrop-blur">
               {legend.map((entry) => (
-                <span key={entry.label} className="flex items-center gap-1.5">
+                <span key={entry.key} className="flex items-center gap-1.5">
                   <span className="size-2 rounded-full" style={{ backgroundColor: entry.color }} />
                   {entry.label}
                 </span>
