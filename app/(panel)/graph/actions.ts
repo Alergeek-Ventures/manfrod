@@ -2,14 +2,7 @@
 
 import { eq } from "drizzle-orm";
 import { db, tables } from "@/lib/db/index.ts";
-import {
-  deleteNodeAccessible,
-  getGraphData,
-  getNodeAccessible,
-  getNodeLinksAccessible,
-  graphStats,
-  updateNodeAccessible,
-} from "@/lib/memory/nodes.ts";
+import { deleteNodeAccessible, getGraphData, getNodeAccessible, getNodeLinksAccessible, updateNodeAccessible } from "@/lib/memory/nodes.ts";
 import { search } from "@/lib/memory/search.ts";
 import { embedQuery } from "@/lib/voyage.ts";
 import { requireAdmin } from "@/lib/web/session.ts";
@@ -22,7 +15,9 @@ export interface SelectedNode {
   processed: boolean;
   linkCount: number;
   insertedAt: string;
+  updatedAt: string;
   projectId: string | null;
+  userId: string;
   links: { id: string; preview: string }[];
 }
 
@@ -36,14 +31,16 @@ async function selected(levels: string[], nodeId: string): Promise<SelectedNode 
     processed: node.processedAt !== null,
     linkCount: links.length,
     insertedAt: node.insertedAt.toISOString(),
+    updatedAt: node.updatedAt.toISOString(),
     projectId: node.projectId,
-    links: links.map((link) => ({ id: link.id, preview: (link.content ?? "").slice(0, 50) })),
+    userId: node.userId,
+    links: links.map((link) => ({ id: link.id, preview: (link.content ?? "").slice(0, 160) })),
   };
 }
 
 export async function loadGraph(filter: Filter, accessLevel: string, projectId: string | null) {
   await requireAdmin();
-  return { graph: await getGraphData({ filter, accessLevel, projectId }), stats: await graphStats() };
+  return getGraphData({ filter, accessLevel, projectId });
 }
 
 export async function selectNode(accessLevel: string, nodeId: string) {
