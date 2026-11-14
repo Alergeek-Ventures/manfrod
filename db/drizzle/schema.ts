@@ -66,6 +66,7 @@ export const auditEvents = pgTable("audit_events", {
 	insertedAt: timestamp("inserted_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
 	userId: uuid("user_id"),
 }, (table) => [
+	index("audit_events_memory_context_index").using("btree", sql`(meta ->> 'session_key'::text)`, table.timestamp.asc().nullsLast().op("timestamp_ops")).where(sql`((type)::text = 'memory_context'::text)`),
 	index().using("btree", table.timestamp.asc().nullsLast().op("timestamp_ops")),
 	index().using("btree", table.userId.asc().nullsLast().op("uuid_ops")),
 ]);

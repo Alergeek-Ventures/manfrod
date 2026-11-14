@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { listNodesByDate } from "../../lib/memory/nodes.ts";
+import { recordMemoryContext } from "../../lib/memory/search.ts";
 import { PROJECT_DOC, noteDate, unknownProject, resolveProject, dateBound } from "../lib/notes.ts";
 import { defineManfrodTool } from "../lib/define-tool.ts";
 
@@ -38,6 +39,13 @@ export default defineManfrodTool({
       order,
     });
     if (found.length === 0) return "No notes found in that range.";
+    recordMemoryContext({
+      userId: ctx.userId,
+      sessionKey: ctx.sessionKey,
+      readableLevels: ctx.readableLevels,
+      noteIds: found.map((node) => node.id),
+      kind: "tool",
+    });
     const label = order === "asc" ? "oldest first" : "newest first";
     return `Found ${found.length} notes (${label}):\n${found.map((node) => `- ${noteDate(node)} [${node.id}] ${node.content}`).join("\n")}`;
   },

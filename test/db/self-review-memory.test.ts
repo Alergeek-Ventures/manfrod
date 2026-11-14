@@ -18,21 +18,29 @@ describe.skipIf(!enabled)("memoryShown", () => {
   const feedback = { sessionKey, messageTs: "1731577000.000100" } as MessageFeedback;
   let shownId: string;
   let otherId: string;
+  let lookedUpId: string;
 
   beforeAll(async () => {
     const owner = await findOrCreateBySlackId(`U${randomUUID().slice(0, 10)}`, `D${randomUUID().slice(0, 10)}`);
     shownId = (await createNode(owner.id, ["internal"], { content: "The office moves to Wrocław in March", embedding: EMBEDDING })).id;
+    lookedUpId = (await createNode(owner.id, ["internal"], { content: 'The lease ends in June "2027"', embedding: EMBEDDING })).id;
     otherId = (await createNode(owner.id, [privateLevel(owner.id)], { content: "A private note", embedding: EMBEDDING })).id;
     await broadcast("memory_context", {
       sessionKey,
       source: "memory",
-      meta: { note_ids: [shownId, otherId], readable_levels: ["internal"], at: new Date().toISOString() },
+      meta: { kind: "turn", note_ids: [shownId], readable_levels: ["internal"], at: new Date(Date.now() - 2000).toISOString() },
+    });
+    await broadcast("memory_context", {
+      sessionKey,
+      source: "memory",
+      meta: { kind: "tool", note_ids: [lookedUpId, otherId], readable_levels: ["internal"], at: new Date().toISOString() },
     });
   });
 
   it("returns the notes that were in context, without notes the reader could not see", async () => {
     const shown = await memoryShown(feedback, new Date(Date.now() + 1000));
-    expect(shown).toContain("The office moves to Wrocław in March");
+    expect(shown).toContain('"The office moves to Wrocław in March"');
+    expect(shown).toContain('"The lease ends in June \\"2027\\""');
     expect(shown).not.toContain("A private note");
   });
 

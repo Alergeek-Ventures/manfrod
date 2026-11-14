@@ -283,6 +283,22 @@ export async function search(
   return results;
 }
 
+export function recordMemoryContext(attrs: {
+  userId: string | null;
+  sessionKey: string | null;
+  readableLevels: string[];
+  noteIds: string[];
+  kind: "turn" | "tool";
+}): void {
+  if (!attrs.sessionKey) return;
+  emit("memory_context", {
+    userId: attrs.userId,
+    sessionKey: attrs.sessionKey,
+    source: "memory",
+    meta: { kind: attrs.kind, note_ids: attrs.noteIds, readable_levels: attrs.readableLevels, at: new Date().toISOString() },
+  });
+}
+
 export function fitContext(items: Node[], budget = NOTE_CONTEXT_CHARS): { lines: string[]; notes: Node[] } {
   const lines: string[] = [];
   const notes: Node[] = [];
@@ -316,13 +332,14 @@ export async function getNoteContext(
     soulInPrompt ? getSoulAnchor(userId, readableLevels) : null,
     search(userId, readableLevels, query, { limit: 10, projectId, sessionKey, purpose: "context" }),
   ]);
-  const inSystemPrompt = new Set(anchor ? [anchor.soul.id, ...anchor.linked.map((node) => node.id)] : []);
-  const items = relevant.filter((node) => !inSystemPrompt.has(node.id));
-  emit("memory_context", {
+  const inSystemPrompt = anchor ? [anchor.soul.id, ...anchor.linked.map((node) => node.id)] : [];
+  const items = relevant.filter((node) => !inSystemPrompt.includes(node.id));
+  recordMemoryContext({
     userId,
     sessionKey,
-    source: "memory",
-    meta: { note_ids: fitContext(items).notes.map((node) => node.id), readable_levels: readableLevels, at: new Date().toISOString() },
+    readableLevels,
+    noteIds: [...inSystemPrompt, ...fitContext(items).notes.map((node) => node.id)],
+    kind: "turn",
   });
   return buildContext(items);
 }

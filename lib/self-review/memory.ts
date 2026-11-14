@@ -11,14 +11,31 @@ export const MEMORY_VERDICTS = ["helped", "wrong", "missing", "unrelated"] as co
 export type MemoryVerdict = (typeof MEMORY_VERDICTS)[number];
 
 export interface ContextEvent {
+  kind?: "turn" | "tool";
   note_ids?: string[];
   readable_levels?: string[];
   at?: string;
 }
 
-export function contextBefore(events: ContextEvent[], ratedAt: Date): ContextEvent | null {
-  const earlier = events.filter((event) => event.at && new Date(event.at).getTime() <= ratedAt.getTime());
-  return earlier.sort((a, b) => b.at!.localeCompare(a.at!))[0] ?? null;
+const MAX_NOTES = 30;
+
+export function contextForReply(events: ContextEvent[], ratedAt: Date): ContextEvent[] {
+  const earlier = events
+    .filter((event) => event.at && new Date(event.at).getTime() <= ratedAt.getTime())
+    .sort((a, b) => a.at!.localeCompare(b.at!));
+  const turnStart = earlier.findLastIndex((event) => event.kind !== "tool");
+  return turnStart === -1 ? [] : earlier.slice(turnStart);
+}
+
+async function readable(event: ContextEvent): Promise<Map<string, string>> {
+  const ids = event.note_ids ?? [];
+  const levels = event.readable_levels ?? [];
+  if (ids.length === 0 || levels.length === 0) return new Map();
+  const found = await db
+    .select({ id: nodes.id, content: nodes.content })
+    .from(nodes)
+    .where(and(inArray(nodes.id, ids), accessOverlaps(nodes.access, levels)));
+  return new Map(found.map((node) => [node.id, node.content]));
 }
 
 export async function memoryShown(feedback: MessageFeedback, ratedAt: Date): Promise<string | null> {
@@ -29,28 +46,25 @@ export async function memoryShown(feedback: MessageFeedback, ratedAt: Date): Pro
     .where(
       and(
         eq(auditEvents.type, "memory_context"),
+        sql`${auditEvents.meta}->>'session_key' = ${feedback.sessionKey}`,
         gte(auditEvents.timestamp, new Date(ratedAt.getTime() - EVENT_WINDOW_MS)),
         lte(auditEvents.timestamp, new Date(ratedAt.getTime() + EVENT_WINDOW_MS)),
-        sql`${auditEvents.meta}->>'session_key' = ${feedback.sessionKey}`,
       ),
     );
-  const event = contextBefore(
+  const events = contextForReply(
     rows.map((row) => (row.meta ?? {}) as ContextEvent),
     ratedAt,
   );
-  if (!event) return null;
-  const ids = event.note_ids ?? [];
-  const levels = event.readable_levels ?? [];
-  if (ids.length === 0 || levels.length === 0) return "(no notes)";
-  const found = await db
-    .select({ id: nodes.id, content: nodes.content })
-    .from(nodes)
-    .where(and(inArray(nodes.id, ids), accessOverlaps(nodes.access, levels)));
-  const byId = new Map(found.map((node) => [node.id, node.content]));
-  const lines = ids.map((id) => {
-    const content = byId.get(id);
-    if (content === undefined) return "- (this note is no longer available)";
-    return `- ${content.length > NOTE_CHARS ? `${content.slice(0, NOTE_CHARS)}…` : content}`;
+  if (events.length === 0) return null;
+  const contents = new Map<string, string | null>();
+  for (const event of events) {
+    const found = await readable(event);
+    for (const id of event.note_ids ?? []) if (!contents.get(id)) contents.set(id, found.get(id) ?? null);
+  }
+  if (contents.size === 0) return "(no notes)";
+  const lines = [...contents.values()].slice(0, MAX_NOTES).map((content) => {
+    if (content === null) return "- (this note is no longer available)";
+    return `- ${JSON.stringify(content.length > NOTE_CHARS ? `${content.slice(0, NOTE_CHARS)}…` : content)}`;
   });
   return lines.join("\n");
 }
