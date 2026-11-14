@@ -31,7 +31,17 @@ export function NoteDetailSkeleton() {
   );
 }
 
-export function NotePanel({ children, noteId, onClose }: { children: React.ReactNode; noteId: string; onClose: () => void }) {
+export function NotePanel({
+  children,
+  noteId,
+  fallbackFocus,
+  onClose,
+}: {
+  children: React.ReactNode;
+  noteId: string;
+  fallbackFocus: React.RefObject<HTMLElement | null>;
+  onClose: () => void;
+}) {
   const panel = useRef<HTMLDivElement>(null);
   const titleId = useId();
 
@@ -39,7 +49,9 @@ export function NotePanel({ children, noteId, onClose }: { children: React.React
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     panel.current?.focus();
     return () => {
+      const fallback = fallbackFocus.current;
       if (previous?.isConnected) previous.focus();
+      else if (fallback?.offsetParent) fallback.focus();
     };
   }, []);
 

@@ -127,6 +127,8 @@ export function GraphClient({
   const [semantic, setSemantic] = useState<string[]>([]);
   const [listOpen, setListOpen] = useState(true);
   const [mobileListOpen, setMobileListOpen] = useState(false);
+  const mobileNotesButton = useRef<HTMLButtonElement>(null);
+  const pickedFromMobileList = useRef(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selectedRef = useRef<string | null>(null);
   selectedRef.current = selectedId;
@@ -282,6 +284,7 @@ export function GraphClient({
 
   const openFromMobileList = useCallback(
     (id: string) => {
+      pickedFromMobileList.current = true;
       setMobileListOpen(false);
       select(id);
     },
@@ -452,8 +455,18 @@ export function GraphClient({
             </aside>
           )}
 
-          <Sheet open={mobileListOpen} onOpenChange={setMobileListOpen}>
-            <SheetContent side="left" className="flex w-full flex-col gap-0 p-0 sm:max-w-sm">
+          <Sheet
+            open={mobileListOpen}
+            onOpenChange={(open) => {
+              if (open) pickedFromMobileList.current = false;
+              setMobileListOpen(open);
+            }}
+          >
+            <SheetContent
+              side="left"
+              finalFocus={() => !pickedFromMobileList.current}
+              className="flex w-full flex-col gap-0 p-0 sm:max-w-sm"
+            >
               <SheetHeader className="border-b">
                 <SheetTitle>Notes</SheetTitle>
                 <SheetDescription className="sr-only">Notes visible with the current filters</SheetDescription>
@@ -468,7 +481,16 @@ export function GraphClient({
           <div className="relative min-w-0 flex-1">
             <GraphCanvas graph={graph} colorOf={colorOf} theme={theme} selectedId={selectedId} matches={matches} onSelect={select} />
 
-            <Button size="sm" variant="outline" className="absolute top-3 left-3 md:hidden" onClick={() => setMobileListOpen(true)}>
+            <Button
+              ref={mobileNotesButton}
+              size="sm"
+              variant="outline"
+              className="absolute top-3 left-3 md:hidden"
+              onClick={() => {
+                pickedFromMobileList.current = false;
+                setMobileListOpen(true);
+              }}
+            >
               <PanelLeftOpenIcon data-icon="inline-start" />
               Notes
             </Button>
@@ -489,7 +511,7 @@ export function GraphClient({
             </div>
 
             {selectedId && (
-              <NotePanel noteId={selectedId} onClose={() => select(null)}>
+              <NotePanel noteId={selectedId} fallbackFocus={mobileNotesButton} onClose={() => select(null)}>
                 {detail && detail.id === selectedId ? (
                   <NoteDetail
                     key={detail.id}
