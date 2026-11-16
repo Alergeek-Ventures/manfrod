@@ -189,6 +189,33 @@ export async function getPull(number: number) {
   );
 }
 
+export interface OpenPull {
+  number: number;
+  title: string;
+  url: string;
+  branch: string;
+  body: string;
+  draft: boolean;
+}
+
+export async function openPulls(): Promise<OpenPull[]> {
+  const pulls = await repo<
+    { number: number; title: string; html_url: string; head: { ref: string }; body: string | null; draft: boolean }[]
+  >("GET", "/pulls?state=open&per_page=100&sort=updated&direction=desc");
+  return (pulls ?? []).map((pull) => ({
+    number: pull.number,
+    title: pull.title,
+    url: pull.html_url,
+    branch: pull.head.ref,
+    body: pull.body ?? "",
+    draft: pull.draft,
+  }));
+}
+
+export async function updatePull(number: number, title: string, body: string): Promise<void> {
+  await required("PATCH", `/pulls/${number}`, { title, body });
+}
+
 export async function markReadyForReview(nodeId: string): Promise<void> {
   const response = await call(await installationToken(), "POST", "/graphql", {
     query: "mutation($id: ID!) { markPullRequestReadyForReview(input: { pullRequestId: $id }) { clientMutationId } }",

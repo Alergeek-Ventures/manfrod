@@ -8,10 +8,11 @@ import {
   createDraftPull,
   createTree,
   moveBranch,
+  updatePull,
   type TreeEntry,
 } from "../../../../lib/github.ts";
 import { matches as secretRule } from "../../../../lib/security/gitleaks.ts";
-import { recordPull } from "../../../../lib/self-modify-pulls.ts";
+import { PROPOSAL_FOOTER, recordPull } from "../../../../lib/self-modify-pulls.ts";
 import { MAX_OPEN_PULLS } from "../../../../lib/self-review/rules.ts";
 import { attachCapabilityPull } from "../../../../lib/tasks/capabilities.ts";
 import { attachPull, countActive } from "../../../../lib/self-review/store.ts";
@@ -35,7 +36,7 @@ const MODES = new Set(["100644", "100755"]);
 export default defineManfrodTool({
   keepSecretPlaceholders: true,
   description:
-    "Publish every change in the checkout as one commit on a GitHub pull request against main. The first call opens it as a draft; later calls add a commit to it. Validates allowed paths, file count, size and secrets first, and lists what it rejected.",
+    "Publish every change in the checkout as one commit on a GitHub pull request against main. The first call opens it as a draft; later calls, and calls after checking out an open pull request, add a commit to it and replace its title and description, so always describe the whole pull request. Validates allowed paths, file count, size and secrets first, and lists what it rejected.",
   inputSchema: z.object({
     title: z
       .string()
@@ -46,7 +47,7 @@ export default defineManfrodTool({
       .string()
       .min(1)
       .max(4000)
-      .describe("Minimal English pull request description: a sentence or two per change, no headings"),
+      .describe("Minimal English description of the whole pull request: a sentence or two per change, no headings"),
     commit_message: z.string().min(1).max(200).describe("Commit message for this round of changes"),
   }),
   label: { start: ({ title }) => `Publishing: ${title}`, complete: (_input, output) => output.split("\n")[0] },
@@ -105,19 +106,21 @@ export default defineManfrodTool({
       branch = `${BRANCH_PREFIX}${randomBytes(4).toString("hex")}`;
       await createBranch(branch, commit);
     }
+    const origin =
+      requester.kind === "self_review"
+        ? " after its self-review of negative ratings"
+        : requester.name
+          ? ` at the request of ${requester.name}`
+          : "";
+    const body = `${description}${PROPOSAL_FOOTER}${origin}.`;
     if (!pullNumber || !pullUrl) {
-      const origin =
-        requester.kind === "self_review"
-          ? " after its self-review of negative ratings"
-          : requester.name
-            ? ` at the request of ${requester.name}`
-            : "";
-      const footer = `\n\n---\nProposed by Manfrod's self-modify agent${origin}.`;
-      ({ number: pullNumber, url: pullUrl } = await createDraftPull(branch, TARGET_BRANCH, title, description + footer));
-      await recordPull(pullNumber, branch, runtime.session.id);
+      ({ number: pullNumber, url: pullUrl } = await createDraftPull(branch, TARGET_BRANCH, title, body));
       if (requester.kind === "self_review") await attachPull(requester.finding.id, pullNumber, pullUrl);
-      if (ctx.capabilityRequestId) await attachCapabilityPull(ctx.capabilityRequestId, pullNumber, pullUrl);
+    } else {
+      await updatePull(pullNumber, title, body);
     }
+    await recordPull(pullNumber, branch, runtime.session.id);
+    if (ctx.capabilityRequestId) await attachCapabilityPull(ctx.capabilityRequestId, pullNumber, pullUrl);
     proposal.update((current) => ({ ...current, branch, headSha: commit, pullNumber, pullUrl }));
 
     const listed = changes.map((change) => `- ${change.status} ${change.path}`).join("\n");
