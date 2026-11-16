@@ -8,6 +8,7 @@ export const PRIMARY_MODEL = "openai/gpt-5.6-luna";
 export const FAST_MODEL = "anthropic/claude-haiku-5.5";
 export const BRAIN_MODEL = "anthropic/claude-opus-5.5";
 export const AGENT_MODEL = "anthropic/claude-sonnet-5.5";
+export const REVIEW_MODEL = "openai/gpt-6.1-terra";
 export const MEMORY_MODEL = PRIMARY_MODEL;
 
 interface ChainEntry {

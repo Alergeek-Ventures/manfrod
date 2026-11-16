@@ -149,10 +149,14 @@ function connect(sandbox: Sandbox): SandboxConnection<Extensions> {
   };
 }
 
+export const sandboxOwner = (session: { id: string; parent?: { sessionId: string } }, shareParent: boolean) =>
+  shareParent && session.parent ? session.parent.sessionId : session.id;
+
 export const E2BSandbox = defineSandboxProvider({
   name: PROVIDER,
-  environment(options: { template?: string; timeoutMs?: number; envs?: Record<string, string> }) {
+  environment(options: { template?: string; timeoutMs?: number; envs?: Record<string, string>; shareParent?: boolean }) {
     const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    const owner = (session: { id: string; parent?: { sessionId: string } }) => sandboxOwner(session, options.shareParent === true);
 
     const find = async (key: string) => {
       const found = await Sandbox.list({ query: { metadata: { [METADATA_KEY]: key } } }).nextItems();
@@ -192,7 +196,7 @@ export const E2BSandbox = defineSandboxProvider({
       },
 
       async start(ctx, open: { networkPolicy?: SandboxNetworkPolicy } | undefined, artifact) {
-        const key = sandboxKey(ctx.session.id);
+        const key = sandboxKey(owner(ctx.session));
         const [existing] = await find(key);
         const sandbox = existing
           ? await Sandbox.connect(existing.sandboxId, { timeoutMs })
@@ -210,6 +214,7 @@ export const E2BSandbox = defineSandboxProvider({
       },
 
       async onSessionEnd(ctx, state) {
+        if (owner(ctx.session) !== ctx.session.id) return;
         const ids = new Set((await find(sandboxKey(ctx.session.id))).map((sandbox) => sandbox.sandboxId));
         if (state) ids.add(state.sandboxId);
         await Promise.all([...ids].map((id) => Sandbox.kill(id)));

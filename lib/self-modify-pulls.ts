@@ -1,10 +1,10 @@
-import { eq } from "drizzle-orm";
+import { and, count, desc, eq } from "drizzle-orm";
 import { db, tables } from "./db/index.ts";
 import { deleteBranch, getPull, openPulls, type OpenPull } from "./github.ts";
 import { logger } from "./log.ts";
 import { killSessionSandboxes, killStaleSandboxes } from "./sandboxes.ts";
 
-const { selfModifyPulls } = tables;
+const { selfModifyPulls, selfModifyReviews } = tables;
 const STALE_SANDBOX_DAYS = 2;
 const SUMMARY_CHARS = 400;
 
@@ -43,6 +43,27 @@ export function capabilityGate(pulls: OpenPull[], extendPull: number | undefined
     ok: false,
     message: `Nothing was posted yet. These self-modify pull requests are still open:\n${describeProposals(pulls)}\n\nIf one of them already adds what you need, don't request it again: tell the person, with its link, that it works once it is merged and deployed. If one covers part of it, call request-capability again with extend_pull set to its number. If none is about this, call it again with checked_open_pulls set to true.`,
   };
+}
+
+export type ReviewVerdict = "approve" | "request_changes";
+
+export async function recordReview(sessionId: string, diffHash: string, verdict: ReviewVerdict, findings: string): Promise<void> {
+  await db.insert(selfModifyReviews).values({ sessionId, diffHash, verdict, findings });
+}
+
+export async function latestReview(sessionId: string, diffHash: string) {
+  const [row] = await db
+    .select()
+    .from(selfModifyReviews)
+    .where(and(eq(selfModifyReviews.sessionId, sessionId), eq(selfModifyReviews.diffHash, diffHash)))
+    .orderBy(desc(selfModifyReviews.insertedAt))
+    .limit(1);
+  return row ?? null;
+}
+
+export async function reviewRounds(sessionId: string): Promise<number> {
+  const [row] = await db.select({ rounds: count() }).from(selfModifyReviews).where(eq(selfModifyReviews.sessionId, sessionId));
+  return Number(row?.rounds ?? 0);
 }
 
 export async function recordPull(pullNumber: number, branch: string, sessionId: string): Promise<void> {

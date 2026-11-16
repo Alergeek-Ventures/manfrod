@@ -198,6 +198,11 @@ export async function sh(sandbox: SandboxSession, command: string, abortSignal?:
   return result.stdout;
 }
 
+export async function diffFingerprint(sandbox: SandboxSession): Promise<string> {
+  const out = await sh(sandbox, `git add -A && git diff --cached --binary ${BASE_TAG} | sha256sum`);
+  return out.trim().split(/\s+/)[0];
+}
+
 export async function localChanges(sandbox: SandboxSession): Promise<Change[]> {
   const raw = await sh(sandbox, `git add -A && git diff --cached --raw --no-renames -z ${BASE_TAG}`);
   const fields = raw.split("\0").filter((field) => field !== "");
