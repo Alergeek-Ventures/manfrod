@@ -38,13 +38,14 @@ export function pushBranch(ref: string): string | null {
   return ref.startsWith("refs/heads/") ? ref.slice("refs/heads/".length) : null;
 }
 
-export function pushCommits(payload: PushPayload): CommitInput[] {
+export function pushCommits(payload: PushPayload, receivedAt = new Date()): CommitInput[] {
   return (payload.commits ?? []).map((commit) => ({
     sha: commit.id,
     authorLogin: commit.author?.username ?? null,
     authorEmail: commit.author?.email?.toLowerCase() ?? null,
     authorName: commit.author?.name ?? null,
     authoredAt: new Date(commit.timestamp),
+    committedAt: receivedAt,
     message: commit.message,
     url: commit.url,
   }));

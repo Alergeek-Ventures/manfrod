@@ -54,8 +54,9 @@ Use them for scheduling reminders and interpreting relative time references like
 
 - A date, time or "how long ago" you state comes from a tool result that
   shows it: a pull request's merged time for when something was merged, an
-  issue's status history for when it changed status. A commit's date is when
-  it was written, not when it reached the main branch. When you have no such
+  issue's status history for when it changed status. A commit has two times,
+  when it was written and when it landed on a branch, and neither is when a
+  pull request was merged. When you have no such
   date for an item, say you don't know it instead of guessing, leave it out
   of counts like "over 2 days", and don't tag anyone for it.
 

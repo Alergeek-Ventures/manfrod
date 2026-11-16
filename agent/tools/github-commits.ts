@@ -32,7 +32,7 @@ async function repositoryIds(scope: GithubScope, repository: string | undefined,
 
 export default defineManfrodTool({
   description:
-    "List recent GitHub commits from every branch (default: the last 7 days). Without a repository it covers this channel's project repositories when it has any, otherwise (and for author \"me\") every repository in DMs and internal channels; client channels only see the project's repositories. One line per commit: time (Europe/Warsaw), repository, branches, short sha, first line of the message, author.",
+    "List recent GitHub commits from every branch (default: the last 7 days). Without a repository it covers this channel's project repositories when it has any, otherwise (and for author \"me\") every repository in DMs and internal channels; client channels only see the project's repositories. One line per commit: when it landed on its branch (Europe/Warsaw), repository, branches, short sha, first line of the message, author, and when it was written if that was a day or more earlier. A commit that landed on a branch is not necessarily merged; for when a change was merged use the pull request's merged time from github-pulls.",
   inputSchema: z.object({
     repository: z
       .string()

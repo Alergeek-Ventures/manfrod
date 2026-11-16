@@ -14,7 +14,7 @@ import {
   searchIssues,
   updateIssue,
 } from "../../lib/linear/calls.ts";
-import { linearProjectForChannel, linearRequester } from "../lib/linear.ts";
+import { linearProjectForChannel, linearProjectForPerson, linearRequester } from "../lib/linear.ts";
 import { toolCtx } from "../../lib/agent/context.ts";
 
 const issueFields = {
@@ -33,6 +33,14 @@ const issueFields = {
   estimate: z.number().int().min(0).optional().describe("Estimate in the team's points scale"),
   cycle: z.string().optional().describe('Cycle number, or "current" / "next"'),
 };
+
+const listIssuesFields = {
+  limit: z.number().int().min(1).max(250).optional().describe("Max issues to return (default 25, up to 250)"),
+  state: z.string().optional().describe('Only issues in this workflow state, e.g. "Merged"'),
+};
+const LIST_ISSUES =
+  "Lists issues of this project's connected Linear team, most recently updated first, each with its state and when it entered that state. Pass state to get only issues in one state, e.g. everything in Merged.";
+const projectChannel = z.string().describe("The Slack channel of the project whose Linear team to read, e.g. #doublepass");
 
 const createIssueInput = z.object({ title: z.string().describe("Issue title"), ...issueFields });
 
@@ -69,10 +77,12 @@ export default defineDynamic({
       const linear = projectId ? await getConnection(projectId) : null;
       if (projectId && linear) {
         entries["linear-list-issues"] = defineTool({
-          description: "Lists recent issues for this project's connected Linear team.",
-          inputSchema: z.object({ limit: z.number().int().optional().describe("Max issues to return (default 25)") }),
-          execute: (input: { limit?: number }) =>
-            runWithSecrets({ toolName: "linear-list-issues", userId, sessionKey }, input, ({ limit }) => listIssues(projectId, limit)),
+          description: LIST_ISSUES,
+          inputSchema: z.object(listIssuesFields),
+          execute: (input: { limit?: number; state?: string }) =>
+            runWithSecrets({ toolName: "linear-list-issues", userId, sessionKey }, input, ({ limit, state }) =>
+              listIssues(projectId, limit, state),
+            ),
         });
         entries["linear-get-issue"] = defineTool({
           description: 'Gets a single Linear issue by its identifier (e.g. "ENG-123").',
@@ -104,6 +114,42 @@ export default defineDynamic({
           inputSchema: z.object({ limit: z.number().int().optional().describe("Max cycles to return (default 10)") }),
           execute: (input: { limit?: number }) =>
             runWithSecrets({ toolName: "linear-list-cycles", userId, sessionKey }, input, ({ limit }) => getCycles(projectId, limit)),
+        });
+      }
+
+      if (!projectId && msgCtx.channel?.startsWith("D")) {
+        const inProject = async <T>(channel: string, run: (id: string) => Promise<T>) => {
+          const found = await linearProjectForPerson(channel, userId);
+          return found.ok ? run(found.projectId) : found.message;
+        };
+        entries["linear-list-issues"] = defineTool({
+          description: `${LIST_ISSUES} In a direct message, name the project's channel.`,
+          inputSchema: z.object({ channel: projectChannel, ...listIssuesFields }),
+          execute: (input: { channel: string; limit?: number; state?: string }) =>
+            runWithSecrets({ toolName: "linear-list-issues", userId, sessionKey }, input, ({ channel, limit, state }) =>
+              inProject(channel, (id) => listIssues(id, limit, state)),
+            ),
+        });
+        entries["linear-get-issue"] = defineTool({
+          description:
+            'Gets a single Linear issue by its identifier (e.g. "ENG-123") from the Linear team of the project whose channel you name.',
+          inputSchema: z.object({ channel: projectChannel, identifier: z.string().describe("Issue identifier, e.g. ENG-123") }),
+          execute: (input: { channel: string; identifier: string }) =>
+            runWithSecrets({ toolName: "linear-get-issue", userId, sessionKey }, input, ({ channel, identifier }) =>
+              inProject(channel, (id) => getIssue(id, identifier)),
+            ),
+        });
+        entries["linear-search-issues"] = defineTool({
+          description: "Full-text searches the issues of the Linear team of the project whose channel you name.",
+          inputSchema: z.object({
+            channel: projectChannel,
+            term: z.string().describe("Search term"),
+            limit: z.number().int().optional().describe("Max results to return (default 25)"),
+          }),
+          execute: (input: { channel: string; term: string; limit?: number }) =>
+            runWithSecrets({ toolName: "linear-search-issues", userId, sessionKey }, input, ({ channel, term, limit }) =>
+              inProject(channel, (id) => searchIssues(id, term, limit)),
+            ),
         });
       }
 

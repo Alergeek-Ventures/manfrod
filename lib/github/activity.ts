@@ -1,7 +1,7 @@
 import { logger } from "../log.ts";
 import { github, repositoryReadToken } from "./api.ts";
 import { listProjectRepositories } from "./projects.ts";
-import { listCommits, type StoredCommit } from "./store.ts";
+import { landedAt, listCommits, type StoredCommit } from "./store.ts";
 
 const log = logger("Github.Activity");
 const MESSAGES_PER_REPOSITORY = 8;
@@ -34,7 +34,7 @@ export function describeWeekCommits(commits: StoredCommit[]): string {
   for (const commit of commits) byRepository.set(commit.repository, [...(byRepository.get(commit.repository) ?? []), commit]);
   return [...byRepository.entries()]
     .map(([repository, list]) => {
-      const sorted = [...list].sort((a, b) => a.authoredAt.getTime() - b.authoredAt.getTime());
+      const sorted = [...list].sort((a, b) => landedAt(a).getTime() - landedAt(b).getTime());
       const authors = new Map<string, number>();
       for (const commit of sorted) authors.set(authorOf(commit), (authors.get(authorOf(commit)) ?? 0) + 1);
       const byAuthor = [...authors.entries()]
@@ -45,7 +45,7 @@ export function describeWeekCommits(commits: StoredCommit[]): string {
       const messages = sorted
         .filter((commit) => !commit.message.startsWith("Merge "))
         .slice(-MESSAGES_PER_REPOSITORY)
-        .map((commit) => `  - ${day(commit.authoredAt)} ${authorOf(commit)}: ${commit.message.split("\n")[0].slice(0, 120)}`);
+        .map((commit) => `  - ${day(landedAt(commit))} ${authorOf(commit)}: ${commit.message.split("\n")[0].slice(0, 120)}`);
       return [`- ${repository}: ${sorted.length} commit(s) by ${byAuthor}${branches ? ` on ${branches}` : ""}`, ...messages].join("\n");
     })
     .join("\n");

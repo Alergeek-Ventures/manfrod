@@ -180,7 +180,7 @@ describe("GitHub formatting", () => {
       },
     ];
     expect(formatCommits(commits, 5)).toBe(
-      "2 commits (times Europe/Warsaw):\n2026-11-13 10:05 acme/app [main, feat/x] abcdef1 fix: thing (ann)\n2026-11-12 10:00 acme/web 1234567 chore (bob@example.com)",
+      "2 commits (times Europe/Warsaw, when each commit landed on its branch):\n2026-11-13 10:05 acme/app [main, feat/x] abcdef1 fix: thing (ann)\n2026-11-12 10:00 acme/web 1234567 chore (bob@example.com)",
     );
     expect(formatCommits(commits, 1)).toContain("Newest 1 commits");
     expect(formatCommits(commits, 1)).toContain("more commits match");
