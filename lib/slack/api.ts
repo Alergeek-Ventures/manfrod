@@ -294,6 +294,27 @@ export async function getChannelCanvasId(channel: string): Promise<string | null
   return info.properties?.canvas?.file_id ?? null;
 }
 
+export function createChannelCanvas(channel: string, markdown: string) {
+  return post("conversations.canvases.create", { channel_id: channel, document_content: { type: "markdown", markdown } });
+}
+
+export function createCanvas(markdown: string, title?: string, channel?: string) {
+  return post("canvases.create", {
+    document_content: { type: "markdown", markdown },
+    ...(title ? { title } : {}),
+    ...(channel ? { channel_id: channel } : {}),
+  });
+}
+
+export function editCanvas(canvasId: string, change: SlackBody) {
+  return post("canvases.edit", { canvas_id: canvasId, changes: [change] });
+}
+
+export async function findCanvasSections(canvasId: string, containsText: string): Promise<string[] | null> {
+  const result = await post("canvases.sections.lookup", { canvas_id: canvasId, criteria: { contains_text: containsText } });
+  return result.ok ? ((result.body.sections ?? []) as SlackBody[]).map((section) => String(section.id)) : null;
+}
+
 export async function getFileInfo(fileId: string): Promise<SlackBody | null> {
   const result = await get("files.info", { file: fileId });
   return result.ok ? (result.body.file as SlackBody) : null;

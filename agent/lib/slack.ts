@@ -69,3 +69,18 @@ export async function readCanvas(fileId: string): Promise<string> {
   const content = await downloadFile(info.url_private);
   return content ?? "Nie udało się odczytać canvasu: :download_failed";
 }
+
+export function canvasChannels(file: SlackBody): string[] {
+  const ids = [
+    ...(file.channels ?? []),
+    ...(file.groups ?? []),
+    ...Object.keys(file.shares?.public ?? {}),
+    ...Object.keys(file.shares?.private ?? {}),
+  ];
+  return [...new Set(ids.map(String))];
+}
+
+export async function canvasLink(fileId: string): Promise<string | null> {
+  const info = await getFileInfo(fileId);
+  return typeof info?.permalink === "string" ? info.permalink : null;
+}
