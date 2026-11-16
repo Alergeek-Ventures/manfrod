@@ -100,6 +100,19 @@ export function pathViolation(path: string): string | null {
   return null;
 }
 
+const NEW_TOOL = /^agent\/tools\/([a-z0-9-]+)\.ts$/;
+
+export function missingToolTests(changes: Pick<Change, "path" | "status">[], contents: Map<string, Uint8Array>): string[] {
+  const tests = changes
+    .filter((change) => change.status !== "D" && change.path.startsWith("test/"))
+    .map((change) => new TextDecoder().decode(contents.get(change.path) ?? new Uint8Array()));
+  return changes.flatMap((change) => {
+    const name = change.status === "A" ? NEW_TOOL.exec(change.path)?.[1] : undefined;
+    if (!name || tests.some((text) => text.includes(`tools/${name}`))) return [];
+    return [`${change.path}: a new tool needs a test under test/ that imports it and covers its access rules`];
+  });
+}
+
 export async function sh(sandbox: SandboxSession, command: string, abortSignal?: AbortSignal) {
   const result = await sandbox.run({ command, workingDirectory: REPO_DIR, abortSignal });
   if (result.exitCode !== 0)

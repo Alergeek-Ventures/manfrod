@@ -29,6 +29,14 @@ Manfrod is a Slack AI agent with a memory graph, written in TypeScript on eve (a
 - `agent/skills/<name>/SKILL.md` are native eve skills the model loads with `eve__skill`. Prompts run in the background by Inngest (cron skills, Firmowid check-ins) live in `agent/routines/<name>.md`, loaded by `lib/routines.ts`; cron routines declare `cron:` in the frontmatter
 - `app/` is the Next.js App Router. Prefer server components and server actions; client components only where interactivity needs them, and never import values from a `"use client"` module into a server component
 
+## Writing tools
+
+- A tool that acts for a person (posts, edits, reads private data) checks that person's access on every path that reaches the data, through one shared helper: a channel name, a channel ID, a file or canvas ID and a DM must all end up in the same membership check. Refuse when access can't be established
+- Don't add irreversible operations (delete, overwrite, close, send to many people) that nobody asked for; when one is asked for, say so in the tool description
+- Every new tool in `agent/tools/` gets a unit test that covers its access rules and refusals, not only the happy path or the API call shape
+- Name new Slack scopes, environment variables and admin settings a change needs in the pull request; the repository has no Slack manifest
+- Follow the closest existing tool for the same service and keep its rules (e.g. `post-slack-message` for anything that writes to Slack)
+
 ## eve
 
 - Tool, hook, channel and instruction files are discovered by path; one export per file
