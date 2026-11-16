@@ -1,6 +1,7 @@
 import * as client from "./client.ts";
 import type { LResult } from "./client.ts";
 import { authorization, getConnection, type LinearConnection } from "./index.ts";
+import { formatLocal } from "../time.ts";
 import { type IssueFields, resolveIssueFields } from "./resolve.ts";
 
 export interface Requester {
@@ -9,8 +10,23 @@ export interface Requester {
   image: string | null;
 }
 
-function formatIssue(issue: any): string {
-  return `${issue.identifier} [${issue.state?.name ?? "?"}] ${issue.title} (${issue.assignee?.name ?? "unassigned"}) — ${issue.url}`;
+export function stateSince(issue: {
+  state?: { name: string } | null;
+  history?: { nodes: { createdAt: string; toState?: { name: string } | null }[] };
+}): string | null {
+  const name = issue.state?.name;
+  if (!name) return null;
+  const entered = (issue.history?.nodes ?? []).filter((entry) => entry.toState?.name === name).map((entry) => entry.createdAt);
+  return entered.sort().at(-1) ?? null;
+}
+
+function stateLabel(issue: any): string {
+  const since = stateSince(issue);
+  return `${issue.state?.name ?? "?"}${since ? ` since ${formatLocal(new Date(since))}` : ""}`;
+}
+
+export function formatIssue(issue: any): string {
+  return `${issue.identifier} [${stateLabel(issue)}] ${issue.title} (${issue.assignee?.name ?? "unassigned"}) — ${issue.url}`;
 }
 
 function formatIssues(issues: any[]): string {
@@ -46,9 +62,9 @@ function withAppConnection(projectId: string, run: (auth: string, teamId: string
 const onBehalfOf = (requester: Requester | null) =>
   requester?.name ? { createAsUser: requester.name, ...(requester.image ? { displayIconUrl: requester.image } : {}) } : {};
 
-export const listIssues = (projectId: string, limit?: number) =>
+export const listIssues = (projectId: string, limit?: number, state?: string) =>
   withConnection(projectId, async (auth, teamId) => {
-    const result = await client.listIssues(auth, teamId, limit ?? 25);
+    const result = await client.listIssues(auth, teamId, limit ?? 25, state?.trim() || undefined);
     return result.ok ? formatIssues(result.value) : `Nie udało się pobrać issues z Linear: ${result.error}`;
   });
 
@@ -67,7 +83,8 @@ export const getIssue = (projectId: string, identifier: string) =>
     if (!result.ok) return `Nie udało się pobrać issue z Linear: ${result.error}`;
     const issue = result.value;
     if (!issue) return `Nie znaleziono issue ${identifier}.`;
-    return `${issue.identifier} [${issue.state?.name ?? "?"}] ${issue.title} (${issue.assignee?.name ?? "unassigned"})\n${issue.description ?? "(no description)"}\n${issue.url}`;
+    const links = ((issue.attachments?.nodes ?? []) as { url: string }[]).map((attachment) => attachment.url);
+    return `${issue.identifier} [${stateLabel(issue)}] ${issue.title} (${issue.assignee?.name ?? "unassigned"})\n${issue.description ?? "(no description)"}\n${issue.url}${links.length > 0 ? `\nLinked: ${links.join(", ")}` : ""}`;
   });
 
 export const searchIssues = (projectId: string, term: string, limit?: number) =>

@@ -29,6 +29,9 @@ export async function query(authorization: string, document: string, variables: 
 }
 
 const ISSUE_FIELDS = "identifier title state { name } assignee { name } url";
+const HISTORY_FIELDS = "history(first: 20, orderBy: createdAt) { nodes { createdAt toState { name } } }";
+const PAGE_SIZE = 50;
+export const MAX_LISTED_ISSUES = 250;
 
 export interface Team {
   id: string;
@@ -92,13 +95,32 @@ export async function teamContext(authorization: string, teamId: string): Promis
   };
 }
 
-export async function listIssues(authorization: string, teamId: string, limit = 25): Promise<LResult<any[]>> {
-  const result = await query(
-    authorization,
-    `query($teamId: ID!, $limit: Int!) { issues(filter: { team: { id: { eq: $teamId } } }, first: $limit, orderBy: updatedAt) { nodes { ${ISSUE_FIELDS} } } }`,
-    { teamId, limit },
-  );
-  return result.ok ? { ok: true, value: result.value.issues.nodes } : result;
+export async function listIssues(authorization: string, teamId: string, limit = 25, state?: string): Promise<LResult<any[]>> {
+  const wanted = Math.min(Math.max(limit, 1), MAX_LISTED_ISSUES);
+  const filter = state
+    ? "{ team: { id: { eq: $teamId } }, state: { name: { eqIgnoreCase: $state } } }"
+    : "{ team: { id: { eq: $teamId } } }";
+  const document = `query($teamId: ID!, $first: Int!, $after: String${state ? ", $state: String!" : ""}) {
+    issues(filter: ${filter}, first: $first, after: $after, orderBy: updatedAt) {
+      nodes { ${ISSUE_FIELDS} updatedAt ${HISTORY_FIELDS} }
+      pageInfo { hasNextPage endCursor }
+    }
+  }`;
+  const issues: any[] = [];
+  let after: string | null = null;
+  while (issues.length < wanted) {
+    const result = await query(authorization, document, {
+      teamId,
+      first: Math.min(PAGE_SIZE, wanted - issues.length),
+      after,
+      ...(state ? { state } : {}),
+    });
+    if (!result.ok) return result;
+    issues.push(...result.value.issues.nodes);
+    if (!result.value.issues.pageInfo.hasNextPage) break;
+    after = result.value.issues.pageInfo.endCursor;
+  }
+  return { ok: true, value: issues };
 }
 
 export interface ActivityIssue {
@@ -133,7 +155,7 @@ export async function getIssue(authorization: string, teamId: string, identifier
   if (Number.isNaN(number)) return { ok: true, value: null };
   const result = await query(
     authorization,
-    `query($teamId: ID!, $identifier: Float!) { issues(filter: { team: { id: { eq: $teamId } }, number: { eq: $identifier } }, first: 1) { nodes { id identifier title description state { name } assignee { name } url } } }`,
+    `query($teamId: ID!, $identifier: Float!) { issues(filter: { team: { id: { eq: $teamId } }, number: { eq: $identifier } }, first: 1) { nodes { id identifier title description state { name } assignee { name } url updatedAt ${HISTORY_FIELDS} attachments { nodes { url } } } } }`,
     { teamId, identifier: number },
   );
   return result.ok ? { ok: true, value: result.value.issues.nodes[0] ?? null } : result;

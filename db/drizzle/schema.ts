@@ -796,6 +796,7 @@ export const githubCommits = pgTable("github_commits", {
 	message: text().notNull(),
 	url: text().notNull(),
 	insertedAt: timestamp("inserted_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
+	committedAt: timestamp("committed_at", { mode: 'date' }),
 }, (table) => [
 	index("github_commits_author_email_index").using("btree", sql`lower(author_email)`, sql`authored_at`),
 	index("github_commits_author_login_index").using("btree", sql`lower(author_login)`, sql`authored_at`),

@@ -25,7 +25,11 @@ export interface ApiCommit {
   sha: string;
   html_url: string;
   author: { login: string } | null;
-  commit: { message: string; author: { name?: string; email?: string; date?: string } | null };
+  commit: {
+    message: string;
+    author: { name?: string; email?: string; date?: string } | null;
+    committer?: { date?: string } | null;
+  };
 }
 
 export function fromApiCommit(commit: ApiCommit): CommitInput {
@@ -35,6 +39,7 @@ export function fromApiCommit(commit: ApiCommit): CommitInput {
     authorEmail: commit.commit.author?.email?.toLowerCase() ?? null,
     authorName: commit.commit.author?.name ?? null,
     authoredAt: new Date(commit.commit.author?.date ?? Date.now()),
+    committedAt: commit.commit.committer?.date ? new Date(commit.commit.committer.date) : null,
     message: commit.commit.message,
     url: commit.html_url,
   };

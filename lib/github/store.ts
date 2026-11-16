@@ -25,6 +25,7 @@ export interface CommitInput {
   authorEmail: string | null;
   authorName: string | null;
   authoredAt: Date;
+  committedAt?: Date | null;
   message: string;
   url: string;
 }
@@ -153,6 +154,7 @@ export async function storeCommits(repositoryId: number, branch: string | null, 
       set: {
         branches: sql`array(select distinct unnest(${githubCommits.branches} || excluded.branches))`,
         authorLogin: sql`coalesce(excluded.author_login, ${githubCommits.authorLogin})`,
+        committedAt: sql`coalesce(${githubCommits.committedAt}, excluded.committed_at)`,
       },
     });
   return rows.length;
@@ -178,20 +180,21 @@ export async function listCommits(filter: {
   limit?: number;
 }): Promise<StoredCommit[]> {
   if (filter.repositoryIds && filter.repositoryIds.length === 0) return [];
+  const landed = sql<Date>`coalesce(${githubCommits.committedAt}, ${githubCommits.authoredAt})`;
   const rows = await db
     .select({ commit: githubCommits, repository: githubRepositories.fullName })
     .from(githubCommits)
     .innerJoin(githubRepositories, eq(githubRepositories.id, githubCommits.repositoryId))
     .where(
       and(
-        gte(githubCommits.authoredAt, filter.since),
-        filter.until ? lt(githubCommits.authoredAt, filter.until) : undefined,
+        gte(landed, filter.since),
+        filter.until ? lt(landed, filter.until) : undefined,
         filter.repositoryIds ? inArray(githubCommits.repositoryId, filter.repositoryIds) : undefined,
         filter.author ? authoredBy(filter.author) : undefined,
         filter.branch ? sql`${filter.branch} = ANY(${githubCommits.branches})` : undefined,
       ),
     )
-    .orderBy(desc(githubCommits.authoredAt))
+    .orderBy(desc(landed))
     .limit(filter.limit ?? 200);
   return rows.map(({ commit, repository }) => ({
     sha: commit.sha,
@@ -199,6 +202,7 @@ export async function listCommits(filter: {
     authorEmail: commit.authorEmail,
     authorName: commit.authorName,
     authoredAt: commit.authoredAt,
+    committedAt: commit.committedAt,
     message: commit.message,
     url: commit.url,
     branches: commit.branches,

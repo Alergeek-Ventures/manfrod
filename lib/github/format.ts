@@ -35,10 +35,13 @@ export function formatCommits(commits: StoredCommit[], limit: number): string {
   const lines = commits.slice(0, limit).map((commit) => {
     const branches = commit.branches.length > 0 ? ` [${commit.branches.join(", ")}]` : "";
     const author = commit.authorLogin ?? commit.authorName ?? commit.authorEmail ?? "unknown";
-    return `${formatLocal(commit.authoredAt)} ${commit.repository}${branches} ${shortSha(commit.sha)} ${firstLine(commit.message)} (${author})`;
+    const landed = commit.committedAt ?? commit.authoredAt;
+    const written =
+      Math.abs(landed.getTime() - commit.authoredAt.getTime()) >= 86_400_000 ? `, written ${day(commit.authoredAt.toISOString())}` : "";
+    return `${formatLocal(landed)} ${commit.repository}${branches} ${shortSha(commit.sha)} ${firstLine(commit.message)} (${author}${written})`;
   });
   const more = commits.length > limit ? "\n…more commits match, narrow the filters or raise the limit" : "";
-  return `${commits.length > limit ? `Newest ${limit} commits` : `${commits.length} commits`} (times Europe/Warsaw):\n${lines.join("\n")}${more}`;
+  return `${commits.length > limit ? `Newest ${limit} commits` : `${commits.length} commits`} (times Europe/Warsaw, when each commit landed on its branch):\n${lines.join("\n")}${more}`;
 }
 
 export interface ContentEntry {
