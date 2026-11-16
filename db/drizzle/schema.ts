@@ -651,6 +651,8 @@ export const selfModifyPulls = pgTable("self_modify_pulls", {
 	status: text().default('open').notNull(),
 	insertedAt: timestamp("inserted_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
 	closedAt: timestamp("closed_at", { mode: 'date' }),
+	learnedAt: timestamp("learned_at", { mode: 'date' }),
+	learnAttempts: integer("learn_attempts").default(0).notNull(),
 }, (table) => [
 	index().using("btree", table.status.asc().nullsLast().op("text_ops")),
 	check("self_modify_pulls_status", sql`status = ANY (ARRAY['open'::text, 'closed'::text])`),

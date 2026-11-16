@@ -1,4 +1,4 @@
-import { and, countDistinct, desc, eq } from "drizzle-orm";
+import { and, countDistinct, desc, eq, isNull, lt, sql } from "drizzle-orm";
 import { db, tables } from "./db/index.ts";
 import { deleteBranch, getPull, openPulls, type OpenPull } from "./github.ts";
 import { logger } from "./log.ts";
@@ -7,6 +7,8 @@ import { killSessionSandboxes, killStaleSandboxes } from "./sandboxes.ts";
 
 const { selfModifyPulls, selfModifyReviews } = tables;
 const STALE_SANDBOX_DAYS = 2;
+const MAX_LEARN_ATTEMPTS = 3;
+const LEARN_PER_RUN = 5;
 const SUMMARY_CHARS = 400;
 
 export const SELF_MODIFY_BRANCH_PREFIX = "manfrod/self-modify/";
@@ -97,6 +99,31 @@ export async function cleanUpPull(pullNumber: number): Promise<boolean> {
   return true;
 }
 
+export async function learnFromClosedPulls(): Promise<number[]> {
+  const pending = await db
+    .select({ pullNumber: selfModifyPulls.pullNumber })
+    .from(selfModifyPulls)
+    .where(
+      and(eq(selfModifyPulls.status, "closed"), isNull(selfModifyPulls.learnedAt), lt(selfModifyPulls.learnAttempts, MAX_LEARN_ATTEMPTS)),
+    )
+    .limit(LEARN_PER_RUN);
+  const learned: number[] = [];
+  for (const { pullNumber } of pending) {
+    try {
+      await learnFromPull(pullNumber);
+      await db.update(selfModifyPulls).set({ learnedAt: new Date() }).where(eq(selfModifyPulls.pullNumber, pullNumber));
+      learned.push(pullNumber);
+    } catch (error) {
+      await db
+        .update(selfModifyPulls)
+        .set({ learnAttempts: sql`${selfModifyPulls.learnAttempts} + 1` })
+        .where(eq(selfModifyPulls.pullNumber, pullNumber));
+      log.error(`SelfModify.Cleanup: could not learn from #${pullNumber}: ${(error as Error).message}`);
+    }
+  }
+  return learned;
+}
+
 export async function cleanUpClosedPulls(): Promise<{ closed: number[]; staleSandboxes: number }> {
   const open = await db.select().from(selfModifyPulls).where(eq(selfModifyPulls.status, "open"));
   const closed: number[] = [];
@@ -108,13 +135,6 @@ export async function cleanUpClosedPulls(): Promise<{ closed: number[]; staleSan
         stillOpen.push(row.sessionId);
         continue;
       }
-      if (pull) {
-        try {
-          await learnFromPull(row.pullNumber);
-        } catch (error) {
-          log.error(`SelfModify.Cleanup: could not learn from #${row.pullNumber}: ${(error as Error).message}`);
-        }
-      }
       await cleanUpPull(row.pullNumber);
       closed.push(row.pullNumber);
     } catch (error) {
@@ -123,6 +143,7 @@ export async function cleanUpClosedPulls(): Promise<{ closed: number[]; staleSan
     }
   }
   const staleSandboxes = await killStaleSandboxes(new Date(Date.now() - STALE_SANDBOX_DAYS * 86_400_000), stillOpen);
+  await learnFromClosedPulls();
   if (closed.length > 0 || staleSandboxes > 0) {
     log.info(`SelfModify.Cleanup: cleaned up ${closed.length} closed pull request(s) and ${staleSandboxes} stale sandbox(es)`);
   }
