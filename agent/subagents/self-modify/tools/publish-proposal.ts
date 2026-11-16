@@ -22,7 +22,6 @@ import { defineManfrodTool } from "../../../lib/define-tool.ts";
 import {
   authorize,
   BRANCH_PREFIX,
-  diffFingerprint,
   localChanges,
   MAX_BYTES,
   missingToolTests,
@@ -30,7 +29,8 @@ import {
   migrationViolation,
   pathViolation,
   proposal,
-  REPO_DIR,
+  snapshotFile,
+  snapshotTree,
   TARGET_BRANCH,
 } from "../../../lib/self-modify.ts";
 import { environment } from "../sandbox.ts";
@@ -79,7 +79,8 @@ export default defineManfrodTool({
     }
     const sandbox = await runtime.getSandbox(environment);
 
-    const changes = await localChanges(sandbox);
+    const snapshot = await snapshotTree(sandbox);
+    const changes = await localChanges(sandbox, snapshot);
     if (changes.length === 0) return "There are no changes to publish.";
     const problems = changes.flatMap((change) => {
       const violation = pathViolation(change.path) ?? (change.status === "D" ? migrationViolation(change, null) : null);
@@ -94,7 +95,7 @@ export default defineManfrodTool({
     let bytes = 0;
     for (const change of changes) {
       if (change.status === "D") continue;
-      const content = await sandbox.readBinaryFile({ path: `${REPO_DIR}/${change.path}` });
+      const content = await snapshotFile(sandbox, snapshot, change.path);
       if (!content) {
         problems.push(`${change.path}: could not be read`);
         continue;
@@ -110,7 +111,7 @@ export default defineManfrodTool({
     if (bytes > MAX_BYTES) problems.push(`${bytes} bytes changed; the limit is ${MAX_BYTES}`);
     problems.push(...missingToolTests(changes, contents));
     if (problems.length > 0) return `Nothing was published. Fix these first:\n${problems.map((problem) => `- ${problem}`).join("\n")}`;
-    const review = await latestReview(runtime.session.id, await diffFingerprint(sandbox));
+    const review = await latestReview(runtime.session.id, snapshot);
     if (!review) {
       return "Nothing was published: the reviewer has not reviewed these exact changes. Ask reviewer to review them (continue its task if it reviewed before), then publish.";
     }

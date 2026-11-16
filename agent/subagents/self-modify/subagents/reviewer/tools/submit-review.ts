@@ -1,13 +1,14 @@
 import { z } from "zod";
 import { recordReview } from "../../../../../../lib/self-modify-pulls.ts";
 import { defineManfrodTool } from "../../../../../lib/define-tool.ts";
-import { authorize, diffFingerprint } from "../../../../../lib/self-modify.ts";
+import { authorize, isSnapshot, snapshotTree } from "../../../../../lib/self-modify.ts";
 import { environment } from "../sandbox.ts";
 
 export default defineManfrodTool({
   description:
-    "Record your verdict on the changes as they are now. Call it once, at the end of each review. publish-proposal reads it, so a verdict covers only the exact changes you reviewed.",
+    "Record your verdict on the snapshot you reviewed. Call it once, at the end of each review, with the snapshot id show-diff gave you. It is refused when the checkout changed after that snapshot; call show-diff again then. publish-proposal only publishes the exact snapshot you approved.",
   inputSchema: z.object({
+    snapshot: z.string().describe("The snapshot id from show-diff"),
     verdict: z.enum(["approve", "request_changes"]),
     findings: z
       .string()
@@ -17,13 +18,17 @@ export default defineManfrodTool({
       ),
   }),
   label: { start: ({ verdict }) => `Recording review: ${verdict}` },
-  async execute({ verdict, findings }, ctx, runtime) {
+  async execute({ snapshot, verdict, findings }, ctx, runtime) {
     const requester = await authorize(ctx);
     if (typeof requester === "string") return requester;
     const parent = runtime.session.parent?.sessionId;
     if (!parent) return "This tool only works inside a self-modify review.";
     const sandbox = await runtime.getSandbox(environment);
-    await recordReview(parent, await diffFingerprint(sandbox), verdict, findings.trim());
-    return `Recorded: ${verdict}.`;
+    if (!(await isSnapshot(sandbox, snapshot))) return `${snapshot} is not a snapshot from show-diff.`;
+    if ((await snapshotTree(sandbox)) !== snapshot) {
+      return "The checkout changed after your snapshot, so nothing was recorded. Call show-diff again and review what changed.";
+    }
+    await recordReview(parent, snapshot, verdict, findings.trim());
+    return `Recorded: ${verdict} for snapshot ${snapshot}.`;
   },
 });

@@ -10,5 +10,5 @@ You review a change to Manfrod's own source code before it becomes a pull reques
    - Scope: anything added that the request did not ask for.
    - Tests: do they cover the risky rules and refusals, not only the happy path or the shape of an API call?
    - Conventions from `AGENTS.md`: no code comments, `.ts` imports, named exports, one tool per file, new migrations only.
-4. Call `submit-review` once: `approve` when nothing below would block a careful human reviewer, otherwise `request_changes` with every finding as one line: severity (high, medium, low), file:line, the problem and the fix.
+4. Call `submit-review` once with the snapshot id from `show-diff`: `approve` when nothing below would block a careful human reviewer, otherwise `request_changes` with every finding as one line: severity (high, medium, low), file:line, the problem and the fix.
 5. Reply with the verdict and the same findings. When you are asked to review again, check that each earlier finding is fixed and look at what changed since.

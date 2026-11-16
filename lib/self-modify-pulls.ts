@@ -1,4 +1,4 @@
-import { and, count, desc, eq } from "drizzle-orm";
+import { and, countDistinct, desc, eq } from "drizzle-orm";
 import { db, tables } from "./db/index.ts";
 import { deleteBranch, getPull, openPulls, type OpenPull } from "./github.ts";
 import { logger } from "./log.ts";
@@ -62,7 +62,10 @@ export async function latestReview(sessionId: string, diffHash: string) {
 }
 
 export async function reviewRounds(sessionId: string): Promise<number> {
-  const [row] = await db.select({ rounds: count() }).from(selfModifyReviews).where(eq(selfModifyReviews.sessionId, sessionId));
+  const [row] = await db
+    .select({ rounds: countDistinct(selfModifyReviews.diffHash) })
+    .from(selfModifyReviews)
+    .where(and(eq(selfModifyReviews.sessionId, sessionId), eq(selfModifyReviews.verdict, "request_changes")));
   return Number(row?.rounds ?? 0);
 }
 
