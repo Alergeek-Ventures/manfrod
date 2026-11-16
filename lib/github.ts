@@ -238,6 +238,25 @@ export async function updatePull(number: number, title: string, body: string): P
   await required("PATCH", `/pulls/${number}`, { title, body });
 }
 
+export interface PullCommit {
+  sha: string;
+  message: string;
+  authorLogin: string | null;
+}
+
+export async function pullCommits(number: number): Promise<PullCommit[]> {
+  const commits = await repo<{ sha: string; commit: { message: string }; author: { login: string } | null }[]>(
+    "GET",
+    `/pulls/${number}/commits?per_page=100`,
+  );
+  return (commits ?? []).map((commit) => ({ sha: commit.sha, message: commit.commit.message, authorLogin: commit.author?.login ?? null }));
+}
+
+export async function commitPatch(sha: string): Promise<string> {
+  const commit = await repo<{ files?: { filename: string; patch?: string }[] }>("GET", `/commits/${sha}`);
+  return (commit?.files ?? []).map((file) => `--- ${file.filename}\n${file.patch ?? "(binary or too large)"}`).join("\n");
+}
+
 export async function markReadyForReview(nodeId: string): Promise<void> {
   const response = await call(await installationToken(), "POST", "/graphql", {
     query: "mutation($id: ID!) { markPullRequestReadyForReview(input: { pullRequestId: $id }) { clientMutationId } }",

@@ -39,6 +39,7 @@ const BLOCKED = [
   "lib/sandboxes.ts",
   "lib/secrets.ts",
   "lib/security/",
+  "lib/self-modify-lessons.ts",
   "lib/self-modify-pulls.ts",
   "lib/self-review/",
   "lib/slack/secret-modal.ts",

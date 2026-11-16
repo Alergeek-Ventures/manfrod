@@ -623,6 +623,15 @@ export const channelNudges = pgTable("channel_nudges", {
 	updatedAt: timestamp("updated_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
 });
 
+export const selfModifyLessons = pgTable("self_modify_lessons", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	pullNumber: integer("pull_number").notNull(),
+	lesson: text().notNull(),
+	insertedAt: timestamp("inserted_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
+}, (table) => [
+	index("self_modify_lessons_inserted_at_index").using("btree", table.insertedAt.asc().nullsLast().op("timestamp_ops")),
+]);
+
 export const selfModifyReviews = pgTable("self_modify_reviews", {
 	id: uuid().defaultRandom().primaryKey().notNull(),
 	sessionId: text("session_id").notNull(),
@@ -642,6 +651,8 @@ export const selfModifyPulls = pgTable("self_modify_pulls", {
 	status: text().default('open').notNull(),
 	insertedAt: timestamp("inserted_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
 	closedAt: timestamp("closed_at", { mode: 'date' }),
+	learnedAt: timestamp("learned_at", { mode: 'date' }),
+	learnAttempts: integer("learn_attempts").default(0).notNull(),
 }, (table) => [
 	index().using("btree", table.status.asc().nullsLast().op("text_ops")),
 	check("self_modify_pulls_status", sql`status = ANY (ARRAY['open'::text, 'closed'::text])`),
