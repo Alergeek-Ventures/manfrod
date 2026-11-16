@@ -100,6 +100,97 @@ export function pathViolation(path: string): string | null {
   return null;
 }
 
+const NEW_TOOL = /^agent\/tools\/([a-z0-9-]+)\.ts$/;
+const QUOTES = new Set(["'", '"', "`"]);
+
+function skipString(source: string, start: number): number {
+  const quote = source[start];
+  let index = start + 1;
+  while (index < source.length && source[index] !== quote) index += source[index] === "\\" ? 2 : 1;
+  return index + 1;
+}
+
+function readString(source: string, start: number): { value: string; end: number } | null {
+  let index = start;
+  while (/\s/.test(source[index] ?? "")) index += 1;
+  if (source[index] !== "'" && source[index] !== '"') return null;
+  const end = skipString(source, index);
+  return { value: source.slice(index + 1, end - 1), end };
+}
+
+const DECLARATION_ENDS = new Set([
+  "function",
+  "class",
+  "const",
+  "let",
+  "var",
+  "interface",
+  "enum",
+  "async",
+  "default",
+  "abstract",
+  "declare",
+  "namespace",
+]);
+
+export function importSpecifiers(source: string): string[] {
+  const found: string[] = [];
+  let inDeclaration = false;
+  let index = 0;
+  while (index < source.length) {
+    const char = source[index];
+    if (source.startsWith("//", index)) {
+      const newline = source.indexOf("\n", index);
+      index = newline === -1 ? source.length : newline;
+    } else if (source.startsWith("/*", index)) {
+      const close = source.indexOf("*/", index + 2);
+      index = close === -1 ? source.length : close + 2;
+    } else if (QUOTES.has(char)) {
+      index = skipString(source, index);
+    } else if (char === ";" || char === "=" || char === "(") {
+      inDeclaration = false;
+      index += 1;
+    } else if (char === "}") {
+      index += 1;
+      if (!/^\s*from\b/.test(source.slice(index))) inDeclaration = false;
+    } else if (/[A-Za-z_$]/.test(char) && !/[\w$.]/.test(source[index - 1] ?? "")) {
+      const word = /^[A-Za-z_$][\w$]*/.exec(source.slice(index))![0];
+      index += word.length;
+      let next = index;
+      while (/\s/.test(source[next] ?? "")) next += 1;
+      const specifier =
+        word === "import" && source[next] === "("
+          ? readString(source, next + 1)
+          : word === "import" || (word === "from" && inDeclaration)
+            ? readString(source, index)
+            : null;
+      if (specifier) {
+        found.push(specifier.value);
+        index = specifier.end;
+        inDeclaration = false;
+      } else if (word === "import" || word === "export") {
+        inDeclaration = source[next] !== "(";
+      } else if (DECLARATION_ENDS.has(word)) {
+        inDeclaration = false;
+      }
+    } else {
+      index += 1;
+    }
+  }
+  return found;
+}
+
+export function missingToolTests(changes: Pick<Change, "path" | "status">[], contents: Map<string, Uint8Array>): string[] {
+  const imported = changes
+    .filter((change) => change.status !== "D" && change.path.startsWith("test/"))
+    .flatMap((change) => importSpecifiers(new TextDecoder().decode(contents.get(change.path) ?? new Uint8Array())));
+  return changes.flatMap((change) => {
+    const name = change.status === "A" ? NEW_TOOL.exec(change.path)?.[1] : undefined;
+    if (!name || imported.some((specifier) => specifier.endsWith(`/agent/tools/${name}.ts`))) return [];
+    return [`${change.path}: a new tool needs a test under test/ that imports it and covers its access rules`];
+  });
+}
+
 export async function sh(sandbox: SandboxSession, command: string, abortSignal?: AbortSignal) {
   const result = await sandbox.run({ command, workingDirectory: REPO_DIR, abortSignal });
   if (result.exitCode !== 0)

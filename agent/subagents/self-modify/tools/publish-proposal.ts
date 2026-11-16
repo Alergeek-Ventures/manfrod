@@ -24,6 +24,7 @@ import {
   BRANCH_PREFIX,
   localChanges,
   MAX_BYTES,
+  missingToolTests,
   MAX_FILES,
   migrationViolation,
   pathViolation,
@@ -51,9 +52,16 @@ export default defineManfrodTool({
       .max(4000)
       .describe("Minimal English description of the whole pull request: a sentence or two per change, no headings"),
     commit_message: z.string().min(1).max(200).describe("Commit message for this round of changes"),
+    risks: z
+      .string()
+      .min(1)
+      .max(2000)
+      .describe(
+        "In English: what you could not verify (e.g. calls to a real external API), new Slack scopes, environment variables or settings a person must add, and anything irreversible the change can do. Write 'None' if there is nothing",
+      ),
   }),
   label: { start: ({ title }) => `Publishing: ${title}`, complete: (_input, output) => output.split("\n")[0] },
-  async execute({ title, description, commit_message }, ctx, runtime) {
+  async execute({ title, description, commit_message, risks }, ctx, runtime) {
     const requester = await authorize(ctx);
     if (typeof requester === "string") return requester;
     const state = proposal.get();
@@ -92,6 +100,7 @@ export default defineManfrodTool({
       contents.set(change.path, content);
     }
     if (bytes > MAX_BYTES) problems.push(`${bytes} bytes changed; the limit is ${MAX_BYTES}`);
+    problems.push(...missingToolTests(changes, contents));
     if (problems.length > 0) return `Nothing was published. Fix these first:\n${problems.map((problem) => `- ${problem}`).join("\n")}`;
     if (state.pullNumber && state.branch) {
       const pull = await getPull(state.pullNumber);
@@ -123,7 +132,7 @@ export default defineManfrodTool({
         : requester.name
           ? ` at the request of ${requester.name}`
           : "";
-    const body = `${description}${PROPOSAL_FOOTER}${origin}.`;
+    const body = `${description}\n\nRisks and unverified: ${risks.trim()}${PROPOSAL_FOOTER}${origin}.`;
     if (!pullNumber || !pullUrl) {
       ({ number: pullNumber, url: pullUrl } = await createDraftPull(branch, TARGET_BRANCH, title, body));
       if (requester.kind === "self_review") await attachPull(requester.finding.id, pullNumber, pullUrl);
