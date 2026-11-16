@@ -80,6 +80,7 @@ export interface PullSummary {
   state: string;
   draft?: boolean;
   merged_at?: string | null;
+  closed_at?: string | null;
   html_url: string;
   user: { login: string } | null;
   head: { ref: string; sha: string };
@@ -116,11 +117,22 @@ export interface CheckRun {
 
 const pullState = (pull: PullSummary) => (pull.merged_at ? "merged" : pull.draft && pull.state === "open" ? "draft" : pull.state);
 
+export function pullWhen(pull: Pick<PullSummary, "merged_at" | "closed_at" | "updated_at">): string {
+  if (pull.merged_at) return `merged ${formatLocal(new Date(pull.merged_at))}`;
+  if (pull.closed_at) return `closed ${formatLocal(new Date(pull.closed_at))}`;
+  return `updated ${day(pull.updated_at)}`;
+}
+
+export function matchesPull(pull: Pick<PullSummary, "title" | "head">, query: string): boolean {
+  const needle = query.trim().toLowerCase();
+  return pull.title.toLowerCase().includes(needle) || pull.head.ref.toLowerCase().includes(needle);
+}
+
 export function formatPullList(repository: string, pulls: PullSummary[]): string {
   if (pulls.length === 0) return `No pull requests in ${repository} match.`;
   const lines = pulls.map(
     (pull) =>
-      `#${pull.number} ${pull.title} [${pullState(pull)}] ${pull.user?.login ?? "?"} ${pull.head.ref} → ${pull.base.ref}, updated ${day(pull.updated_at)} ${pull.html_url}`,
+      `#${pull.number} ${pull.title} [${pullState(pull)}] ${pull.user?.login ?? "?"} ${pull.head.ref} → ${pull.base.ref}, ${pullWhen(pull)} ${pull.html_url}`,
   );
   return `${repository} pull requests:\n${lines.join("\n")}`;
 }
@@ -152,7 +164,7 @@ export function formatPull(repository: string, pull: PullDetail, files: PullFile
   const lines = [
     `${repository}#${pull.number} ${pull.title} [${pullState(pull)}]`,
     `${pull.html_url}`,
-    `Author: ${pull.user?.login ?? "?"}, ${pull.head.ref} → ${pull.base.ref}, updated ${day(pull.updated_at)}`,
+    `Author: ${pull.user?.login ?? "?"}, ${pull.head.ref} → ${pull.base.ref}, ${pullWhen(pull)}`,
   ];
   if (pull.additions !== undefined)
     lines.push(`Changes: +${pull.additions} -${pull.deletions ?? 0} in ${pull.changed_files ?? files.length} files`);
