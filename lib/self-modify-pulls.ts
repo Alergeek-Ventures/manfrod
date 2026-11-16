@@ -2,6 +2,7 @@ import { and, countDistinct, desc, eq } from "drizzle-orm";
 import { db, tables } from "./db/index.ts";
 import { deleteBranch, getPull, openPulls, type OpenPull } from "./github.ts";
 import { logger } from "./log.ts";
+import { learnFromPull } from "./self-modify-lessons.ts";
 import { killSessionSandboxes, killStaleSandboxes } from "./sandboxes.ts";
 
 const { selfModifyPulls, selfModifyReviews } = tables;
@@ -106,6 +107,13 @@ export async function cleanUpClosedPulls(): Promise<{ closed: number[]; staleSan
       if (pull && pull.state !== "closed") {
         stillOpen.push(row.sessionId);
         continue;
+      }
+      if (pull) {
+        try {
+          await learnFromPull(row.pullNumber);
+        } catch (error) {
+          log.error(`SelfModify.Cleanup: could not learn from #${row.pullNumber}: ${(error as Error).message}`);
+        }
       }
       await cleanUpPull(row.pullNumber);
       closed.push(row.pullNumber);
