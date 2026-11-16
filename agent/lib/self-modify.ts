@@ -108,7 +108,8 @@ export function missingToolTests(changes: Pick<Change, "path" | "status">[], con
     .map((change) => new TextDecoder().decode(contents.get(change.path) ?? new Uint8Array()));
   return changes.flatMap((change) => {
     const name = change.status === "A" ? NEW_TOOL.exec(change.path)?.[1] : undefined;
-    if (!name || tests.some((text) => text.includes(`tools/${name}`))) return [];
+    const imported = new RegExp(`(?:\\bfrom\\s*|\\bimport\\s*\\(\\s*|^\\s*import\\s*)["'][^"']*\\/agent\\/tools\\/${name}\\.ts["']`, "m");
+    if (!name || tests.some((text) => imported.test(text))) return [];
     return [`${change.path}: a new tool needs a test under test/ that imports it and covers its access rules`];
   });
 }
