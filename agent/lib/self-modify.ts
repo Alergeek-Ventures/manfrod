@@ -4,12 +4,13 @@ import { getUser, isAdmin } from "../../lib/accounts.ts";
 import type { ToolCtx } from "../../lib/agent/context.ts";
 import type { SelfReviewFinding } from "../../lib/db/schema.ts";
 import { ACTIVE_STATUSES, SELF_REVIEW_KIND, SELF_REVIEW_SLACK_ID } from "../../lib/self-review/rules.ts";
+import { SELF_MODIFY_BRANCH_PREFIX } from "../../lib/self-modify-pulls.ts";
 import { getFinding } from "../../lib/self-review/store.ts";
 
 export const REPO_DIR = "/workspace/repo";
 export const BASE_TAG = "manfrod-base";
 export const TARGET_BRANCH = "main";
-export const BRANCH_PREFIX = "manfrod/self-modify/";
+export const BRANCH_PREFIX = SELF_MODIFY_BRANCH_PREFIX;
 export const MAX_FILES = 40;
 export const MAX_BYTES = 500_000;
 
