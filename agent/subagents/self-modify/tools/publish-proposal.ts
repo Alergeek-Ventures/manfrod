@@ -14,7 +14,7 @@ import {
   type TreeEntry,
 } from "../../../../lib/github.ts";
 import { matches as secretRule } from "../../../../lib/security/gitleaks.ts";
-import { PROPOSAL_FOOTER, recordPull } from "../../../../lib/self-modify-pulls.ts";
+import { latestReview, PROPOSAL_FOOTER, recordPull, reviewRounds } from "../../../../lib/self-modify-pulls.ts";
 import { MAX_OPEN_PULLS } from "../../../../lib/self-review/rules.ts";
 import { attachCapabilityPull } from "../../../../lib/tasks/capabilities.ts";
 import { attachPull, countActive } from "../../../../lib/self-review/store.ts";
@@ -29,12 +29,14 @@ import {
   migrationViolation,
   pathViolation,
   proposal,
-  REPO_DIR,
+  snapshotFile,
+  snapshotTree,
   TARGET_BRANCH,
 } from "../../../lib/self-modify.ts";
 import { environment } from "../sandbox.ts";
 
 const MODES = new Set(["100644", "100755"]);
+const MIN_ROUNDS_BEFORE_OVERRIDE = 3;
 
 export default defineManfrodTool({
   keepSecretPlaceholders: true,
@@ -52,6 +54,12 @@ export default defineManfrodTool({
       .max(4000)
       .describe("Minimal English description of the whole pull request: a sentence or two per change, no headings"),
     commit_message: z.string().min(1).max(200).describe("Commit message for this round of changes"),
+    accept_open_findings: z
+      .boolean()
+      .optional()
+      .describe(
+        "Only after at least 3 review rounds: publish although the reviewer still asks for changes; its open findings go into the pull request",
+      ),
     risks: z
       .string()
       .min(1)
@@ -61,7 +69,7 @@ export default defineManfrodTool({
       ),
   }),
   label: { start: ({ title }) => `Publishing: ${title}`, complete: (_input, output) => output.split("\n")[0] },
-  async execute({ title, description, commit_message, risks }, ctx, runtime) {
+  async execute({ title, description, commit_message, risks, accept_open_findings }, ctx, runtime) {
     const requester = await authorize(ctx);
     if (typeof requester === "string") return requester;
     const state = proposal.get();
@@ -71,7 +79,8 @@ export default defineManfrodTool({
     }
     const sandbox = await runtime.getSandbox(environment);
 
-    const changes = await localChanges(sandbox);
+    const snapshot = await snapshotTree(sandbox);
+    const changes = await localChanges(sandbox, snapshot);
     if (changes.length === 0) return "There are no changes to publish.";
     const problems = changes.flatMap((change) => {
       const violation = pathViolation(change.path) ?? (change.status === "D" ? migrationViolation(change, null) : null);
@@ -86,7 +95,7 @@ export default defineManfrodTool({
     let bytes = 0;
     for (const change of changes) {
       if (change.status === "D") continue;
-      const content = await sandbox.readBinaryFile({ path: `${REPO_DIR}/${change.path}` });
+      const content = await snapshotFile(sandbox, snapshot, change.path);
       if (!content) {
         problems.push(`${change.path}: could not be read`);
         continue;
@@ -102,6 +111,17 @@ export default defineManfrodTool({
     if (bytes > MAX_BYTES) problems.push(`${bytes} bytes changed; the limit is ${MAX_BYTES}`);
     problems.push(...missingToolTests(changes, contents));
     if (problems.length > 0) return `Nothing was published. Fix these first:\n${problems.map((problem) => `- ${problem}`).join("\n")}`;
+    const review = await latestReview(runtime.session.id, snapshot);
+    if (!review) {
+      return "Nothing was published: the reviewer has not reviewed these exact changes. Ask reviewer to review them (continue its task if it reviewed before), then publish.";
+    }
+    let openFindings: string | null = null;
+    if (review.verdict === "request_changes") {
+      if (!accept_open_findings || (await reviewRounds(runtime.session.id)) < MIN_ROUNDS_BEFORE_OVERRIDE) {
+        return `Nothing was published: the reviewer asked for changes.\n${review.findings}\n\nFix them, verify again and ask reviewer for another review. Only after ${MIN_ROUNDS_BEFORE_OVERRIDE} review rounds can you publish with accept_open_findings; its open findings then go into the pull request.`;
+      }
+      openFindings = review.findings;
+    }
     if (state.pullNumber && state.branch) {
       const pull = await getPull(state.pullNumber);
       if (!pull || pull.merged || pull.state === "closed") {
@@ -132,7 +152,8 @@ export default defineManfrodTool({
         : requester.name
           ? ` at the request of ${requester.name}`
           : "";
-    const body = `${description}\n\nRisks and unverified: ${risks.trim()}${PROPOSAL_FOOTER}${origin}.`;
+    const open = openFindings ? `\n\nReviewer findings left open:\n${openFindings}` : "";
+    const body = `${description}\n\nRisks and unverified: ${risks.trim()}${open}${PROPOSAL_FOOTER}${origin}.`;
     if (!pullNumber || !pullUrl) {
       ({ number: pullNumber, url: pullUrl } = await createDraftPull(branch, TARGET_BRANCH, title, body));
       if (requester.kind === "self_review") await attachPull(requester.finding.id, pullNumber, pullUrl);

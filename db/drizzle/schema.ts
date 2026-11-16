@@ -623,6 +623,18 @@ export const channelNudges = pgTable("channel_nudges", {
 	updatedAt: timestamp("updated_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
 });
 
+export const selfModifyReviews = pgTable("self_modify_reviews", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	sessionId: text("session_id").notNull(),
+	diffHash: text("diff_hash").notNull(),
+	verdict: text().notNull(),
+	findings: text().default('').notNull(),
+	insertedAt: timestamp("inserted_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
+}, (table) => [
+	index("self_modify_reviews_session_index").using("btree", table.sessionId.asc().nullsLast().op("text_ops"), table.insertedAt.asc().nullsLast().op("timestamp_ops")),
+	check("self_modify_reviews_verdict", sql`verdict = ANY (ARRAY['approve'::text, 'request_changes'::text])`),
+]);
+
 export const selfModifyPulls = pgTable("self_modify_pulls", {
 	pullNumber: integer("pull_number").primaryKey().notNull(),
 	branch: text().notNull(),

@@ -198,8 +198,26 @@ export async function sh(sandbox: SandboxSession, command: string, abortSignal?:
   return result.stdout;
 }
 
-export async function localChanges(sandbox: SandboxSession): Promise<Change[]> {
-  const raw = await sh(sandbox, `git add -A && git diff --cached --raw --no-renames -z ${BASE_TAG}`);
+const SNAPSHOT_FILE = "/tmp/manfrod-snapshot-file";
+const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+
+export async function snapshotTree(sandbox: SandboxSession): Promise<string> {
+  return (await sh(sandbox, "git add -A && git write-tree")).trim();
+}
+
+export async function isSnapshot(sandbox: SandboxSession, tree: string): Promise<boolean> {
+  if (!/^[0-9a-f]{40}$/.test(tree)) return false;
+  const result = await sandbox.run({ command: `git cat-file -t ${tree}`, workingDirectory: REPO_DIR });
+  return result.exitCode === 0 && result.stdout.trim() === "tree";
+}
+
+export async function snapshotFile(sandbox: SandboxSession, tree: string, path: string): Promise<Uint8Array | null> {
+  await sh(sandbox, `git cat-file blob ${quote(`${tree}:${path}`)} > ${SNAPSHOT_FILE}`);
+  return sandbox.readBinaryFile({ path: SNAPSHOT_FILE });
+}
+
+export async function localChanges(sandbox: SandboxSession, tree: string): Promise<Change[]> {
+  const raw = await sh(sandbox, `git diff --raw --no-renames -z ${BASE_TAG} ${tree}`);
   const fields = raw.split("\0").filter((field) => field !== "");
   const changes: Change[] = [];
   for (let index = 0; index < fields.length; index += 2) {
