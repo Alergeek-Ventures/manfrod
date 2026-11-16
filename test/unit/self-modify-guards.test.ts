@@ -17,8 +17,10 @@ describe("importSpecifiers", () => {
       'export const Item = () => <p>from "./nope4.ts"</p>;',
       'export default function Page() { return <b>from "./nope5.ts"</b>; }',
       'export type { F } from "./f.ts";',
+      'export {}\n<div>from "./nope6.ts"</div>',
+      "import {\n  g,\n}\nfrom './g.ts'",
     ].join("\n");
-    expect(importSpecifiers(source)).toEqual(["./a.ts", "./b.ts", "./c.ts", "./d.ts", "./e.ts", "./f.ts"]);
+    expect(importSpecifiers(source)).toEqual(["./a.ts", "./b.ts", "./c.ts", "./d.ts", "./e.ts", "./f.ts", "./g.ts"]);
   });
 });
 

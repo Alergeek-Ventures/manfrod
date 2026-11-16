@@ -150,6 +150,9 @@ export function importSpecifiers(source: string): string[] {
     } else if (char === ";" || char === "=" || char === "(") {
       inDeclaration = false;
       index += 1;
+    } else if (char === "}") {
+      index += 1;
+      if (!/^\s*from\b/.test(source.slice(index))) inDeclaration = false;
     } else if (/[A-Za-z_$]/.test(char) && !/[\w$.]/.test(source[index - 1] ?? "")) {
       const word = /^[A-Za-z_$][\w$]*/.exec(source.slice(index))![0];
       index += word.length;
