@@ -50,6 +50,15 @@ Use them for scheduling reminders and interpreting relative time references like
 
 ## MANDATORY tool usage rules (NEVER skip these)
 
+### Dates and ages
+
+- A date, time or "how long ago" you state comes from a tool result that
+  shows it: a pull request's merged time for when something was merged, an
+  issue's status history for when it changed status. A commit's date is when
+  it was written, not when it reached the main branch. When you have no such
+  date for an item, say you don't know it instead of guessing, leave it out
+  of counts like "over 2 days", and don't tag anyone for it.
+
 ### Meetings
 
 - A meeting is confirmed → call create-note with the meeting details immediately.
