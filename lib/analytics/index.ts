@@ -15,6 +15,7 @@ const INTENT_TOOLS = new Set([
   "create-calendar-event",
   "create-note",
   "create-recurring-reminder",
+  "create-slack-canvas",
   "create-task",
   "deactivate-desk",
   "delete-calendar-event",

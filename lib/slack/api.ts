@@ -336,7 +336,19 @@ export async function botIdentity(): Promise<{ botId: string; userId: string; te
 export const archiveLink = (workspaceUrl: string, channel: string, ts: string) =>
   `${workspaceUrl.replace(/\/$/, "")}/archives/${channel}/p${ts.replace(".", "")}`;
 
-export type CanvasOperation = "insert_at_start" | "insert_at_end" | "insert_after" | "insert_before" | "replace" | "delete";
+export type CanvasOperation = "insert_at_start" | "insert_at_end" | "insert_after" | "insert_before" | "replace";
+
+export function createChannelCanvas(channel: string, markdown: string) {
+  return post("conversations.canvases.create", { channel_id: channel, document_content: { type: "markdown", markdown } });
+}
+
+export function createCanvas(markdown: string, title?: string, channel?: string) {
+  return post("canvases.create", {
+    document_content: { type: "markdown", markdown },
+    ...(title ? { title } : {}),
+    ...(channel ? { channel_id: channel } : {}),
+  });
+}
 
 export function editCanvas(canvasId: string, change: { operation: CanvasOperation; markdown?: string; sectionId?: string }) {
   return post("canvases.edit", {

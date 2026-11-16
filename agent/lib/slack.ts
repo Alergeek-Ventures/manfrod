@@ -98,6 +98,38 @@ export async function resolveCanvas(
   return { ok: true, id: fileId, channelId: resolved.id };
 }
 
+export function canvasChannels(file: SlackBody): string[] {
+  const ids = [
+    ...(file.channels ?? []),
+    ...(file.groups ?? []),
+    ...Object.keys(file.shares?.public ?? {}),
+    ...Object.keys(file.shares?.private ?? {}),
+  ];
+  return [...new Set(ids.map(String))];
+}
+
+export async function canvasLink(fileId: string): Promise<string | null> {
+  const info = await getFileInfo(fileId);
+  return typeof info?.permalink === "string" ? info.permalink : null;
+}
+
+export async function canvasEditDenial(
+  canvas: { id: string; channelId: string | null },
+  person: { slackId: string; name: string | null },
+): Promise<string | null> {
+  if (canvas.channelId?.startsWith("D")) return "Canvases in direct messages can't be edited.";
+  let channels = canvas.channelId ? [canvas.channelId] : [];
+  if (!canvas.channelId) {
+    const file = await getFileInfo(canvas.id);
+    if (!file) return "Could not read the canvas details, so I changed nothing.";
+    channels = canvasChannels(file).filter((id) => !id.startsWith("D"));
+    if (channels.length === 0) return "This canvas isn't shared in any channel, so I can't check that you may edit it.";
+  }
+  for (const channel of channels) if (await isChannelMember(channel, person.slackId)) return null;
+  const where = channels.map((id) => `<#${id}>`).join(", ");
+  return `${person.name ?? person.slackId} is not a member of ${where}, so you can't edit this canvas for them.`;
+}
+
 export function canvasErrorText(error: string, scope: string): string {
   if (error === "missing_scope")
     return `the Slack app lacks the ${scope} scope; an admin has to add it to the bot token scopes and reinstall the app`;

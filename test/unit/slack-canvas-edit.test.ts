@@ -26,12 +26,6 @@ describe("Slack canvas editing", () => {
     });
   });
 
-  it("sends no content for a delete", async () => {
-    const calls = stubSlack({ ok: true });
-    await editCanvas("F1", { operation: "delete", sectionId: "temp:C:1" });
-    expect(calls[0].body).toEqual({ canvas_id: "F1", changes: [{ operation: "delete", section_id: "temp:C:1" }] });
-  });
-
   it("passes the Slack error through", async () => {
     stubSlack({ ok: false, error: "missing_scope" });
     expect(await editCanvas("F1", { operation: "replace", markdown: "x" })).toEqual({ ok: false, error: "missing_scope" });
