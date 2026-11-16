@@ -118,8 +118,24 @@ function readString(source: string, start: number): { value: string; end: number
   return { value: source.slice(index + 1, end - 1), end };
 }
 
+const DECLARATION_ENDS = new Set([
+  "function",
+  "class",
+  "const",
+  "let",
+  "var",
+  "interface",
+  "enum",
+  "async",
+  "default",
+  "abstract",
+  "declare",
+  "namespace",
+]);
+
 export function importSpecifiers(source: string): string[] {
   const found: string[] = [];
+  let inDeclaration = false;
   let index = 0;
   while (index < source.length) {
     const char = source[index];
@@ -131,17 +147,28 @@ export function importSpecifiers(source: string): string[] {
       index = close === -1 ? source.length : close + 2;
     } else if (QUOTES.has(char)) {
       index = skipString(source, index);
+    } else if (char === ";" || char === "=" || char === "(") {
+      inDeclaration = false;
+      index += 1;
     } else if (/[A-Za-z_$]/.test(char) && !/[\w$.]/.test(source[index - 1] ?? "")) {
       const word = /^[A-Za-z_$][\w$]*/.exec(source.slice(index))![0];
       index += word.length;
-      if (word === "from" || word === "import") {
-        let next = index;
-        while (/\s/.test(source[next] ?? "")) next += 1;
-        const specifier = word === "import" && source[next] === "(" ? readString(source, next + 1) : readString(source, index);
-        if (specifier) {
-          found.push(specifier.value);
-          index = specifier.end;
-        }
+      let next = index;
+      while (/\s/.test(source[next] ?? "")) next += 1;
+      const specifier =
+        word === "import" && source[next] === "("
+          ? readString(source, next + 1)
+          : word === "import" || (word === "from" && inDeclaration)
+            ? readString(source, index)
+            : null;
+      if (specifier) {
+        found.push(specifier.value);
+        index = specifier.end;
+        inDeclaration = false;
+      } else if (word === "import" || word === "export") {
+        inDeclaration = source[next] !== "(";
+      } else if (DECLARATION_ENDS.has(word)) {
+        inDeclaration = false;
       }
     } else {
       index += 1;

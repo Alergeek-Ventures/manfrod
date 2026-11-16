@@ -13,8 +13,12 @@ describe("importSpecifiers", () => {
       'export { e } from "./e.ts";',
       "const s = \"import x from './nope.ts'\";",
       "// from './nope2.ts'",
+      'const view = <div>from "./nope3.ts"</div>;',
+      'export const Item = () => <p>from "./nope4.ts"</p>;',
+      'export default function Page() { return <b>from "./nope5.ts"</b>; }',
+      'export type { F } from "./f.ts";',
     ].join("\n");
-    expect(importSpecifiers(source)).toEqual(["./a.ts", "./b.ts", "./c.ts", "./d.ts", "./e.ts"]);
+    expect(importSpecifiers(source)).toEqual(["./a.ts", "./b.ts", "./c.ts", "./d.ts", "./e.ts", "./f.ts"]);
   });
 });
 
@@ -34,6 +38,7 @@ describe("missingToolTests", () => {
       'const template = `from "../../agent/tools/edit-slack-canvas.ts"`;',
       '// import("../../agent/tools/edit-slack-canvas.ts")',
       '/* from "../../agent/tools/edit-slack-canvas.ts" */',
+      'const jsx = <div>from "../../agent/tools/edit-slack-canvas.ts"</div>;',
     ].join("\n");
     expect(missingToolTests([tool, mention], new Map([[mention.path, bytes(text)]]))).toHaveLength(1);
   });
