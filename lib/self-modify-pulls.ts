@@ -46,6 +46,14 @@ export function capabilityGate(pulls: OpenPull[], extendPull: number | undefined
 }
 
 export async function recordPull(pullNumber: number, branch: string, sessionId: string): Promise<void> {
+  const [previous] = await db.select().from(selfModifyPulls).where(eq(selfModifyPulls.pullNumber, pullNumber)).limit(1);
+  if (previous && previous.sessionId !== sessionId) {
+    try {
+      await killSessionSandboxes(previous.sessionId);
+    } catch (error) {
+      log.error(`SelfModify.Cleanup: could not stop the earlier sandbox of #${pullNumber}: ${(error as Error).message}`);
+    }
+  }
   await db
     .insert(selfModifyPulls)
     .values({ pullNumber, branch, sessionId })

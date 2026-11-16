@@ -1,12 +1,14 @@
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import {
+  branchSha,
   commitTree,
   createBlob,
   createBranch,
   createCommit,
   createDraftPull,
   createTree,
+  getPull,
   moveBranch,
   updatePull,
   type TreeEntry,
@@ -91,6 +93,15 @@ export default defineManfrodTool({
     }
     if (bytes > MAX_BYTES) problems.push(`${bytes} bytes changed; the limit is ${MAX_BYTES}`);
     if (problems.length > 0) return `Nothing was published. Fix these first:\n${problems.map((problem) => `- ${problem}`).join("\n")}`;
+    if (state.pullNumber && state.branch) {
+      const pull = await getPull(state.pullNumber);
+      if (!pull || pull.merged || pull.state === "closed") {
+        return `Pull request #${state.pullNumber} was ${pull?.merged ? "merged" : "closed"} after you checked it out; nothing was published. Call checkout-repo without pull_number to start a new pull request.`;
+      }
+      if ((await branchSha(state.branch)) !== state.headSha) {
+        return `Branch ${state.branch} changed after your checkout; nothing was published. Call checkout-repo with pull_number ${state.pullNumber} again and redo your change on top of it.`;
+      }
+    }
 
     for (const change of changes) {
       const content = contents.get(change.path);

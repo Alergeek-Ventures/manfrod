@@ -1,10 +1,16 @@
 import { z } from "zod";
-import { branchSha, getPull, tarball } from "../../../../lib/github.ts";
+import type { SandboxSession } from "eve/sandbox";
+import { branchSha, getPull, mergeBase, tarball } from "../../../../lib/github.ts";
 import { defineManfrodTool } from "../../../lib/define-tool.ts";
 import { authorize, BASE_TAG, BRANCH_PREFIX, proposal, REPO_DIR, sh, TARGET_BRANCH } from "../../../lib/self-modify.ts";
 import { environment } from "../sandbox.ts";
 
 const ARCHIVE = "/tmp/manfrod.tar.gz";
+
+async function extract(sandbox: SandboxSession, sha: string) {
+  await sandbox.writeFiles({ files: [{ path: ARCHIVE, content: await tarball(sha) }] });
+  await sh(sandbox, `tar -xzf ${ARCHIVE} --strip-components=1 && rm ${ARCHIVE}`);
+}
 
 export default defineManfrodTool({
   description: `Check out the Manfrod repository into ${REPO_DIR} and install its dependencies: the latest ${TARGET_BRANCH} for a new pull request, or with pull_number the current state of one of your open self-modify pull requests to add to it. Call it before editing. Calling it again discards local changes.`,
@@ -36,22 +42,27 @@ export default defineManfrodTool({
         return `Pull request #${pull_number} is already ${pull.merged ? "merged" : "closed"}; start a new one without pull_number.`;
       continued = { branch: pull.branch, pullNumber: pull.number, pullUrl: pull.url };
     }
-    const sha = await branchSha(continued?.branch ?? TARGET_BRANCH);
-    if (!sha) return `Branch ${continued?.branch ?? TARGET_BRANCH} not found.`;
+    const headSha = await branchSha(continued?.branch ?? TARGET_BRANCH);
+    if (!headSha) return `Branch ${continued?.branch ?? TARGET_BRANCH} not found.`;
+    const baseSha = continued ? await mergeBase(TARGET_BRANCH, headSha) : headSha;
+    if (!baseSha) return `Could not find where pull request #${pull_number} branched off ${TARGET_BRANCH}.`;
     const sandbox = await runtime.getSandbox(environment);
-    await sandbox.writeFiles({ files: [{ path: ARCHIVE, content: await tarball(sha) }] });
     await sandbox.run({ command: `rm -rf ${REPO_DIR} && mkdir -p ${REPO_DIR}` });
+    await extract(sandbox, baseSha);
     await sh(
       sandbox,
       [
-        `tar -xzf ${ARCHIVE} --strip-components=1`,
-        `rm ${ARCHIVE}`,
         "git init -q -b work",
         "git config user.name Manfrod && git config user.email manfrod@alergeek.ventures",
         "git add -A && git commit -qm base",
         `git tag ${BASE_TAG}`,
       ].join(" && "),
     );
+    if (continued) {
+      await sh(sandbox, "find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +");
+      await extract(sandbox, headSha);
+      await sh(sandbox, "git add -A && git commit -qm 'pull request head' --allow-empty");
+    }
     const install = "pnpm install --frozen-lockfile --prefer-offline";
     let offline = await sandbox.run({ command: `${install} --offline`, workingDirectory: REPO_DIR });
     if (offline.exitCode !== 0) {
@@ -63,13 +74,14 @@ export default defineManfrodTool({
       }
     }
     proposal.update(() => ({
-      baseSha: sha,
+      baseSha,
       branch: continued?.branch ?? null,
-      headSha: continued ? sha : null,
+      headSha: continued ? headSha : null,
       pullNumber: continued?.pullNumber ?? null,
       pullUrl: continued?.pullUrl ?? null,
     }));
     const what = continued ? `pull request #${continued.pullNumber} (${continued.branch})` : TARGET_BRANCH;
+    const sha = headSha;
     if (offline.exitCode !== 0) {
       return `Checked out ${what} at ${sha.slice(0, 7)}, but pnpm install failed:\n${(offline.stderr || offline.stdout).slice(-2000)}`;
     }

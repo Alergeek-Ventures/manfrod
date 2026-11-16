@@ -198,11 +198,28 @@ export interface OpenPull {
   draft: boolean;
 }
 
+const PAGE_SIZE = 100;
+const MAX_PAGES = 10;
+
+export async function collectPages<T>(fetchPage: (page: number) => Promise<T[]>): Promise<T[]> {
+  const all: T[] = [];
+  for (let page = 1; page <= MAX_PAGES; page += 1) {
+    const items = await fetchPage(page);
+    all.push(...items);
+    if (items.length < PAGE_SIZE) break;
+  }
+  return all;
+}
+
 export async function openPulls(): Promise<OpenPull[]> {
-  const pulls = await repo<
-    { number: number; title: string; html_url: string; head: { ref: string }; body: string | null; draft: boolean }[]
-  >("GET", "/pulls?state=open&per_page=100&sort=updated&direction=desc");
-  return (pulls ?? []).map((pull) => ({
+  const pulls = await collectPages(
+    async (page) =>
+      (await repo<{ number: number; title: string; html_url: string; head: { ref: string }; body: string | null; draft: boolean }[]>(
+        "GET",
+        `/pulls?state=open&per_page=${PAGE_SIZE}&page=${page}&sort=updated&direction=desc`,
+      )) ?? [],
+  );
+  return pulls.map((pull) => ({
     number: pull.number,
     title: pull.title,
     url: pull.html_url,
@@ -210,6 +227,11 @@ export async function openPulls(): Promise<OpenPull[]> {
     body: pull.body ?? "",
     draft: pull.draft,
   }));
+}
+
+export async function mergeBase(base: string, headSha: string): Promise<string | null> {
+  const compare = await repo<{ merge_base_commit: { sha: string } }>("GET", `/compare/${base}...${headSha}`);
+  return compare?.merge_base_commit.sha ?? null;
 }
 
 export async function updatePull(number: number, title: string, body: string): Promise<void> {

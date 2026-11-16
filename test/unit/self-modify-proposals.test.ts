@@ -47,3 +47,17 @@ describe("capabilityGate", () => {
     if (!gate.ok) expect(gate.message).toContain("#99 is not an open self-modify pull request");
   });
 });
+
+describe("collectPages", () => {
+  it("keeps fetching while pages are full and stops at the first short one", async () => {
+    const { collectPages } = await import("../../lib/github.ts");
+    const pages = [Array.from({ length: 100 }, (_, index) => index), [100, 101]];
+    const requested: number[] = [];
+    const all = await collectPages(async (page) => {
+      requested.push(page);
+      return pages[page - 1] ?? [];
+    });
+    expect(all).toHaveLength(102);
+    expect(requested).toEqual([1, 2]);
+  });
+});
