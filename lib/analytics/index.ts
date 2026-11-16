@@ -21,6 +21,7 @@ const INTENT_TOOLS = new Set([
   "delete-note",
   "delete-recurring-reminder",
   "delete-slack-message",
+  "edit-slack-canvas",
   "escalate-note",
   "find-meeting-time",
   "leave-thread",

@@ -1,5 +1,13 @@
 import { containsSecret } from "../../lib/security/secrets.ts";
-import { channelMembers, downloadFile, fetchUserName, getFileInfo, resolveChannel, type SlackBody } from "../../lib/slack/api.ts";
+import {
+  channelMembers,
+  downloadFile,
+  fetchUserName,
+  getChannelCanvasId,
+  getFileInfo,
+  resolveChannel,
+  type SlackBody,
+} from "../../lib/slack/api.ts";
 import { formatLocal, slackTsToDate } from "../../lib/time.ts";
 import { type MsgCtx } from "../../lib/../lib/agent/context.ts";
 
@@ -68,4 +76,33 @@ export async function readCanvas(fileId: string): Promise<string> {
   if (!info?.url_private) return "Nie udało się odczytać canvasu: :not_found";
   const content = await downloadFile(info.url_private);
   return content ?? "Nie udało się odczytać canvasu: :download_failed";
+}
+
+export async function resolveCanvas(
+  channel: string | undefined,
+  canvasId: string | undefined,
+): Promise<{ ok: true; id: string; channelId: string | null } | { ok: false; message: string }> {
+  if (blank(canvasId)) return { ok: true, id: canvasId!.trim(), channelId: null };
+  if (!blank(channel)) return { ok: false, message: "Give a channel or a canvas_id." };
+  const resolved = await resolveChannel(channel!.trim());
+  if (!resolved.ok) {
+    return {
+      ok: false,
+      message:
+        resolved.error === "not_found" ? `Channel not found: ${channel}` : `Could not find the channel: ${errorText(resolved.error)}`,
+    };
+  }
+  const fileId = await getChannelCanvasId(resolved.id);
+  if (fileId === undefined) return { ok: false, message: "Could not read the channel info: :api_error" };
+  if (fileId === null) return { ok: false, message: "This channel has no pinned canvas." };
+  return { ok: true, id: fileId, channelId: resolved.id };
+}
+
+export function canvasErrorText(error: string, scope: string): string {
+  if (error === "missing_scope")
+    return `the Slack app lacks the ${scope} scope; an admin has to add it to the bot token scopes and reinstall the app`;
+  if (error === "canvas_not_found" || error === "not_found") return "canvas not found or not shared with the bot";
+  if (error === "access_denied" || error === "not_allowed" || error === "restricted_action")
+    return "the bot has no edit access to this canvas; someone has to share it with the bot with edit rights";
+  return errorText(error);
 }
