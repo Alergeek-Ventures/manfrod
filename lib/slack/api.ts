@@ -335,3 +335,45 @@ export async function botIdentity(): Promise<{ botId: string; userId: string; te
 
 export const archiveLink = (workspaceUrl: string, channel: string, ts: string) =>
   `${workspaceUrl.replace(/\/$/, "")}/archives/${channel}/p${ts.replace(".", "")}`;
+
+export type CanvasOperation = "insert_at_start" | "insert_at_end" | "insert_after" | "insert_before" | "replace";
+
+export function createChannelCanvas(channel: string, markdown: string) {
+  return post("conversations.canvases.create", { channel_id: channel, document_content: { type: "markdown", markdown } });
+}
+
+export function createCanvas(markdown: string, title?: string, channel?: string) {
+  return post("canvases.create", {
+    document_content: { type: "markdown", markdown },
+    ...(title ? { title } : {}),
+    ...(channel ? { channel_id: channel } : {}),
+  });
+}
+
+export function editCanvas(canvasId: string, change: { operation: CanvasOperation; markdown?: string; sectionId?: string }) {
+  return post("canvases.edit", {
+    canvas_id: canvasId,
+    changes: [
+      {
+        operation: change.operation,
+        ...(change.sectionId ? { section_id: change.sectionId } : {}),
+        ...(change.markdown !== undefined ? { document_content: { type: "markdown", markdown: change.markdown } } : {}),
+      },
+    ],
+  });
+}
+
+export async function lookupCanvasSections(
+  canvasId: string,
+  criteria: { sectionTypes?: string[]; containsText?: string },
+): Promise<{ ok: true; ids: string[] } | { ok: false; error: string }> {
+  const result = await post("canvases.sections.lookup", {
+    canvas_id: canvasId,
+    criteria: {
+      ...(criteria.sectionTypes?.length ? { section_types: criteria.sectionTypes } : {}),
+      ...(criteria.containsText ? { contains_text: criteria.containsText } : {}),
+    },
+  });
+  if (!result.ok) return result;
+  return { ok: true, ids: ((result.body.sections ?? []) as SlackBody[]).map((section) => String(section.id)) };
+}
