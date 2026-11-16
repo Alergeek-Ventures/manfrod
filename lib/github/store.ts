@@ -143,9 +143,24 @@ export async function markBackfilled(id: number): Promise<void> {
   await db.update(githubRepositories).set({ backfilledAt: new Date() }).where(eq(githubRepositories.id, id));
 }
 
+export const landedAt = (commit: Pick<CommitInput, "authoredAt" | "committedAt">) => commit.committedAt ?? commit.authoredAt;
+
+const landedColumn = sql<Date>`coalesce(${githubCommits.committedAt}, ${githubCommits.authoredAt})`;
+
+async function isDefaultBranch(repositoryId: number, branch: string | null): Promise<boolean> {
+  if (!branch) return false;
+  const [repository] = await db
+    .select({ defaultBranch: githubRepositories.defaultBranch })
+    .from(githubRepositories)
+    .where(eq(githubRepositories.id, repositoryId))
+    .limit(1);
+  return repository?.defaultBranch === branch;
+}
+
 export async function storeCommits(repositoryId: number, branch: string | null, commits: CommitInput[]): Promise<number> {
   if (commits.length === 0) return 0;
   const rows = commits.map((commit) => ({ repositoryId, ...commit, branches: branch ? [branch] : [] }));
+  const onDefault = await isDefaultBranch(repositoryId, branch);
   await db
     .insert(githubCommits)
     .values(rows)
@@ -154,14 +169,16 @@ export async function storeCommits(repositoryId: number, branch: string | null, 
       set: {
         branches: sql`array(select distinct unnest(${githubCommits.branches} || excluded.branches))`,
         authorLogin: sql`coalesce(excluded.author_login, ${githubCommits.authorLogin})`,
-        committedAt: sql`coalesce(${githubCommits.committedAt}, excluded.committed_at)`,
+        committedAt: onDefault
+          ? sql`coalesce(excluded.committed_at, ${githubCommits.committedAt})`
+          : sql`coalesce(${githubCommits.committedAt}, excluded.committed_at)`,
       },
     });
   return rows.length;
 }
 
 export async function deleteCommitsBefore(cutoff: Date): Promise<void> {
-  await db.delete(githubCommits).where(lt(githubCommits.authoredAt, cutoff));
+  await db.delete(githubCommits).where(lt(landedColumn, cutoff));
 }
 
 export function authoredBy(account: Pick<GithubAccount, "login" | "emails">): SQL {
@@ -178,9 +195,10 @@ export async function listCommits(filter: {
   author?: Pick<GithubAccount, "login" | "emails">;
   branch?: string;
   limit?: number;
+  time?: "landed" | "written";
 }): Promise<StoredCommit[]> {
   if (filter.repositoryIds && filter.repositoryIds.length === 0) return [];
-  const landed = sql<Date>`coalesce(${githubCommits.committedAt}, ${githubCommits.authoredAt})`;
+  const landed = filter.time === "written" ? sql<Date>`${githubCommits.authoredAt}` : landedColumn;
   const rows = await db
     .select({ commit: githubCommits, repository: githubRepositories.fullName })
     .from(githubCommits)

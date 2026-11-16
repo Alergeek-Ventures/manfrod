@@ -185,7 +185,7 @@ async function commitsBetween(person: User, since: Date, until: Date): Promise<S
   const token = await userToken(person.id);
   if (!token.ok) return [];
   const readable = await userRepositories(person.id, token.value).catch(() => []);
-  return listCommits({ since, until, author: account, repositoryIds: readable.map((repository) => repository.id) });
+  return listCommits({ since, until, author: account, repositoryIds: readable.map((repository) => repository.id), time: "written" });
 }
 
 function firstEntry(person: User, office: AccessEntry[]): Date | null {

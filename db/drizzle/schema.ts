@@ -801,6 +801,7 @@ export const githubCommits = pgTable("github_commits", {
 	index("github_commits_author_email_index").using("btree", sql`lower(author_email)`, sql`authored_at`),
 	index("github_commits_author_login_index").using("btree", sql`lower(author_login)`, sql`authored_at`),
 	index().using("btree", table.authoredAt.asc().nullsLast().op("timestamp_ops")),
+	index("github_commits_landed_at_index").using("btree", sql`COALESCE(committed_at, authored_at)`),
 	primaryKey({ columns: [table.repositoryId, table.sha], name: "github_commits_pkey"}),
 ]);
 
