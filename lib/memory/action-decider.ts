@@ -1,9 +1,9 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { experimental_decide as decide } from "ai";
 import { config } from "../config.ts";
 import { logger } from "../log.ts";
+import { jevEnabled, jevModel } from "../llm/jev.ts";
 
 export const MEMORY_ACTIONS = [
   "ignore",
@@ -76,14 +76,12 @@ export function classifierRules() {
   return cached;
 }
 
-export const jevEnabled = () => Boolean(config.typesafeApiKey);
-
 export async function decideAction(input: ActionInput, today: string): Promise<ActionDecision | null> {
   if (!jevEnabled()) return null;
   const rules = classifierRules();
   try {
     const result = await decide({
-      model: typeSafeAi.decisionModel(config.decisionModel),
+      model: jevModel(),
       state: {
         current_date: today,
         channel: input.channelKind,
@@ -109,7 +107,7 @@ export async function worthSummarizing(conversation: string): Promise<boolean | 
   if (!jevEnabled()) return null;
   try {
     const result = await decide({
-      model: typeSafeAi.decisionModel(config.decisionModel),
+      model: jevModel(),
       state: { conversation },
       questions: {
         substantive: {
@@ -141,7 +139,7 @@ export async function suggestProject(
   };
   try {
     const result = await decide({
-      model: typeSafeAi.decisionModel(config.decisionModel),
+      model: jevModel(),
       state: channel,
       questions: {
         project: {

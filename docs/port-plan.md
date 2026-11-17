@@ -178,13 +178,13 @@ decryption and the Oban import. Run it before and after the cutover.
   Built-in providers keep `firmowid__<tool>`.
 - A follow-up from the running turn's author steers it; anyone else's message
   queues behind it (same outcome as the old interrupt/wait split).
-- The gate uses Jev when `TYPESAFE_AI_API_KEY` is set and falls back to the
-  fast-model prompt otherwise; on any failure it responds.
+- The gate uses Jev (through OpenRouter) and falls back to the fast-model
+  prompt when it is unavailable; on any failure it responds.
 
 ## Operations
 
 - Env: `DATABASE_URL`, `APP_URL`, `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET`,
-  `OPENROUTER_API_KEY`, `TYPESAFE_AI_API_KEY`, `VOYAGE_API_KEY`,
+  `OPENROUTER_API_KEY`, `VOYAGE_API_KEY`,
   `BRAVE_SEARCH_API_KEY`, `GOOGLE_*`, `HOLIDAY_CALENDAR_ID`,
   `KALAFIORNIA_OFFICE_ACCESS_API_KEY`, `ENCRYPTION_KEY`,
   `INNGEST_BASE_URL`, `INNGEST_EVENT_KEY`, `INNGEST_SIGNING_KEY`, `E2B_API_KEY`.

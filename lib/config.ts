@@ -101,7 +101,7 @@ export const config = {
     return env("INTERNAL_URL") ?? `http://127.0.0.1:${env("PORT") ?? "35233"}`;
   },
   get decisionModel() {
-    return env("DECISION_MODEL") ?? "jev-latest";
+    return env("DECISION_MODEL") ?? "~typesafe/jev-latest";
   },
   get cronsEnabled() {
     return env("DISABLE_CRONS") !== "1";
@@ -130,9 +130,6 @@ export const config = {
   get appCommit() {
     bakedCommit ??= { value: readAppCommit() };
     return bakedCommit.value;
-  },
-  get typesafeApiKey() {
-    return env("TYPESAFE_AI_API_KEY");
   },
   get isProduction() {
     return process.env.NODE_ENV === "production";

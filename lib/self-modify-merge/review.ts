@@ -1,8 +1,8 @@
-import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { experimental_decide as decide } from "ai";
 import { z } from "zod";
 import { config } from "../config.ts";
 import { generateSimple, REVIEW_MODEL, system, user } from "../llm/index.ts";
+import { jevEnabled, jevModel } from "../llm/jev.ts";
 
 export interface ReviewedFile {
   path: string;
@@ -78,9 +78,9 @@ export const reviewModelJudge: Judge = async (input) => {
 };
 
 export const jevJudge: Judge = async (input) => {
-  if (!config.typesafeApiKey) throw new Error("TYPESAFE_AI_API_KEY is not set");
+  if (!jevEnabled()) throw new Error("OPENROUTER_API_KEY is not set");
   const result = await decide({
-    model: typeSafeAi.decisionModel(config.decisionModel),
+    model: jevModel(),
     state: { change: JSON.stringify(input) },
     questions: {
       verdict: {
