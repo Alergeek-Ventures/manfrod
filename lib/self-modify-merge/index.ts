@@ -13,7 +13,6 @@ import {
 import { logger } from "../log.ts";
 import { getRecentSessionMessages } from "../memory/messages.ts";
 import { isProposal, publishedHead, recordedOpenPulls } from "../self-modify-pulls.ts";
-import { runRehearsals } from "../rehearsal/index.ts";
 import { planRehearsals, targetFor } from "../rehearsal/scenarios.ts";
 import { insertPlanned } from "../rehearsal/store.ts";
 import { findingForPull, linkedCases } from "../self-review/store.ts";
@@ -317,11 +316,6 @@ export async function detectLive(): Promise<number> {
 
 export async function runAutoMerge(): Promise<{ live: number; settled: number; outcomes: Record<number, Outcome> }> {
   const live = await detectLive();
-  try {
-    await runRehearsals();
-  } catch (error) {
-    log.error(`SelfModify.Merge: rehearsals failed: ${(error as Error).message}`);
-  }
   const outcomes: Record<number, Outcome> = {};
   if (!config.selfReviewChannelId) return { live, settled: 0, outcomes };
   const settledCount = await settleMerging();

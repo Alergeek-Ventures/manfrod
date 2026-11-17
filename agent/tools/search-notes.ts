@@ -2,6 +2,7 @@ import { z } from "zod";
 import { getNodeLinksAccessible } from "../../lib/memory/nodes.ts";
 import { recordMemoryContext, search } from "../../lib/memory/search.ts";
 import { PROJECT_DOC, noteDate, unknownProject, resolveProject } from "../lib/notes.ts";
+import { isRehearsal } from "../../lib/rehearsal/guard.ts";
 import { defineManfrodTool } from "../lib/define-tool.ts";
 
 export default defineManfrodTool({
@@ -20,6 +21,7 @@ export default defineManfrodTool({
       projectId: resolved.id,
       sessionKey: ctx.sessionKey,
       purpose: "tool",
+      audit: !isRehearsal(ctx.kind),
     });
     if (found.length === 0) return `No relevant notes found for: ${query}`;
     recordMemoryContext({

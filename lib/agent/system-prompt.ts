@@ -31,9 +31,11 @@ Timezone: ${TIMEZONE} (${zoneAbbreviation(now)}, UTC${offset >= 0 ? "+" : "-"}${
 
 export const timeNote = () => `${TIME_NOTE_HEADER}\n${nowLine()}`;
 
-async function currentContext(userId: string, sessionKey: string | null): Promise<string> {
+async function currentContext(userId: string, sessionKey: string | null, channel: string | null): Promise<string> {
   let userLine = "";
-  if (sessionKey && !isDmSession(sessionKey)) {
+  if (!sessionKey && channel && !channel.startsWith("D")) {
+    userLine = `\nThis is a shared Slack channel, ${channel}; other people may read your reply.`;
+  } else if (sessionKey && !isDmSession(sessionKey)) {
     const [channel, threadTs] = sessionKey.split(":");
     userLine =
       '\nThis is a shared channel thread — multiple people participate. Each user message is prefixed with its author ("[from: Full Name <slack_id>]" — the <slack_id> is a unique identifier, not part of the name; use it to tell apart people who share a name). Address the right person; don\'t assume there is a single "the user".' +
@@ -51,16 +53,22 @@ const sections = (...parts: (string | null | undefined)[]) =>
     .filter((part) => part !== "")
     .join("\n\n");
 
-export async function buildSystemPrompt(userId: string, sessionKey: string | null, readableLevels: string[]): Promise<string> {
+export async function buildSystemPrompt(
+  userId: string,
+  sessionKey: string | null,
+  readableLevels: string[],
+  channelWithoutSession: string | null = null,
+): Promise<string> {
   if (!(await healthy())) return sections(CONVERSATION_PROMPT, SOUL_BASE_PROMPT);
-  const dm = isDmSession(sessionKey);
+  const channel = sessionKey?.split(":")[0] ?? channelWithoutSession;
+  const dm = channel?.startsWith("D") ?? false;
   const anchor = dm ? await getSoulAnchor(userId, readableLevels) : null;
   const identity = anchor ? soulContext(anchor) : `${SOUL_BASE_PROMPT}${dm ? SOUL_ONBOARDING_PROMPT : ""}`;
-  const context = await currentContext(userId, sessionKey);
-  const language = await languageInstructions(sessionKey?.split(":")[0] ?? null);
+  const context = await currentContext(userId, sessionKey, channel);
+  const language = await languageInstructions(channel);
   const secrets = await secretsPrompt(userId);
   const tasks = await tasksPrompt(sessionKey);
-  const github = await githubPrompt(sessionKey?.split(":")[0] ?? null);
+  const github = await githubPrompt(channel);
   return sections(CONVERSATION_PROMPT, identity, context, language, github, secrets, tasks);
 }
 

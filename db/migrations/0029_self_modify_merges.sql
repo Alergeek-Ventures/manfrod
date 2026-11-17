@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS self_modify_rehearsals (
     scenario jsonb,
     status text NOT NULL DEFAULT 'pending' CONSTRAINT self_modify_rehearsals_status CHECK (status = ANY (ARRAY['pending'::text, 'running'::text, 'done'::text, 'failed'::text])),
     session_id text,
+    start_attempts integer NOT NULL DEFAULT 0,
     transcript jsonb,
     verdict text CONSTRAINT self_modify_rehearsals_verdict CHECK (verdict IS NULL OR verdict = ANY (ARRAY['fixed'::text, 'still_broken'::text, 'unclear'::text])),
     reason text,

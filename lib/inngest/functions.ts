@@ -15,6 +15,7 @@ import { deleteCommitsBefore } from "../github/store.ts";
 import { backfillRepository, COMMIT_RETENTION_DAYS, completePush, pendingBackfills, syncAll, syncInstallation } from "../github/sync.ts";
 import { runHolidayCheck } from "../holidays.ts";
 import { deleteSandboxFilesOlderThan } from "../sandbox-files.ts";
+import { runRehearsals } from "../rehearsal/index.ts";
 import { clearTranscriptsOlderThan } from "../rehearsal/store.ts";
 import { runAutoMerge } from "../self-modify-merge/index.ts";
 import { cleanUpClosedPulls } from "../self-modify-pulls.ts";
@@ -279,6 +280,7 @@ const allFunctions = [
   cronFunction("nudges-project-summaries", "0 15 * * 5", async () => ({ posted: await runProjectSummaries() })),
   cronFunction("self-modify-cleanup", "20 * * * *", () => cleanUpClosedPulls()),
   cronFunction("self-modify-auto-merge", "*/10 * * * *", () => runAutoMerge()),
+  cronFunction("self-modify-rehearsals", "*/5 * * * *", () => runRehearsals()),
   cronFunction("capability-sync", "*/10 * * * *", () => syncCapabilityRequests()),
   cronFunction("gitleaks-refresh", "0 3 * * *", () => refreshGitleaks()),
   cronFunction("self-review", "30 3 * * *", () => selfReviewNightly()),

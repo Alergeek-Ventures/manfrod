@@ -390,10 +390,4 @@ describe("auto-merge", () => {
     expect(await processPull(42)).toBe("merged");
     expect(state.targets[0].target).toMatchObject({ source: "request", expected: "Answers in Polish", findingId: null });
   });
-
-  it("rehearses on every run, even with the kill switch off", async () => {
-    state.enabled = [false];
-    await runAutoMerge();
-    expect(state.rehearsalRuns).toBe(1);
-  });
 });

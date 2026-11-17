@@ -171,6 +171,14 @@ export async function mergedPull(pullNumber: number): Promise<SelfModifyMerge | 
   return row ?? null;
 }
 
+export async function brokenMergeShas(): Promise<Set<string>> {
+  const rows = await db
+    .select({ mergeSha: selfModifyMerges.mergeSha })
+    .from(selfModifyMerges)
+    .where(and(eq(selfModifyMerges.verdict, "still_broken"), isNotNull(selfModifyMerges.mergeSha)));
+  return new Set(rows.flatMap((row) => (row.mergeSha ? [row.mergeSha] : [])));
+}
+
 export async function recordVerdict(id: string, verdict: Verdict): Promise<void> {
   await db.update(selfModifyMerges).set({ verdict }).where(eq(selfModifyMerges.id, id));
 }

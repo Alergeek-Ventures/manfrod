@@ -669,6 +669,7 @@ export const selfModifyRehearsals = pgTable("self_modify_rehearsals", {
 	scenario: jsonb(),
 	status: text().default('pending').notNull(),
 	sessionId: text("session_id"),
+	startAttempts: integer("start_attempts").default(0).notNull(),
 	transcript: jsonb(),
 	verdict: text(),
 	reason: text(),

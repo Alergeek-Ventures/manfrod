@@ -41,6 +41,7 @@ Self-modify pull requests that only change Markdown in `agent/skills/<name>/SKIL
 - If Coolify builds a newer `main` than `github.sha` (two quick pushes), `APP_COMMIT` lags; that only delays detection, never a false "live".
 - No `/version.json` endpoint. User decision.
 - Verification = a rehearsal of the original scenario on the new version, judged against expected; not rating counts. User decision 2026-11-17. Real conversations after deploy are not re-checked in v1.
+- Rehearsal LLM cost (the agent turns of headless sessions skip the audit hook) is not recorded yet; follow-up.
 - Reverting a harmful change stays manual in v1.
 - Branch protection bypass for the GitHub App on `main`: the user does it in repo settings.
 

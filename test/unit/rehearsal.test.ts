@@ -9,6 +9,8 @@ const state = vi.hoisted(() => ({
   posts: [] as { channel: string; thread_ts?: string; text: string }[],
   verdicts: new Map<string, string>(),
   reopened: [] as string[],
+  readFails: false,
+  startFails: false,
 }));
 
 vi.mock("../../lib/inngest/runtime.ts", () => ({
@@ -17,18 +19,31 @@ vi.mock("../../lib/inngest/runtime.ts", () => ({
       throw new Error("a rehearsal must never reach Slack");
     },
     startHeadless: async (address: string, message: string, auth: { attributes: Record<string, unknown> }, history: unknown[]) => {
+      if (state.startFails) throw new Error("runtime busy");
       state.started.push({ address, message, auth, history });
       return `session-${state.started.length}`;
     },
-    sessionEvents: async (sessionId: string) => state.events.get(sessionId) ?? [],
+    sessionEvents: async (sessionId: string) => {
+      if (state.readFails) throw new Error("stream unavailable");
+      return state.events.get(sessionId) ?? [];
+    },
     endSession: async (sessionId: string) => {
       state.ended.push(sessionId);
     },
   }),
 }));
 vi.mock("../../lib/rehearsal/store.ts", () => ({
-  pendingLive: async () => state.rehearsals.filter((row) => row.status === "pending"),
-  running: async () => state.rehearsals.filter((row) => row.status === "running"),
+  pendingLive: async (limit: number) =>
+    state.rehearsals
+      .filter((row) => row.status === "pending")
+      .slice(0, limit)
+      .map((row) => ({ liveAt: new Date(), ...row })),
+  running: async (limit: number) => state.rehearsals.filter((row) => row.status === "running").slice(0, limit),
+  failedStart: async (id: string) => {
+    const row = state.rehearsals.find((entry) => entry.id === id)!;
+    row.startAttempts = ((row.startAttempts as number) ?? 0) + 1;
+    return row.startAttempts as number;
+  },
   markRunning: async (id: string, sessionId: string) => {
     Object.assign(
       state.rehearsals.find((row) => row.id === id)!,
@@ -55,10 +70,16 @@ vi.mock("../../lib/self-review/store.ts", () => ({
   },
 }));
 vi.mock("../../lib/accounts.ts", () => ({
-  getUser: async (id: string) => (id === "gone" ? null : { id, slackId: `U-${id}` }),
+  getUser: async (id: string) => (id === "gone" ? null : { id, slackId: `U-${id}`, banned: id === "banned" }),
 }));
-vi.mock("../../lib/memory/access.ts", () => ({ resolveAccess: async () => ({ readableLevels: ["internal"], writeAccess: ["internal"] }) }));
+vi.mock("../../lib/memory/access.ts", () => ({
+  readOnlyAccess: async () => ({ readableLevels: ["internal"], writeAccess: ["internal"] }),
+  resolveAccess: async () => {
+    throw new Error("a rehearsal must not change memberships");
+  },
+}));
 vi.mock("../../lib/slack/api.ts", () => ({
+  deactivatedSlackIds: async () => new Set(["U-deactivated"]),
   post: async (_endpoint: string, body: { channel: string; thread_ts?: string; text: string }) => {
     state.posts.push(body);
     return { ok: true, body: { ts: "9.9" } };
@@ -109,6 +130,8 @@ beforeEach(() => {
   state.posts = [];
   state.verdicts = new Map();
   state.reopened = [];
+  state.readFails = false;
+  state.startFails = false;
 });
 
 describe("scenarios", () => {
@@ -248,5 +271,60 @@ describe("rehearsal runs", () => {
     expect(state.verdicts.get("m1")).toBe("unclear");
     expect(state.verdicts.get("m2")).toBe("unclear");
     expect(state.posts.map((entry) => entry.text).join("\n")).toContain("there was no scenario to rehearse");
+  });
+
+  it("skips scenarios whose person or channel is gone, without touching memberships", async () => {
+    state.merges = [merge("m1", null)];
+    state.rehearsals = [
+      rehearsal("r1", "m1", { channelId: null }),
+      rehearsal("r2", "m1", { userId: "gone" }),
+      rehearsal("r3", "m1", { userId: "banned" }),
+      rehearsal("r4", "m1", { userId: "deactivated" }),
+    ];
+    await runRehearsals(judge);
+    expect(state.started).toEqual([]);
+    expect(state.rehearsals.map((row) => [row.status, row.verdict, row.reason])).toEqual(
+      Array(4).fill(["failed", "unclear", "The person or channel is no longer available."]),
+    );
+  });
+
+  it("gives up on a scenario after three failed starts or six hours live", async () => {
+    state.merges = [merge("m1", null)];
+    state.rehearsals = [rehearsal("r1", "m1")];
+    state.startFails = true;
+    await runRehearsals(judge);
+    await runRehearsals(judge);
+    expect(state.rehearsals[0].status).toBe("pending");
+    await runRehearsals(judge);
+    expect(state.rehearsals[0]).toMatchObject({ status: "failed", verdict: "unclear" });
+    state.verdicts.clear();
+    state.rehearsals = [rehearsal("r2", "m1", { liveAt: new Date(Date.now() - 7 * 3_600_000) })];
+    state.startFails = false;
+    await runRehearsals(judge);
+    expect(state.started).toEqual([]);
+    expect(state.rehearsals[0]).toMatchObject({ status: "failed", verdict: "unclear" });
+  });
+
+  it("checks the timeout before trusting the event stream", async () => {
+    state.merges = [merge("m1", null)];
+    state.rehearsals = [rehearsal("r1", "m1", { status: "running", sessionId: "s1", startedAt: new Date() })];
+    state.readFails = true;
+    await runRehearsals(judge);
+    expect(state.rehearsals[0].status).toBe("running");
+    (state.rehearsals[0] as { startedAt: Date }).startedAt = new Date(Date.now() - 31 * 60_000);
+    await runRehearsals(judge);
+    expect(state.rehearsals[0]).toMatchObject({ status: "failed", verdict: "unclear" });
+    expect(state.verdicts.get("m1")).toBe("unclear");
+  });
+
+  it("collects at most five rehearsals per run", async () => {
+    state.merges = [merge("m1", null)];
+    state.rehearsals = Array.from({ length: 7 }, (_, index) =>
+      rehearsal(`r${index}`, "m1", { status: "running", sessionId: `s${index}`, startedAt: new Date() }),
+    );
+    for (let index = 0; index < 7; index += 1) state.events.set(`s${index}`, finished("Which day?"));
+    await runRehearsals(judge);
+    expect(state.rehearsals.filter((row) => row.status === "done")).toHaveLength(5);
+    expect(state.verdicts.size).toBe(0);
   });
 });

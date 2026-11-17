@@ -102,24 +102,35 @@ describe.skipIf(!enabled)("self-modify auto-merge store", () => {
     await rehearsals.insertPlanned(merge.id, [
       { userId, channelId: "C1", evidenceLink: "https://slack.example/1", scenario: { history: [], message: "book a desk" } },
     ]);
-    expect((await rehearsals.pendingLive()).some((row) => row.mergeId === merge.id)).toBe(false);
+    expect((await rehearsals.pendingLive(100)).some((row) => row.mergeId === merge.id)).toBe(false);
     await store.claimLive(merge.id);
-    const [pending] = (await rehearsals.pendingLive()).filter((row) => row.mergeId === merge.id);
+    const [pending] = (await rehearsals.pendingLive(100)).filter((row) => row.mergeId === merge.id);
     expect(pending.scenario).toEqual({ history: [], message: "book a desk" });
+    expect(pending.liveAt).toBeInstanceOf(Date);
+    expect(await rehearsals.failedStart(pending.id)).toBe(1);
+    expect(await rehearsals.failedStart(pending.id)).toBe(2);
     await rehearsals.markRunning(pending.id, "session-1");
-    expect((await rehearsals.running()).some((row) => row.id === pending.id)).toBe(true);
+    expect((await rehearsals.running(100)).some((row) => row.id === pending.id)).toBe(true);
     await rehearsals.finish(pending.id, "done", { finished: "completed", reply: "Which day?", actions: [] }, "fixed", "It asked first.");
     const [done] = await rehearsals.forMerges([merge.id]);
     expect(done).toMatchObject({ status: "done", verdict: "fixed", reason: "It asked first." });
     expect((await store.liveUnjudged()).some((row) => row.id === merge.id)).toBe(true);
-    await store.recordVerdict(merge.id, "fixed");
+    await store.recordVerdict(merge.id, "still_broken");
     expect((await store.liveUnjudged()).some((row) => row.id === merge.id)).toBe(false);
-    await db
-      .update(tables.selfModifyRehearsals)
-      .set({ insertedAt: new Date(Date.now() - 8 * 86_400_000) })
-      .where(eq(tables.selfModifyRehearsals.id, pending.id));
-    expect(await rehearsals.clearTranscriptsOlderThan(7)).toBeGreaterThanOrEqual(1);
-    const [cleared] = await rehearsals.forMerges([merge.id]);
+    expect((await store.brokenMergeShas()).has("squash6")).toBe(true);
+    await rehearsals.insertPlanned(merge.id, [
+      { userId, channelId: "C1", evidenceLink: null, scenario: { history: [], message: "never started" } },
+    ]);
+    const old = new Date(Date.now() - 8 * 86_400_000);
+    await db.update(tables.selfModifyRehearsals).set({ insertedAt: old }).where(eq(tables.selfModifyRehearsals.mergeId, merge.id));
+    await rehearsals.clearTranscriptsOlderThan(7);
+    const kept = (await rehearsals.forMerges([merge.id])).find((row) => row.id === pending.id)!;
+    expect(kept.transcript).not.toBeNull();
+    const expired = (await rehearsals.forMerges([merge.id])).find((row) => row.id !== pending.id)!;
+    expect(expired).toMatchObject({ status: "failed", verdict: "unclear", scenario: null });
+    await db.update(tables.selfModifyRehearsals).set({ finishedAt: old }).where(eq(tables.selfModifyRehearsals.id, pending.id));
+    await rehearsals.clearTranscriptsOlderThan(7);
+    const cleared = (await rehearsals.forMerges([merge.id])).find((row) => row.id === pending.id)!;
     expect(cleared).toMatchObject({ scenario: null, transcript: null, verdict: "fixed", reason: "It asked first." });
   });
 

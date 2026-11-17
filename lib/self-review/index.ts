@@ -6,6 +6,7 @@ import { agentRuntime, type HandoffAuth } from "../inngest/runtime.ts";
 import { logger } from "../log.ts";
 import { getRecentSessionMessages } from "../memory/messages.ts";
 import { proactiveTitle, startThread, userAuth } from "../proactive.ts";
+import { brokenMergeShas } from "../self-modify-merge/store.ts";
 import { post } from "../slack/api.ts";
 import {
   BAD_RATING,
@@ -214,9 +215,11 @@ async function selfReviewAuth(findingId: string, channelId: string, threadTs: st
   };
 }
 
+export const withoutBrokenFixes = (commits: CommitSummary[], broken: Set<string>) => commits.filter((commit) => !broken.has(commit.sha));
+
 async function recentCommits(since: Date): Promise<CommitSummary[]> {
   try {
-    return await commitsSince(since, TARGET_BRANCH, RECENT_COMMITS);
+    return withoutBrokenFixes(await commitsSince(since, TARGET_BRANCH, RECENT_COMMITS), await brokenMergeShas());
   } catch (error) {
     log.error(`SelfReview: could not list recent commits: ${(error as Error).message}`);
     return [];
