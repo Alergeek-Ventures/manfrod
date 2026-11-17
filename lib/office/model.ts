@@ -80,6 +80,25 @@ export function footprint(item: Placed): Box {
     : { x: item.x, y: item.y, width: item.width, height: item.height };
 }
 
+export function doorGeometry(item: Placed) {
+  const box = footprint(item);
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
+  const left = cx - item.width / 2;
+  const bottom = cy + item.height / 2;
+  const leaf = item.width;
+  return {
+    cx,
+    cy,
+    rotation: item.rotation,
+    hinge: { x: left, y: bottom },
+    leafEnd: { x: left, y: bottom - leaf },
+    closedEnd: { x: left + leaf, y: bottom },
+    radius: leaf,
+    opening: { x: left, y: bottom, width: leaf },
+  };
+}
+
 export const nextRotation = (rotation: number): Rotation => ((((rotation + 90) % 360) + 360) % 360) as Rotation;
 
 export function clampToGrid(box: Box, grid: { width: number; height: number }): { x: number; y: number } {
