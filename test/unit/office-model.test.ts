@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   clampToGrid,
   elementsSchema,
+  fitDeskGeometry,
+  fitInside,
   footprint,
   layoutSettingsSchema,
   nextRotation,
@@ -46,6 +48,27 @@ describe("office layout elements", () => {
 
   it("keeps boxes inside the grid", () => {
     expect(clampToGrid({ x: 58, y: -3, width: 6, height: 4 }, { width: 60, height: 40 })).toEqual({ x: 54, y: 0 });
+  });
+
+  it("pulls items back inside a shrunk grid", () => {
+    const grid = { width: 20, height: 12 };
+    expect(fitInside({ id: "w", x: 30, y: 30, width: 6, height: 4, rotation: 0 }, grid)).toEqual({
+      id: "w",
+      x: 14,
+      y: 8,
+      width: 6,
+      height: 4,
+      rotation: 0,
+    });
+    expect(fitInside({ x: 18, y: 0, width: 6, height: 4, rotation: 90 }, grid)).toEqual({ x: 16, y: 0, width: 6, height: 4, rotation: 90 });
+    expect(fitInside({ x: 5, y: 5, width: 40, height: 30, rotation: 0 }, grid)).toEqual({ x: 0, y: 0, width: 20, height: 12, rotation: 0 });
+  });
+
+  it("leaves unplaced desks unplaced and clamps placed ones", () => {
+    const grid = { width: 20, height: 12 };
+    const unplaced = { x: null, y: null, width: 6, height: 4, rotation: 0 as const };
+    expect(fitDeskGeometry(unplaced, grid)).toBe(unplaced);
+    expect(fitDeskGeometry({ ...unplaced, x: 50, y: 50 }, grid)).toEqual({ x: 14, y: 8, width: 6, height: 4, rotation: 0 });
   });
 
   it("validates layout settings", () => {

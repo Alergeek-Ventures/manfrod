@@ -1,4 +1,4 @@
-import { isSystemUser, listUsers } from "@/lib/accounts.ts";
+import { isSystemUser, listUsers, personName } from "@/lib/accounts.ts";
 import { loadOffice } from "@/lib/office/layout.ts";
 import { listOfficeMembers } from "@/lib/office/members.ts";
 import { deskMapPath } from "@/lib/office/url.ts";
@@ -8,8 +8,6 @@ import { OfficeEditor } from "./office-editor.tsx";
 import { OfficeMembers, OfficeSettings, OfficePreview } from "./office-sections.tsx";
 
 export const dynamic = "force-dynamic";
-
-const personName = (user: { name: string | null; email: string | null; slackId: string }) => user.name ?? user.email ?? user.slackId;
 
 export default async function OfficePage() {
   await requireAdmin();

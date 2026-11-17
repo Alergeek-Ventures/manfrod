@@ -29,7 +29,9 @@ SET owner_user_id = matched.user_id
 FROM (
     SELECT d.id AS desk_id, min(u.id::text)::uuid AS user_id
     FROM desks d
-    JOIN users u ON lower(u.name) = lower(d.permanent_owner) OR lower(split_part(u.name, ' ', 1)) = lower(d.permanent_owner)
+    JOIN users u ON (lower(u.name) = lower(d.permanent_owner) OR lower(split_part(u.name, ' ', 1)) = lower(d.permanent_owner))
+        AND u.slack_id NOT LIKE 'system:%'
+        AND u.banned IS NOT TRUE
     WHERE d.permanent_owner IS NOT NULL
     GROUP BY d.id
     HAVING count(*) = 1

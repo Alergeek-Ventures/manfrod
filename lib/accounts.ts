@@ -40,6 +40,8 @@ export function isSystemUser(user: Pick<User, "slackId">): boolean {
   return user.slackId.startsWith("system:");
 }
 
+export const personName = (user: Pick<User, "name" | "email" | "slackId">) => user.name ?? user.email ?? user.slackId;
+
 export async function findOrCreateBySlackId(
   slackId: string,
   slackDmChannelId: string,

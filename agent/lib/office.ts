@@ -1,17 +1,17 @@
 import { z } from "zod";
-import { getUser, getUserByEmail, getUserBySlackId, isAdmin, isUuid, listUsers } from "../../lib/accounts.ts";
+import { getUser, getUserByEmail, getUserBySlackId, isAdmin, isUuid, listUsers, personName } from "../../lib/accounts.ts";
 import { config } from "../../lib/config.ts";
 import type { User } from "../../lib/db/schema.ts";
 import { splitTags } from "../../lib/office/model.ts";
 import type { MapDesk } from "../../lib/office/state.ts";
-import { isValidIsoDate, utcToday } from "../../lib/time.ts";
+import { isValidIsoDate, localToday } from "../../lib/time.ts";
 
 export const DOOR_ID = "studencka4-4";
 export const DATE_DOC = "ISO8601 date (YYYY-MM-DD), default today";
 export const editorUrl = () => `${config.appUrl}/admin/office`;
 
 export function withDate(date: string | undefined, run: (date: string) => Promise<string>): Promise<string> {
-  if (date === undefined || date === null) return run(utcToday());
+  if (date === undefined || date === null) return run(localToday());
   if (!isValidIsoDate(date)) return Promise.resolve(`Invalid date '${date}'. Use ISO8601 like '2026-07-23'.`);
   return run(date);
 }
@@ -24,8 +24,6 @@ export async function adminRefusal(userId: string): Promise<string | null> {
 export function splitEquipment(equipment: string | undefined): string[] | undefined {
   return typeof equipment === "string" ? splitTags(equipment) : undefined;
 }
-
-export const personName = (user: Pick<User, "name" | "email" | "slackId">) => user.name ?? user.email ?? user.slackId;
 
 export type PersonMatch = { ok: true; user: User } | { ok: false; message: string };
 

@@ -24,6 +24,7 @@ import { Switch } from "@/components/ui/switch";
 import {
   clampToGrid,
   DEFAULT_SIZES,
+  fitInside,
   footprint,
   isSideways,
   nextRotation,
@@ -35,7 +36,7 @@ import {
   type Rotation,
 } from "@/lib/office/model.ts";
 import { STATUS_STYLE } from "@/lib/office/svg.ts";
-import { addDesk, removeDesk, saveDesk, saveOfficeElements } from "./actions.ts";
+import { addDesk, removeDesk, saveDesk, saveOfficeElements, type Result } from "./actions.ts";
 import { useRun } from "./office-sections.tsx";
 import type { EditorDesk, EditorLayout, EditorPerson } from "./types.ts";
 
@@ -66,16 +67,6 @@ function gridPoint(svg: SVGSVGElement, clientX: number, clientY: number) {
 
 function isPlaced(desk: EditorDesk): desk is EditorDesk & { x: number; y: number } {
   return desk.x !== null && desk.y !== null;
-}
-
-function fitInside(geometry: Geometry, grid: { width: number; height: number }): Geometry {
-  const box = footprint(geometry);
-  const width = Math.min(box.width, grid.width);
-  const height = Math.min(box.height, grid.height);
-  const { x, y } = clampToGrid({ x: geometry.x, y: geometry.y, width, height }, grid);
-  return isSideways(geometry.rotation)
-    ? { x, y, width: height, height: width, rotation: geometry.rotation }
-    : { x, y, width, height, rotation: geometry.rotation };
 }
 
 function ElementShape({ element }: { element: OfficeElement }) {
@@ -188,16 +179,19 @@ export function OfficeEditor({ layout, desks, people }: { layout: EditorLayout; 
   const [elements, setElements] = useState(layout.elements);
   const [deskList, setDeskList] = useState(desks);
   const [synced, setSynced] = useState({ layout, desks });
-  if (synced.layout !== layout || synced.desks !== desks) {
-    setSynced({ layout, desks });
-    setElements(layout.elements);
-    setDeskList(desks);
-  }
+  const [dragging, setDragging] = useState(false);
   const [selection, setSelection] = useState<Target | null>(null);
   const [newLabel, setNewLabel] = useState("");
   const drag = useRef<Drag | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
+  const saves = useRef<Promise<unknown>>(Promise.resolve());
+  const latestElements = useRef(elements);
   const { pending, run } = useRun();
+  if ((synced.layout !== layout || synced.desks !== desks) && !pending && !dragging) {
+    setSynced({ layout, desks });
+    setElements(layout.elements);
+    setDeskList(desks);
+  }
 
   const grid = { width: layout.width, height: layout.height };
   const ownerNames = new Map(people.map((person) => [person.id, shortName(person.name)]));
@@ -208,9 +202,21 @@ export function OfficeEditor({ layout, desks, people }: { layout: EditorLayout; 
   const selectedGeometry: Placed | undefined =
     selectedElement ?? (selectedDesk && isPlaced(selectedDesk) ? (selectedDesk as EditorDesk & { x: number; y: number }) : undefined);
 
-  const commitElements = (next: OfficeElement[]) => run(() => saveOfficeElements(next), { quiet: true });
+  const save = (action: () => Promise<Result>) =>
+    run(
+      () => {
+        const next = saves.current.then(action);
+        saves.current = next.catch(() => undefined);
+        return next;
+      },
+      { quiet: true },
+    );
+  const commitElements = (next: OfficeElement[]) => {
+    latestElements.current = next;
+    save(() => saveOfficeElements(latestElements.current));
+  };
   const commitDesk = (id: string, geometry: { x: number | null; y: number | null; width?: number; height?: number; rotation?: number }) =>
-    run(() => saveDesk(id, geometry), { quiet: true });
+    save(() => saveDesk(id, geometry));
 
   const applyGeometry = (target: Target, geometry: Geometry) => {
     if (target.type === "desk") setDeskList((list) => list.map((desk) => (desk.id === target.id ? { ...desk, ...geometry } : desk)));
@@ -235,6 +241,7 @@ export function OfficeEditor({ layout, desks, people }: { layout: EditorLayout; 
     svgRef.current.setPointerCapture(event.pointerId);
     svgRef.current.focus();
     drag.current = { mode, target, origin, start: gridPoint(svgRef.current, event.clientX, event.clientY), moved: false };
+    setDragging(true);
   };
 
   const dragGeometry = (current: Drag, point: { x: number; y: number }): Geometry => {
@@ -273,6 +280,7 @@ export function OfficeEditor({ layout, desks, people }: { layout: EditorLayout; 
   const onPointerUp = (event: React.PointerEvent<SVGSVGElement>) => {
     const current = drag.current;
     drag.current = null;
+    setDragging(false);
     if (!current?.moved || !svgRef.current) return;
     commit(current.target, dragGeometry(current, gridPoint(svgRef.current, event.clientX, event.clientY)));
   };
@@ -404,7 +412,10 @@ export function OfficeEditor({ layout, desks, people }: { layout: EditorLayout; 
               onPointerDown={() => setSelection(null)}
               onPointerMove={onPointerMove}
               onPointerUp={onPointerUp}
-              onPointerCancel={() => (drag.current = null)}
+              onPointerCancel={() => {
+                drag.current = null;
+                setDragging(false);
+              }}
               onKeyDown={onKeyDown}
               onDragOver={(event) => event.preventDefault()}
               onDrop={(event) => {

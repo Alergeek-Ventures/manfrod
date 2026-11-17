@@ -1,17 +1,21 @@
-import { asc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNotNull, sql } from "drizzle-orm";
 import type { z } from "zod";
 import { db, tables } from "../db/index.ts";
 import type { Desk, OfficeLayout } from "../db/schema.ts";
 import {
+  DEFAULT_SIZES,
   deskDetailsSchema,
   deskGeometrySchema,
   elementsSchema,
+  fitDeskGeometry,
+  fitInside,
   layoutSettingsSchema,
   parseElements,
   type DeskDetails,
   type DeskGeometry,
   type LayoutSettings,
   type OfficeElement,
+  samePlace,
 } from "./model.ts";
 
 const { desks, officeLayouts, users } = tables;
@@ -30,11 +34,31 @@ function parse<T>(schema: z.ZodType<T>, value: unknown): T {
   throw new OfficeError(result.error.issues.map((issue) => `${issue.path.map(String).join(".") || "value"}: ${issue.message}`).join(", "));
 }
 
+const LAYOUT_LOCK = 4_208_311;
+
+const selectLayout = (executor: Pick<typeof db, "select">) =>
+  executor
+    .select()
+    .from(officeLayouts)
+    .orderBy(desc(sql`exists (select 1 from ${desks} where ${desks.layoutId} = ${officeLayouts.id})`), asc(officeLayouts.id))
+    .limit(1);
+
 export async function getLayout(): Promise<Layout> {
-  const [existing] = await db.select().from(officeLayouts).orderBy(asc(officeLayouts.updatedAt)).limit(1);
+  const [existing] = await selectLayout(db);
   if (existing) return toLayout(existing);
-  const [created] = await db.insert(officeLayouts).values({ name: "Biuro" }).returning();
-  return toLayout(created);
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(${LAYOUT_LOCK})`);
+    const [raced] = await selectLayout(tx);
+    if (raced) return toLayout(raced);
+    const [created] = await tx.insert(officeLayouts).values({ name: "Biuro" }).returning();
+    return toLayout(created);
+  });
+}
+
+async function getLayoutById(layoutId: string): Promise<Layout> {
+  const [row] = await db.select().from(officeLayouts).where(eq(officeLayouts.id, layoutId)).limit(1);
+  if (!row) throw new OfficeError("layout not found");
+  return toLayout(row);
 }
 
 export async function listDesksWithOwners(opts: { includeInactive?: boolean } = {}): Promise<DeskWithOwner[]> {
@@ -57,22 +81,43 @@ export async function loadOffice(opts: { includeInactive?: boolean } = {}): Prom
 export async function saveElements(layoutId: string, elements: unknown): Promise<OfficeElement[]> {
   const parsed = parse(elementsSchema, elements);
   if (new Set(parsed.map((element) => element.id)).size !== parsed.length) throw new OfficeError("elements: ids must be unique");
+  const layout = await getLayoutById(layoutId);
+  const fitted = parsed.map((element) => fitInside(element, layout));
   await db
     .update(officeLayouts)
-    .set({ elements: parsed, updatedAt: sql`timezone('UTC'::text, now())` })
+    .set({ elements: fitted, updatedAt: sql`timezone('UTC'::text, now())` })
     .where(eq(officeLayouts.id, layoutId));
-  return parsed;
+  return fitted;
 }
 
 export async function saveLayoutSettings(layoutId: string, settings: LayoutSettings): Promise<Layout> {
   const parsed = parse(layoutSettingsSchema, settings);
-  const [updated] = await db
-    .update(officeLayouts)
-    .set({ ...parsed, updatedAt: sql`timezone('UTC'::text, now())` })
-    .where(eq(officeLayouts.id, layoutId))
-    .returning();
-  if (!updated) throw new OfficeError("layout not found");
-  return toLayout(updated);
+  return db.transaction(async (tx) => {
+    const [updated] = await tx
+      .update(officeLayouts)
+      .set({ ...parsed, updatedAt: sql`timezone('UTC'::text, now())` })
+      .where(eq(officeLayouts.id, layoutId))
+      .returning();
+    if (!updated) throw new OfficeError("layout not found");
+    const layout = toLayout(updated);
+    const elements = layout.elements.map((element) => fitInside(element, layout));
+    if (elements.some((element, index) => !samePlace(element, layout.elements[index])))
+      await tx.update(officeLayouts).set({ elements }).where(eq(officeLayouts.id, layoutId));
+    const placed = await tx
+      .select()
+      .from(desks)
+      .where(and(eq(desks.layoutId, layoutId), isNotNull(desks.x), isNotNull(desks.y)));
+    for (const desk of placed) {
+      const current = { x: desk.x!, y: desk.y!, width: desk.width, height: desk.height, rotation: desk.rotation };
+      const fitted = fitInside(current, layout);
+      if (!samePlace(fitted, current))
+        await tx
+          .update(desks)
+          .set({ ...fitted, updatedAt: sql`timezone('UTC'::text, now())` })
+          .where(eq(desks.id, desk.id));
+    }
+    return { ...layout, elements };
+  });
 }
 
 export type DeskInput = Partial<DeskDetails> & Partial<DeskGeometry> & { label: string };
@@ -101,24 +146,35 @@ async function writeDesk<T>(run: () => Promise<T>, label: string | undefined): P
   }
 }
 
+const GEOMETRY_KEYS = ["x", "y", "width", "height", "rotation"] as const;
+
+function mergedGeometry(current: DeskGeometry, patch: DeskPatch, grid: { width: number; height: number }): DeskGeometry {
+  const { x, y, width, height, rotation } = { ...current, ...pick(patch, [...GEOMETRY_KEYS]) };
+  return fitDeskGeometry({ x, y, width, height, rotation: rotation as DeskGeometry["rotation"] }, grid);
+}
+
 export async function createDesk(input: DeskInput): Promise<Desk> {
   const values = validPatch(input);
   const layout = await getLayout();
+  const geometry = mergedGeometry({ x: null, y: null, ...DEFAULT_SIZES.desk, rotation: 0 }, values, layout);
   return writeDesk(async () => {
     const [desk] = await db
       .insert(desks)
-      .values({ ...values, label: values.label!, layoutId: layout.id })
+      .values({ ...values, ...geometry, label: values.label!, layoutId: layout.id })
       .returning();
     return desk;
   }, values.label);
 }
 
 export async function updateDesk(deskId: string, patch: DeskPatch): Promise<Desk> {
-  const values = validPatch(patch);
-  if (Object.keys(values).length === 0) {
-    const [desk] = await db.select().from(desks).where(eq(desks.id, deskId)).limit(1);
-    if (!desk) throw new OfficeError("desk not found");
-    return desk;
+  let values = validPatch(patch);
+  const movesDesk = GEOMETRY_KEYS.some((key) => values[key] !== undefined);
+  if (Object.keys(values).length === 0 || movesDesk) {
+    const [current] = await db.select().from(desks).where(eq(desks.id, deskId)).limit(1);
+    if (!current) throw new OfficeError("desk not found");
+    if (!movesDesk) return current;
+    const layout = await getLayoutById(current.layoutId);
+    values = { ...values, ...mergedGeometry(current as Desk & DeskGeometry, values, layout) };
   }
   return writeDesk(async () => {
     const [desk] = await db

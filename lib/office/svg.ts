@@ -203,12 +203,17 @@ function legend(state: MapState, y: number): string {
   }).join("\n");
 }
 
+export function canvasSize(grid: { width: number; height: number }): { width: number; height: number } {
+  const mapWidth = grid.width * UNIT;
+  const mapHeight = grid.height * UNIT;
+  return { width: Math.max(mapWidth + PAD * 2, 880), height: HEADER + mapHeight + LEGEND + PAD };
+}
+
 export function renderSvg(state: MapState, options: { date?: string; title?: string } = {}): string {
   const date = options.date ?? state.date;
   const mapWidth = state.layout.width * UNIT;
   const mapHeight = state.layout.height * UNIT;
-  const width = Math.max(mapWidth + PAD * 2, 880);
-  const height = HEADER + mapHeight + LEGEND + PAD;
+  const { width, height } = canvasSize(state.layout);
   const originX = (width - mapWidth) / 2;
   const originY = HEADER;
   const desks = placedDesks(state);

@@ -3,7 +3,7 @@ import { db, tables } from "./db/index.ts";
 import type { Desk, DeskReservation, User } from "./db/schema.ts";
 import { recordedAwayUserIds } from "./office/away.ts";
 import { updateDesk } from "./office/layout.ts";
-import { utcToday } from "./time.ts";
+import { localToday } from "./time.ts";
 
 const { desks, deskReservations, users } = tables;
 
@@ -54,7 +54,7 @@ export async function reserveDesk(
   const desk = await getDeskByLabel(label);
   if (!desk) return { ok: false, error: "not_found" };
   if (!desk.active) return { ok: false, error: "inactive" };
-  if (date < utcToday()) return { ok: false, error: "past_date" };
+  if (date < localToday()) return { ok: false, error: "past_date" };
 
   const userId = "userId" in person ? person.userId : null;
   if (desk.ownerUserId && desk.ownerUserId !== userId) {
@@ -113,7 +113,7 @@ export async function listUserReservations(userId: string): Promise<(DeskReserva
     .select({ reservation: deskReservations, desk: desks })
     .from(deskReservations)
     .innerJoin(desks, eq(desks.id, deskReservations.deskId))
-    .where(and(eq(deskReservations.userId, userId), gte(deskReservations.date, utcToday())))
+    .where(and(eq(deskReservations.userId, userId), gte(deskReservations.date, localToday())))
     .orderBy(asc(deskReservations.date));
   return rows.map((row) => ({ ...row.reservation, desk: row.desk }));
 }

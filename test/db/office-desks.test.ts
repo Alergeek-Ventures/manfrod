@@ -7,12 +7,12 @@ const { db, tables } = await import("../../lib/db/index.ts");
 const desks = await import("../../lib/desks.ts");
 const layout = await import("../../lib/office/layout.ts");
 const map = await import("../../lib/office/map.ts");
-const { addDays, utcToday } = await import("../../lib/time.ts");
+const { addDays, localToday } = await import("../../lib/time.ts");
 const { eq, inArray } = await import("drizzle-orm");
 
 const suffix = Math.random().toString(36).slice(2, 8).toUpperCase();
 const label = `TEST-${suffix}`;
-const date = addDays(utcToday(), 21);
+const date = addDays(localToday(), 21);
 const userIds: string[] = [];
 let deskId = "";
 
@@ -75,5 +75,17 @@ describe.skipIf(!enabled)("reserving owned desks", () => {
   it("does not let a second person take a booked desk", async () => {
     const result = await desks.reserveDesk(label, { userId: other.id }, date, { awayUserIds: new Set([owner.id]) });
     expect(result).toEqual({ ok: false, error: "taken" });
+  });
+
+  it("keeps a moved desk inside the grid", async () => {
+    const office = await layout.getLayout();
+    const moved = await layout.updateDesk(deskId, { x: 400, y: 400, rotation: 90 });
+    expect(moved).toMatchObject({ x: office.width - 4, y: office.height - 6, width: 6, height: 4, rotation: 90 });
+    await layout.updateDesk(deskId, { x: 0, y: 0, rotation: 0 });
+  });
+
+  it("refuses a date before today in Warsaw", async () => {
+    const result = await desks.reserveDesk(label, { userId: owner.id }, addDays(localToday(), -1));
+    expect(result).toEqual({ ok: false, error: "past_date" });
   });
 });

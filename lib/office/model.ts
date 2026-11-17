@@ -89,6 +89,22 @@ export function clampToGrid(box: Box, grid: { width: number; height: number }): 
   };
 }
 
+export function fitInside<T extends Placed>(item: T, grid: { width: number; height: number }): T {
+  const box = footprint(item);
+  const width = Math.min(box.width, grid.width);
+  const height = Math.min(box.height, grid.height);
+  const { x, y } = clampToGrid({ x: item.x, y: item.y, width, height }, grid);
+  return isSideways(item.rotation) ? { ...item, x, y, width: height, height: width } : { ...item, x, y, width, height };
+}
+
+export function fitDeskGeometry(desk: DeskGeometry, grid: { width: number; height: number }): DeskGeometry {
+  if (desk.x === null || desk.y === null) return desk;
+  return fitInside({ ...desk, x: desk.x, y: desk.y }, grid);
+}
+
+export const samePlace = (a: Placed, b: Placed) =>
+  a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height && a.rotation === b.rotation;
+
 export const DEFAULT_SIZES: Record<ElementKind | "desk", { width: number; height: number }> = {
   desk: { width: 6, height: 4 },
   room: { width: 16, height: 12 },
