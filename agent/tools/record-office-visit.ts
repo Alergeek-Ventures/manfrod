@@ -45,10 +45,13 @@ export default defineManfrodTool({
     });
     if (!recorded.ok) return ERRORS[recorded.error];
     const names = new Map(everyone.map((user) => [user.id, user.name ?? user.slackId]));
-    const lines = [`Recorded: ${describeVisit(recorded.visit, names)}${await refreshNote(datesBetween(start_date, endsOn))}`];
-    if (existing.length > 0)
+    const verb = recorded.duplicate ? "Already recorded, merged into it" : "Recorded";
+    const dates = datesBetween(recorded.visit.startsOn, recorded.visit.endsOn);
+    const lines = [`${verb}: ${describeVisit(recorded.visit, names)}${await refreshNote(dates)}`];
+    const others = existing.filter((visit) => visit.id !== recorded.visit.id);
+    if (others.length > 0)
       lines.push(
-        `Other visits already recorded on those days (cancel duplicates with cancel-office-visit):\n${existing.map((visit) => `- ${describeVisit(visit, names)}`).join("\n")}`,
+        `Other visits already recorded on those days (cancel duplicates with cancel-office-visit):\n${others.map((visit) => `- ${describeVisit(visit, names)}`).join("\n")}`,
       );
     return lines.join("\n");
   },
