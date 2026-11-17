@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   clampToGrid,
+  doorGeometry,
   elementsSchema,
   fitDeskGeometry,
   fitInside,
@@ -79,5 +80,23 @@ describe("office layout elements", () => {
 
   it("splits equipment tags", () => {
     expect(splitTags(" usb-c, mac_mini,,usb-c ")).toEqual(["usb-c", "mac_mini"]);
+  });
+});
+
+describe("door geometry", () => {
+  it("makes the leaf as long as the opening and swings it in a quarter circle", () => {
+    const door = doorGeometry({ x: 4, y: 2, width: 6, height: 6, rotation: 0 });
+    expect(door.opening).toEqual({ x: 4, y: 8, width: 6 });
+    expect(door.radius).toBe(6);
+    expect(door.hinge).toEqual({ x: 4, y: 8 });
+    expect(door.leafEnd).toEqual({ x: 4, y: 2 });
+    expect(door.closedEnd).toEqual({ x: 10, y: 8 });
+  });
+
+  it("keeps a sideways door centred on its footprint", () => {
+    const door = doorGeometry({ x: 0, y: 0, width: 6, height: 6, rotation: 90 });
+    expect({ cx: door.cx, cy: door.cy }).toEqual({ cx: 3, cy: 3 });
+    expect(door.opening.width).toBe(6);
+    expect(door.radius).toBe(6);
   });
 });

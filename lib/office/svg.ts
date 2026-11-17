@@ -1,5 +1,5 @@
 import { weekdayName } from "../time.ts";
-import { footprint, isSideways, type Box, type OfficeElement } from "./model.ts";
+import { doorGeometry, footprint, isSideways, type Box, type OfficeElement } from "./model.ts";
 import { DESK_STATUSES, placedDesks, type DeskStatus, type MapState, type PlacedDesk } from "./state.ts";
 
 export const UNIT = 20;
@@ -104,16 +104,15 @@ function wall(box: Box): string {
   return `<rect x="${px(box.x)}" y="${px(box.y)}" width="${px(box.width)}" height="${px(box.height)}" rx="2" fill="#334155"/>`;
 }
 
-function door(element: OfficeElement, box: Box): string {
-  const size = Math.min(box.width, box.height);
-  const cx = box.x + box.width / 2;
-  const cy = box.y + box.height / 2;
-  const left = cx - size / 2;
-  const top = cy - size / 2;
-  return `<g transform="rotate(${element.rotation} ${px(cx)} ${px(cy)})">
-<rect x="${px(left)}" y="${px(top + size - 1)}" width="${px(size)}" height="${UNIT + 2}" fill="#FFFFFF"/>
-<path d="M ${px(left)} ${px(top)} A ${px(size)} ${px(size)} 0 0 1 ${px(left + size)} ${px(top + size)}" fill="none" stroke="#94A3B8" stroke-width="1.5" stroke-dasharray="4 3"/>
-<line x1="${px(left)}" y1="${px(top + size)}" x2="${px(left)}" y2="${px(top)}" stroke="#475569" stroke-width="3" stroke-linecap="round"/>
+function door(element: OfficeElement, originX: number, originY: number): string {
+  const door = doorGeometry(element);
+  const x = (value: number) => px(originX + value * UNIT);
+  const y = (value: number) => px(originY + value * UNIT);
+  const length = (value: number) => px(value * UNIT);
+  return `<g transform="rotate(${door.rotation} ${x(door.cx)} ${y(door.cy)})">
+<rect x="${x(door.opening.x)}" y="${y(door.opening.y) - 1}" width="${length(door.opening.width)}" height="${UNIT + 2}" fill="#FFFFFF"/>
+<path d="M ${x(door.leafEnd.x)} ${y(door.leafEnd.y)} A ${length(door.radius)} ${length(door.radius)} 0 0 1 ${x(door.closedEnd.x)} ${y(door.closedEnd.y)}" fill="none" stroke="#94A3B8" stroke-width="1.5" stroke-dasharray="4 3"/>
+<line x1="${x(door.hinge.x)}" y1="${y(door.hinge.y)}" x2="${x(door.leafEnd.x)}" y2="${y(door.leafEnd.y)}" stroke="#475569" stroke-width="3" stroke-linecap="round"/>
 </g>`;
 }
 
@@ -226,7 +225,7 @@ export function renderSvg(state: MapState, options: { date?: string; title?: str
       const box = scaled(footprint(element), originX, originY);
       if (element.kind === "room") return room(element, box);
       if (element.kind === "wall") return wall(box);
-      if (element.kind === "door") return door(element, box);
+      if (element.kind === "door") return door(element, originX, originY);
       return label(element, box);
     });
 

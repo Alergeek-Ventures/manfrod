@@ -24,6 +24,7 @@ import { Switch } from "@/components/ui/switch";
 import {
   clampToGrid,
   DEFAULT_SIZES,
+  doorGeometry,
   fitInside,
   footprint,
   isSideways,
@@ -84,23 +85,29 @@ function ElementShape({ element }: { element: OfficeElement }) {
     );
   if (element.kind === "wall") return <rect x={box.x} y={box.y} width={box.width} height={box.height} rx={0.1} fill="#334155" />;
   if (element.kind === "door") {
-    const size = Math.min(box.width, box.height);
-    const cx = box.x + box.width / 2;
-    const cy = box.y + box.height / 2;
-    const left = cx - size / 2;
-    const top = cy - size / 2;
+    const door = doorGeometry(element);
     return (
-      <g transform={`rotate(${element.rotation} ${cx} ${cy})`}>
+      <g>
         <rect x={box.x} y={box.y} width={box.width} height={box.height} fill="transparent" />
-        <rect x={left} y={top + size - 0.05} width={size} height={1.05} fill="#FFFFFF" />
-        <path
-          d={`M ${left} ${top} A ${size} ${size} 0 0 1 ${left + size} ${top + size}`}
-          fill="none"
-          stroke="#94A3B8"
-          strokeWidth={0.07}
-          strokeDasharray="0.2 0.15"
-        />
-        <line x1={left} y1={top + size} x2={left} y2={top} stroke="#475569" strokeWidth={0.15} strokeLinecap="round" />
+        <g transform={`rotate(${door.rotation} ${door.cx} ${door.cy})`}>
+          <rect x={door.opening.x} y={door.opening.y - 0.05} width={door.opening.width} height={1.05} fill="#FFFFFF" />
+          <path
+            d={`M ${door.leafEnd.x} ${door.leafEnd.y} A ${door.radius} ${door.radius} 0 0 1 ${door.closedEnd.x} ${door.closedEnd.y}`}
+            fill="none"
+            stroke="#94A3B8"
+            strokeWidth={0.07}
+            strokeDasharray="0.2 0.15"
+          />
+          <line
+            x1={door.hinge.x}
+            y1={door.hinge.y}
+            x2={door.leafEnd.x}
+            y2={door.leafEnd.y}
+            stroke="#475569"
+            strokeWidth={0.15}
+            strokeLinecap="round"
+          />
+        </g>
       </g>
     );
   }
@@ -253,8 +260,14 @@ export function OfficeEditor({ layout, desks, people }: { layout: EditorLayout; 
       return { x, y, width: origin.width, height: origin.height, rotation: origin.rotation };
     }
     const box = footprint(origin);
-    const width = Math.max(1, Math.min(grid.width - origin.x, box.width + dx));
-    const height = Math.max(1, Math.min(grid.height - origin.y, box.height + dy));
+    let width = Math.max(1, Math.min(grid.width - origin.x, box.width + dx));
+    let height = Math.max(1, Math.min(grid.height - origin.y, box.height + dy));
+    const isDoor = current.target.type === "element" && elements.find((element) => element.id === current.target.id)?.kind === "door";
+    if (isDoor) {
+      const side = Math.min(Math.max(width, height), grid.width - origin.x, grid.height - origin.y);
+      width = side;
+      height = side;
+    }
     return isSideways(origin.rotation)
       ? { x: origin.x, y: origin.y, width: height, height: width, rotation: origin.rotation }
       : { x: origin.x, y: origin.y, width, height, rotation: origin.rotation };
