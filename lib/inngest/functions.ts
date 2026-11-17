@@ -14,6 +14,7 @@ import { processAllBuckets, reviewProcessedGraph } from "../memory/retrospector.
 import { deleteCommitsBefore } from "../github/store.ts";
 import { backfillRepository, COMMIT_RETENTION_DAYS, completePush, pendingBackfills, syncAll, syncInstallation } from "../github/sync.ts";
 import { runHolidayCheck } from "../holidays.ts";
+import { runDeskPlan, runDeskPlanHeadsUp } from "../office/plan-cron.ts";
 import { deleteSandboxFilesOlderThan } from "../sandbox-files.ts";
 import { runRehearsals } from "../rehearsal/index.ts";
 import { clearTranscriptsOlderThan } from "../rehearsal/store.ts";
@@ -276,6 +277,8 @@ const allFunctions = [
     logger("RollupWorker").info("RollupWorker: rolled up the last 4 day(s)");
   }),
   cronFunction("holiday-check", "0 10 * * 1-5", () => runHolidayCheck()),
+  cronFunction("desk-plan", "0 15 * * 1-5", () => runDeskPlan()),
+  cronFunction("desk-plan-heads-up", "5 10 * * 1-5", () => runDeskPlanHeadsUp()),
   cronFunction("nudges-work-start", "*/15 7-12 * * 1-5", async () => ({ sent: await runWorkStartNudges() })),
   cronFunction("nudges-weekly", "*/30 12-17 * * 5", async () => ({ sent: await runWeeklyWrapUps() })),
   cronFunction("nudges-hours", "0 19 * * 1-5", async () => ({ sent: await runEveningHours() })),
