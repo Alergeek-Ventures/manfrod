@@ -104,6 +104,11 @@ export async function getFinding(id: string): Promise<SelfReviewFinding | null> 
   return finding ?? null;
 }
 
+export async function findingForPull(pullNumber: number): Promise<SelfReviewFinding | null> {
+  const [finding] = await db.select().from(selfReviewFindings).where(eq(selfReviewFindings.pullNumber, pullNumber)).limit(1);
+  return finding ?? null;
+}
+
 export async function findingsWithStatus(statuses: FindingStatus[]): Promise<SelfReviewFinding[]> {
   return db
     .select()
@@ -133,6 +138,13 @@ export async function attachPull(id: string, pullNumber: number, pullUrl: string
 
 export async function resolveFinding(id: string, status: Extract<FindingStatus, "merged" | "closed" | "unresolved" | "dismissed">) {
   await db.update(selfReviewFindings).set({ status, resolvedAt: new Date() }).where(eq(selfReviewFindings.id, id));
+}
+
+export async function reopenFinding(id: string): Promise<void> {
+  await db
+    .update(selfReviewFindings)
+    .set({ status: "open", resolvedAt: null, notifiedAt: null, startedAt: null, sessionChannelId: null, sessionThreadTs: null })
+    .where(eq(selfReviewFindings.id, id));
 }
 
 export async function markNotified(id: string): Promise<void> {

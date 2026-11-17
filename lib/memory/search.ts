@@ -205,6 +205,7 @@ export interface SearchOptions {
   projectId?: string | null;
   sessionKey?: string | null;
   purpose?: "context" | "tool" | "panel";
+  audit?: boolean;
 }
 
 export async function search(
@@ -253,32 +254,33 @@ export async function search(
 
   const results = await expandWithLinks(filtered, readableLevels);
 
-  emit("memory_searched", {
-    userId,
-    sessionKey: opts.sessionKey ?? null,
-    source: "memory",
-    meta: {
-      query: queryText,
-      purpose: opts.purpose ?? null,
-      expanded_queries: queries,
-      rerank_scores: rerankScores,
-      stats: {
-        vector: vectorResults.length,
-        bm25: bm25Results.length,
-        merged: merged.length,
-        reranked: reranked.length,
-        filtered: filtered.length,
-        final: results.length,
-        relevance_threshold: RELEVANCE_THRESHOLD,
-        rerank_threshold: RERANK_THRESHOLD,
-        rerank_enabled: rerankEnabled,
-        rerank_ran: rerankRan,
-        expand_query_enabled: expandQuery,
-        linked: results.length - filtered.length,
-        degraded: [...degradation.stages],
+  if (opts.audit !== false)
+    emit("memory_searched", {
+      userId,
+      sessionKey: opts.sessionKey ?? null,
+      source: "memory",
+      meta: {
+        query: queryText,
+        purpose: opts.purpose ?? null,
+        expanded_queries: queries,
+        rerank_scores: rerankScores,
+        stats: {
+          vector: vectorResults.length,
+          bm25: bm25Results.length,
+          merged: merged.length,
+          reranked: reranked.length,
+          filtered: filtered.length,
+          final: results.length,
+          relevance_threshold: RELEVANCE_THRESHOLD,
+          rerank_threshold: RERANK_THRESHOLD,
+          rerank_enabled: rerankEnabled,
+          rerank_ran: rerankRan,
+          expand_query_enabled: expandQuery,
+          linked: results.length - filtered.length,
+          degraded: [...degradation.stages],
+        },
       },
-    },
-  });
+    });
 
   return results;
 }
@@ -327,10 +329,11 @@ export async function getNoteContext(
   projectId: string | null = null,
   soulInPrompt = true,
   sessionKey: string | null = null,
+  audit = true,
 ): Promise<string> {
   const [anchor, relevant] = await Promise.all([
     soulInPrompt ? getSoulAnchor(userId, readableLevels) : null,
-    search(userId, readableLevels, query, { limit: 10, projectId, sessionKey, purpose: "context" }),
+    search(userId, readableLevels, query, { limit: 10, projectId, sessionKey, purpose: "context", audit }),
   ]);
   const inSystemPrompt = anchor ? [anchor.soul.id, ...anchor.linked.map((node) => node.id)] : [];
   const items = relevant.filter((node) => !inSystemPrompt.includes(node.id));

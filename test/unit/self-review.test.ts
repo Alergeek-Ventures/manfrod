@@ -153,3 +153,18 @@ describe("satisfaction review", () => {
     expect(input.replies.map((reply) => reply.key)).toEqual(["r1"]);
   });
 });
+
+describe("commits that may already fix a finding", () => {
+  it("leave out auto-merged commits whose rehearsal was still broken", async () => {
+    const { withoutBrokenFixes } = await import("../../lib/self-review/index.ts");
+    const commit = (sha: string) => ({
+      sha,
+      message: sha,
+      date: "2026-11-17T10:00:00Z",
+      url: `https://github.com/o/r/commit/${sha}`,
+      files: [],
+    });
+    expect(withoutBrokenFixes([commit("aaa"), commit("bbb")], new Set(["bbb"])).map((entry) => entry.sha)).toEqual(["aaa"]);
+    expect(withoutBrokenFixes([commit("aaa")], new Set())).toHaveLength(1);
+  });
+});

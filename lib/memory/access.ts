@@ -168,6 +168,10 @@ export async function resolveAccess(userId: string, channelId: string | null): P
   const mapping = await getActiveMapping(channelId);
   if (mapping?.projectId) await ensureMembership(userId, mapping.projectId);
 
+  return readOnlyAccess(userId, channelId);
+}
+
+export async function readOnlyAccess(userId: string, channelId: string): Promise<ResolvedAccess> {
   return {
     writeAccess: await resolveForWrite(channelId, userId),
     readableLevels: await resolveForRead(userId, channelId),

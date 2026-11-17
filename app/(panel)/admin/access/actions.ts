@@ -8,6 +8,7 @@ import { auth } from "@/lib/auth.ts";
 import { db, tables } from "@/lib/db/index.ts";
 import { isLanguageCode, setLanguages } from "@/lib/agent-settings.ts";
 import { setFact } from "@/lib/facts.ts";
+import { setAutoMerge } from "@/lib/self-modify-merge/settings.ts";
 import { availableBoards, boardLabel } from "@/lib/github/boards.ts";
 import {
   crossOwnerWarning,
@@ -188,6 +189,12 @@ export async function saveLanguages(internal: string, external: string): Promise
   if (!isLanguageCode(internal) || !isLanguageCode(external)) return { ok: false, message: "Error: unknown language" };
   await setLanguages({ internal, external }, admin.id);
   return done("Languages saved");
+}
+
+export async function saveAutoMerge(enabled: boolean): Promise<Result> {
+  const admin = await requireAdmin();
+  await setAutoMerge(enabled, admin.id);
+  return done(enabled ? "Auto-merge turned on" : "Auto-merge turned off");
 }
 
 export async function linkGithubRepository(projectId: string, repositoryId: number): Promise<Result> {

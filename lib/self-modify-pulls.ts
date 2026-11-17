@@ -72,7 +72,36 @@ export async function reviewRounds(sessionId: string): Promise<number> {
   return Number(row?.rounds ?? 0);
 }
 
-export async function recordPull(pullNumber: number, branch: string, sessionId: string): Promise<void> {
+export type PublishedVerdict = "approve" | "overridden";
+
+export interface Published {
+  headSha: string;
+  reviewVerdict: PublishedVerdict;
+  description?: string | null;
+  requestedByUserId?: string | null;
+}
+
+const publishedColumns = (published: Published | null) => ({
+  headSha: published?.headSha ?? null,
+  reviewVerdict: published?.reviewVerdict ?? null,
+  description: published?.description ?? null,
+  requestedByUserId: published?.requestedByUserId ?? null,
+});
+
+export async function recordPublished(pullNumber: number, published: Published): Promise<void> {
+  await db.update(selfModifyPulls).set(publishedColumns(published)).where(eq(selfModifyPulls.pullNumber, pullNumber));
+}
+
+export async function publishedHead(pullNumber: number): Promise<{ headSha: string | null; reviewVerdict: string | null } | null> {
+  const [row] = await db
+    .select({ headSha: selfModifyPulls.headSha, reviewVerdict: selfModifyPulls.reviewVerdict })
+    .from(selfModifyPulls)
+    .where(eq(selfModifyPulls.pullNumber, pullNumber))
+    .limit(1);
+  return row ?? null;
+}
+
+export async function recordPull(pullNumber: number, branch: string, sessionId: string, published: Published | null = null): Promise<void> {
   const [previous] = await db.select().from(selfModifyPulls).where(eq(selfModifyPulls.pullNumber, pullNumber)).limit(1);
   if (previous && previous.sessionId !== sessionId) {
     try {
@@ -83,11 +112,26 @@ export async function recordPull(pullNumber: number, branch: string, sessionId: 
   }
   await db
     .insert(selfModifyPulls)
-    .values({ pullNumber, branch, sessionId })
+    .values({ pullNumber, branch, sessionId, ...publishedColumns(published) })
     .onConflictDoUpdate({
       target: selfModifyPulls.pullNumber,
-      set: { branch, sessionId, status: "open", closedAt: null },
+      set: {
+        branch,
+        sessionId,
+        status: "open",
+        closedAt: null,
+        ...publishedColumns(published),
+      },
     });
+}
+
+export async function recordedOpenPulls(): Promise<number[]> {
+  const rows = await db
+    .select({ pullNumber: selfModifyPulls.pullNumber })
+    .from(selfModifyPulls)
+    .where(eq(selfModifyPulls.status, "open"))
+    .orderBy(selfModifyPulls.insertedAt);
+  return rows.map((row) => row.pullNumber);
 }
 
 export async function cleanUpPull(pullNumber: number): Promise<boolean> {
