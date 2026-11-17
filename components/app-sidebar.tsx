@@ -4,6 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import {
   ActivityIcon,
+  ArmchairIcon,
   BarChart3Icon,
   BotIcon,
   CalendarClockIcon,
@@ -57,6 +58,7 @@ const ADMIN_GROUPS: NavGroup[] = [
     items: [
       { title: "Tasks", url: "/admin/tasks", icon: <ListChecksIcon /> },
       { title: "Self-review", url: "/admin/self-review", icon: <SearchCheckIcon /> },
+      { title: "Office", url: "/admin/office", icon: <ArmchairIcon /> },
     ],
   },
   {
