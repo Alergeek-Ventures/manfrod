@@ -42,7 +42,9 @@ async function projectChannels(userId: string) {
 async function leaveRequests(userId: string, startDate: string, endDate: string): Promise<string | null> {
   const access = await firmowidAccess(userId);
   if (!access) return null;
-  const result = await callTool(access.mcpUrl, access.token, "list_leave_requests", { start_date: startDate, end_date: endDate });
+  const result = await callTool(access.mcpUrl, access.token, "list_leave_requests", {
+    input: { start_date: startDate, end_date: endDate },
+  });
   if (!result.ok) return null;
   const text = formatResult(result.value);
   return text.length > FIRMOWID_CHARS ? `${text.slice(0, FIRMOWID_CHARS)}…` : text;

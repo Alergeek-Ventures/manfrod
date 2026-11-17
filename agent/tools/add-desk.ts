@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { createDesk } from "../../lib/office/layout.ts";
 import { personName } from "../../lib/accounts.ts";
-import { adminRefusal, deskFields, editorUrl, resolvePerson, splitEquipment } from "../lib/office.ts";
+import { adminRefusal, deskFields, editorUrl, splitEquipment } from "../lib/office.ts";
+import { resolvePerson } from "../lib/people.ts";
 import { defineManfrodTool } from "../lib/define-tool.ts";
 
 export default defineManfrodTool({
