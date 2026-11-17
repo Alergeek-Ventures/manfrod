@@ -187,9 +187,13 @@ export const deskPlans = pgTable("desk_plans", {
 	headsUpTs: text("heads_up_ts"),
 	version: integer().default(1).notNull(),
 	updatedAt: timestamp("updated_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
+	awayUserIds: uuid("away_user_ids").array().default(sql`'{}'::uuid[]`).notNull(),
+	seating: text(),
+	claimedAt: timestamp("claimed_at", { mode: 'date' }),
+	message: jsonb(),
 }, (table) => [
 	primaryKey({ columns: [table.date, table.layoutId], name: "desk_plans_pkey"}),
-	check("desk_plans_status", sql`status = ANY (ARRAY['heads_up'::text, 'declined'::text, 'posted'::text])`),
+	check("desk_plans_status", sql`status = ANY (ARRAY['heads_up'::text, 'declined'::text, 'requested'::text, 'posting'::text, 'posted'::text])`),
 ]);
 
 export const projects = pgTable("projects", {

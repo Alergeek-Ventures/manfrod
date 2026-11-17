@@ -5,7 +5,15 @@ import { experimental_decide as decide } from "ai";
 import { config } from "../config.ts";
 import { logger } from "../log.ts";
 
-export const MEMORY_ACTIONS = ["ignore", "create_memory", "create_absence", "create_meeting", "flag_sensitive", "ask_human"] as const;
+export const MEMORY_ACTIONS = [
+  "ignore",
+  "create_memory",
+  "create_absence",
+  "create_visit",
+  "create_meeting",
+  "flag_sensitive",
+  "ask_human",
+] as const;
 export type MemoryAction = (typeof MEMORY_ACTIONS)[number];
 
 export interface ActionInput {
@@ -29,6 +37,7 @@ const SECTION_ACTIONS: Record<string, MemoryAction> = {
   IGNORE: "ignore",
   SAFETY: "ignore",
   CREATE_ABSENCE: "create_absence",
+  CREATE_VISIT: "create_visit",
   CREATE_MEETING: "create_meeting",
   CREATE_MEMORY: "create_memory",
   FLAG_SENSITIVE: "flag_sensitive",

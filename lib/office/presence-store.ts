@@ -1,4 +1,4 @@
-import { and, asc, eq, gte, isNull, lte } from "drizzle-orm";
+import { and, asc, eq, gte, isNull, lte, sql } from "drizzle-orm";
 import { db, tables } from "../db/index.ts";
 import type { OfficePresence, OfficeVisit } from "../db/schema.ts";
 import { compareDates, isValidIsoDate } from "../time.ts";
@@ -49,7 +49,23 @@ export interface VisitInput {
 
 export type VisitError = "invalid_dates" | "nobody" | "invalid_guests" | "no_layout";
 
-export async function recordVisit(input: VisitInput): Promise<{ ok: true; visit: OfficeVisit } | { ok: false; error: VisitError }> {
+export type VisitLike = Pick<OfficeVisit, "startsOn" | "endsOn" | "userIds" | "createdBy">;
+
+export function duplicateVisit<T extends VisitLike>(existing: T[], input: VisitLike): T | null {
+  return (
+    existing.find((visit) => {
+      const overlaps = compareDates(visit.startsOn, input.endsOn) <= 0 && compareDates(visit.endsOn, input.startsOn) >= 0;
+      if (!overlaps) return false;
+      const sameAuthor = input.createdBy !== null && visit.createdBy === input.createdBy;
+      const samePeople = input.userIds.some((userId) => visit.userIds.includes(userId));
+      return sameAuthor || samePeople;
+    }) ?? null
+  );
+}
+
+export type RecordedVisit = { ok: true; visit: OfficeVisit; duplicate: boolean } | { ok: false; error: VisitError };
+
+export async function recordVisit(input: VisitInput): Promise<RecordedVisit> {
   if (!isValidIsoDate(input.startsOn) || !isValidIsoDate(input.endsOn) || compareDates(input.endsOn, input.startsOn) < 0)
     return { ok: false, error: "invalid_dates" };
   if (!Number.isInteger(input.guests) || input.guests < 0) return { ok: false, error: "invalid_guests" };
@@ -57,19 +73,47 @@ export async function recordVisit(input: VisitInput): Promise<{ ok: true; visit:
   if (userIds.length === 0 && input.guests === 0) return { ok: false, error: "nobody" };
   const layoutId = input.layoutId ?? (await defaultLayoutId());
   if (!layoutId) return { ok: false, error: "no_layout" };
-  const [visit] = await db
-    .insert(officeVisits)
-    .values({
-      layoutId,
-      startsOn: input.startsOn,
-      endsOn: input.endsOn,
-      userIds,
-      guests: input.guests,
-      note: input.note,
-      createdBy: input.createdBy,
-    })
-    .returning();
-  return { ok: true, visit };
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext('office-visits'), hashtext(${layoutId}))`);
+    const overlapping = await tx
+      .select()
+      .from(officeVisits)
+      .where(
+        and(
+          eq(officeVisits.layoutId, layoutId),
+          isNull(officeVisits.cancelledAt),
+          lte(officeVisits.startsOn, input.endsOn),
+          gte(officeVisits.endsOn, input.startsOn),
+        ),
+      );
+    const duplicate = duplicateVisit(overlapping, { ...input, userIds });
+    if (duplicate) {
+      const [visit] = await tx
+        .update(officeVisits)
+        .set({
+          startsOn: compareDates(input.startsOn, duplicate.startsOn) < 0 ? input.startsOn : duplicate.startsOn,
+          endsOn: compareDates(input.endsOn, duplicate.endsOn) > 0 ? input.endsOn : duplicate.endsOn,
+          userIds: [...new Set([...duplicate.userIds, ...userIds])],
+          guests: Math.max(duplicate.guests, input.guests),
+        })
+        .where(eq(officeVisits.id, duplicate.id))
+        .returning();
+      return { ok: true as const, visit, duplicate: true };
+    }
+    const [visit] = await tx
+      .insert(officeVisits)
+      .values({
+        layoutId,
+        startsOn: input.startsOn,
+        endsOn: input.endsOn,
+        userIds,
+        guests: input.guests,
+        note: input.note,
+        createdBy: input.createdBy,
+      })
+      .returning();
+    return { ok: true as const, visit, duplicate: false };
+  });
 }
 
 export async function getVisit(id: string): Promise<OfficeVisit | null> {

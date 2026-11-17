@@ -13,6 +13,8 @@ import {
   startInstall,
 } from "../linear/status.ts";
 import { logger } from "../log.ts";
+import { handlePlanAction, handlePlanSubmission } from "../office/plan-actions.ts";
+import { PLAN_ACTION_IDS, PLAN_CALLBACK_IDS } from "../office/plan-message.ts";
 import { CAPABILITY_APPROVE_ACTION_ID, CAPABILITY_REJECT_ACTION_ID, handleCapabilityDecision } from "../tasks/capabilities.ts";
 import { preselectedLevels, resolveEscalation } from "../memory/classifier.ts";
 import { CARD_LINK_ACTION_PREFIX } from "./cards.ts";
@@ -39,7 +41,8 @@ const OWNED_ACTIONS = new Set([
 ]);
 
 const isOwnedAction = (actionId: unknown) =>
-  typeof actionId === "string" && (OWNED_ACTIONS.has(actionId) || actionId.startsWith(CARD_LINK_ACTION_PREFIX));
+  typeof actionId === "string" &&
+  (OWNED_ACTIONS.has(actionId) || PLAN_ACTION_IDS.has(actionId) || actionId.startsWith(CARD_LINK_ACTION_PREFIX));
 
 const LEVELS_BLOCK_ID = "memory_escalation_levels_block";
 const LEVELS_ACTION_ID = "memory_escalation_levels";
@@ -59,6 +62,7 @@ async function handleBlockActions(payload: Record<string, any>) {
   const action = payload.actions?.[0] ?? {};
   const channelId: string | undefined = payload.channel?.id;
   const botTs: string | undefined = payload.message?.ts;
+  if (PLAN_ACTION_IDS.has(action.action_id)) return handlePlanAction(payload);
 
   switch (action.action_id) {
     case "linear_connect":
@@ -129,8 +133,9 @@ export function interceptInteractivity(headers: Headers, body: string): Intercep
 
   const ownedSubmission = payload.type === "view_submission" && payload.view?.callback_id === CONNECT_CALLBACK_ID;
   const secretSubmission = payload.type === "view_submission" && payload.view?.callback_id === SECRET_CALLBACK_ID;
+  const planSubmission = payload.type === "view_submission" && PLAN_CALLBACK_IDS.has(payload.view?.callback_id);
   const ownedAction = payload.type === "block_actions" && isOwnedAction(payload.actions?.[0]?.action_id);
-  if (!ownedSubmission && !secretSubmission && !ownedAction) return null;
+  if (!ownedSubmission && !secretSubmission && !planSubmission && !ownedAction) return null;
 
   if (!verifySlackSignature(headers, body))
     return { response: new Response("invalid signature", { status: 401 }), work: Promise.resolve() };
@@ -148,7 +153,9 @@ export function interceptInteractivity(headers: Headers, body: string): Intercep
 
   const work = (async () => {
     try {
-      if (ownedSubmission) {
+      if (planSubmission) {
+        await handlePlanSubmission(payload);
+      } else if (ownedSubmission) {
         await handleConnectSubmission(payload.view.private_metadata, payload.user?.id, selectedTeam(payload));
       } else {
         await handleBlockActions(payload);
