@@ -1,73 +1,88 @@
-import { and, asc, eq, gte } from "drizzle-orm";
+import { and, asc, eq, gte, sql } from "drizzle-orm";
 import { db, tables } from "./db/index.ts";
 import type { Desk, DeskReservation, User } from "./db/schema.ts";
+import { recordedAwayUserIds } from "./office/away.ts";
+import { updateDesk } from "./office/layout.ts";
 import { utcToday } from "./time.ts";
 
 const { desks, deskReservations, users } = tables;
 
-export type ReservationWithDesk = DeskReservation & { desk: Desk; user: User };
+export type ReservationSource = "manual" | "plan";
+export type ReservationWithDesk = DeskReservation & { desk: Desk; user: User | null; name: string };
+export type DeskPerson = { userId: string } | { guestName: string };
+
+export const reservationName = (reservation: Pick<DeskReservation, "guestName">, user: Pick<User, "name" | "email"> | null) =>
+  user?.name ?? user?.email ?? reservation.guestName ?? "?";
 
 export async function listDesks(opts: { includeInactive?: boolean } = {}): Promise<Desk[]> {
-  return db
+  const rows = await db
     .select()
     .from(desks)
     .where(opts.includeInactive ? undefined : eq(desks.active, true))
     .orderBy(asc(desks.label));
+  return rows.sort((a, b) => a.label.localeCompare(b.label, "pl", { numeric: true }));
 }
 
 export async function getDeskByLabel(label: string): Promise<Desk | null> {
-  const [desk] = await db.select().from(desks).where(eq(desks.label, label.trim())).limit(1);
+  const [desk] = await db
+    .select()
+    .from(desks)
+    .where(sql`lower(${desks.label}) = lower(${label.trim()})`)
+    .limit(1);
   return desk ?? null;
 }
 
-export type DeskAttrs = Partial<Pick<Desk, "label" | "locationNote" | "equipment" | "mapX" | "mapY" | "permanentOwner" | "active">>;
-
-export async function createDesk(attrs: DeskAttrs): Promise<Desk> {
-  if (!attrs.label || attrs.label.trim() === "") throw new Error("label: can't be blank");
-  const [desk] = await db
-    .insert(desks)
-    .values({ ...attrs, label: attrs.label.trim() })
-    .returning();
-  return desk;
-}
-
-export async function updateDesk(desk: Desk, attrs: DeskAttrs): Promise<Desk> {
-  const values = attrs.label !== undefined ? { ...attrs, label: attrs.label.trim() } : attrs;
-  const [updated] = await db.update(desks).set(values).where(eq(desks.id, desk.id)).returning();
-  return updated;
-}
-
 export function deactivateDesk(desk: Desk): Promise<Desk> {
-  return updateDesk(desk, { active: false });
+  return updateDesk(desk.id, { active: false });
 }
 
 export type ReserveError =
-  | { error: "not_found" }
-  | { error: "inactive" }
-  | { error: "permanent_owner"; owner: string }
-  | { error: "past_date" }
-  | { error: "taken" };
+  { error: "not_found" } | { error: "inactive" } | { error: "owned"; owner: string } | { error: "past_date" } | { error: "taken" };
+
+export type ReserveOptions = {
+  note?: string | null;
+  source?: ReservationSource;
+  awayUserIds?: ReadonlySet<string>;
+};
 
 export async function reserveDesk(
   label: string,
-  userId: string,
+  person: DeskPerson,
   date: string,
-  note: string | null = null,
+  options: ReserveOptions = {},
 ): Promise<{ ok: true; reservation: ReservationWithDesk } | ({ ok: false } & ReserveError)> {
   const desk = await getDeskByLabel(label);
   if (!desk) return { ok: false, error: "not_found" };
   if (!desk.active) return { ok: false, error: "inactive" };
-  if (desk.permanentOwner !== null) return { ok: false, error: "permanent_owner", owner: desk.permanentOwner };
   if (date < utcToday()) return { ok: false, error: "past_date" };
+
+  const userId = "userId" in person ? person.userId : null;
+  if (desk.ownerUserId && desk.ownerUserId !== userId) {
+    const away = options.awayUserIds ?? (await recordedAwayUserIds(date));
+    if (!away.has(desk.ownerUserId)) {
+      const [owner] = await db.select().from(users).where(eq(users.id, desk.ownerUserId)).limit(1);
+      return { ok: false, error: "owned", owner: owner?.name ?? owner?.email ?? "?" };
+    }
+  }
 
   try {
     const reservation = await db.transaction(async (tx) => {
-      await tx.delete(deskReservations).where(and(eq(deskReservations.userId, userId), eq(deskReservations.date, date)));
-      const [created] = await tx.insert(deskReservations).values({ deskId: desk.id, userId, date, note }).returning();
+      if (userId) await tx.delete(deskReservations).where(and(eq(deskReservations.userId, userId), eq(deskReservations.date, date)));
+      const [created] = await tx
+        .insert(deskReservations)
+        .values({
+          deskId: desk.id,
+          userId,
+          guestName: "guestName" in person ? person.guestName.trim() : null,
+          date,
+          note: options.note ?? null,
+          source: options.source ?? "manual",
+        })
+        .returning();
       return created;
     });
-    const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
-    return { ok: true, reservation: { ...reservation, desk, user } };
+    const [user] = userId ? await db.select().from(users).where(eq(users.id, userId)).limit(1) : [];
+    return { ok: true, reservation: { ...reservation, desk, user: user ?? null, name: reservationName(reservation, user ?? null) } };
   } catch {
     return { ok: false, error: "taken" };
   }
@@ -87,10 +102,10 @@ export async function listReservationsForDate(date: string): Promise<Reservation
     .select({ reservation: deskReservations, desk: desks, user: users })
     .from(deskReservations)
     .innerJoin(desks, eq(desks.id, deskReservations.deskId))
-    .innerJoin(users, eq(users.id, deskReservations.userId))
+    .leftJoin(users, eq(users.id, deskReservations.userId))
     .where(eq(deskReservations.date, date))
     .orderBy(asc(deskReservations.insertedAt));
-  return rows.map((row) => ({ ...row.reservation, desk: row.desk, user: row.user }));
+  return rows.map((row) => ({ ...row.reservation, desk: row.desk, user: row.user, name: reservationName(row.reservation, row.user) }));
 }
 
 export async function listUserReservations(userId: string): Promise<(DeskReservation & { desk: Desk })[]> {

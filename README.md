@@ -57,7 +57,6 @@ To work offline, skip Infisical with `AV_SKIP_INFISICAL=1`.
 | `pnpm typecheck` / `pnpm test` | `tsc` and vitest (`TEST_DATABASE_URL` enables DB tests) |
 | `pnpm slack:export [n]` | Export recent Slack messages to `eval/slack_raw.json` |
 | `pnpm eval:memory [--dry-run] [--scope kind]` | Memory classification eval against `eval/dataset.json` |
-| `pnpm desk-map [date] [out.png]` | Render the desk map for a day |
 
 ## Sign-in
 

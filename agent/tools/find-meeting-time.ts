@@ -63,10 +63,8 @@ export default defineManfrodTool({
       const start = new Date(Math.max(zonedToUtc(date, dayStart).getTime(), Date.now()));
       const windows = freeWindows(allBusy, { start, end: zonedToUtc(date, dayEnd) }, duration_minutes);
       const inOffice = (await listReservationsForDate(date))
-        .filter((reservation) => userIds.has(reservation.userId))
-        .map((reservation) =>
-          reservation.userId === ctx.userId ? (self?.name ?? "you") : (reservation.user.name ?? reservation.user.email),
-        );
+        .filter((reservation) => reservation.userId !== null && userIds.has(reservation.userId))
+        .map((reservation) => (reservation.userId === ctx.userId ? (self?.name ?? "you") : reservation.name));
       const free =
         windows.length > 0 ? windows.map((window) => `${hhmm(window.start)}–${hhmm(window.end)}`).join(", ") : "no common free time";
       lines.push(`${date} (${weekday}): ${free}${inOffice.length > 0 ? ` · desk booked: ${inOffice.join(", ")}` : ""}`);

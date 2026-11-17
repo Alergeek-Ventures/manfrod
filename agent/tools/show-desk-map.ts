@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { postMap } from "../../lib/desk-map.ts";
+import { renderDeskMapPng } from "../../lib/office/map.ts";
+import { uploadFile } from "../../lib/slack/api.ts";
 import { DATE_DOC, withDate } from "../lib/office.ts";
 import { defineManfrodTool } from "../lib/define-tool.ts";
 
@@ -15,7 +16,7 @@ export default defineManfrodTool({
     if (!channel) return "Can't post the map outside a Slack channel.";
     return withDate(date, async (day) => {
       try {
-        const result = await postMap(channel, day);
+        const result = await uploadFile(channel, `biurka-${day}.png`, await renderDeskMapPng(day));
         return result.ok ? `Posted the desk map for ${day}.` : `Could not render/post the desk map: ${result.error}`;
       } catch (error) {
         return `Could not render/post the desk map: ${(error as Error).message}`;

@@ -65,7 +65,7 @@ lib/                   domain code shared by agent and web
   prompts/             verbatim prompts (classifier, zettelkasten, ...)
 db/migrations/         SQL migrations (0000 is the exact Ecto schema)
 db/drizzle/            output of `pnpm db:pull`
-scripts/               migrate, db-pull, verify-data, eval-memory, slack-export, desk-map
+scripts/               migrate, db-pull, verify-data, eval-memory, slack-export
 test/                  vitest (unit + DB tests behind TEST_DATABASE_URL)
 ```
 
@@ -95,11 +95,11 @@ test/                  vitest (unit + DB tests behind TEST_DATABASE_URL)
 | `Linear.*`, `Encrypted.Binary`, `Vault` | `lib/linear/*.ts`, `lib/vault.ts` |
 | `Google.*`, `Kalafiornia.*`, `Firmowid.SessionStats` | `lib/google.ts`, `lib/kalafiornia.ts`, `lib/firmowid.ts` |
 | `Security.*` | `lib/security/*.ts` (vendored `gitleaks.toml`) |
-| `Desks`, `DeskMap` | `lib/desks.ts`, `lib/desk-map.ts` |
+| `Desks`, `DeskMap` | `lib/desks.ts`, `lib/office/` |
 | `Facts`, `Feedback`, `Accounts` | `lib/facts.ts`, `lib/feedback.ts`, `lib/accounts.ts` |
 | Oban workers and crons | `lib/inngest/functions.ts` |
 | `ManfrodWeb.*` LiveViews and controllers | `app/**` |
-| `mix eval.memory`, `mix slack.export`, `generate_desk_map.exs` | `scripts/*.ts` |
+| `mix eval.memory`, `mix slack.export` | `scripts/*.ts` |
 
 ### Background functions (Inngest, `TZ=Europe/Warsaw`)
 
