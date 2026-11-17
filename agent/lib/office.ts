@@ -1,7 +1,6 @@
 import { z } from "zod";
-import { getUser, getUserByEmail, getUserBySlackId, isAdmin, isUuid, listUsers, personName } from "../../lib/accounts.ts";
+import { getUser, isAdmin } from "../../lib/accounts.ts";
 import { config } from "../../lib/config.ts";
-import type { User } from "../../lib/db/schema.ts";
 import { splitTags } from "../../lib/office/model.ts";
 import type { MapDesk } from "../../lib/office/state.ts";
 import { isValidIsoDate, localToday } from "../../lib/time.ts";
@@ -23,28 +22,6 @@ export async function adminRefusal(userId: string): Promise<string | null> {
 
 export function splitEquipment(equipment: string | undefined): string[] | undefined {
   return typeof equipment === "string" ? splitTags(equipment) : undefined;
-}
-
-export type PersonMatch = { ok: true; user: User } | { ok: false; message: string };
-
-export async function resolvePerson(value: string): Promise<PersonMatch> {
-  const raw = value.trim().replace(/^<@([A-Z0-9]+)(\|[^>]*)?>$/, "$1");
-  const direct = /^[UW][A-Z0-9]{5,}$/.test(raw)
-    ? await getUserBySlackId(raw)
-    : raw.includes("@")
-      ? await getUserByEmail(raw.toLowerCase())
-      : isUuid(raw)
-        ? await getUser(raw)
-        : null;
-  if (direct) return { ok: true, user: direct };
-  const wanted = raw.toLowerCase();
-  const users = await listUsers();
-  const exact = users.filter((user) => (user.name ?? "").toLowerCase() === wanted);
-  const matches = exact.length > 0 ? exact : users.filter((user) => (user.name ?? "").toLowerCase().split(/\s+/)[0] === wanted);
-  if (matches.length === 1) return { ok: true, user: matches[0] };
-  if (matches.length > 1)
-    return { ok: false, message: `'${value}' matches several people (${matches.map(personName).join(", ")}); pass their Slack ID.` };
-  return { ok: false, message: `I don't know anyone called '${value}'; pass their Slack ID (see list-team-members).` };
 }
 
 export function deskStatusText(desk: MapDesk): string {

@@ -2,6 +2,7 @@ import { and, asc, eq, gte, isNull, lte } from "drizzle-orm";
 import { db, tables } from "../db/index.ts";
 import type { OfficePresence, OfficeVisit } from "../db/schema.ts";
 import { compareDates, isValidIsoDate } from "../time.ts";
+import { getLayout } from "./layout.ts";
 import type { StatedStatus } from "./presence-resolve.ts";
 
 const { officeLayouts, officePresence, officeVisits } = tables;
@@ -9,8 +10,7 @@ const { officeLayouts, officePresence, officeVisits } = tables;
 export type PresenceSource = "chat" | "button";
 
 export async function defaultLayoutId(): Promise<string | null> {
-  const [layout] = await db.select({ id: officeLayouts.id }).from(officeLayouts).orderBy(asc(officeLayouts.updatedAt)).limit(1);
-  return layout?.id ?? null;
+  return (await getLayout()).id;
 }
 
 export async function setPresence(

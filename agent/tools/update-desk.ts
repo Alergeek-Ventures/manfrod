@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { getDeskByLabel } from "../../lib/desks.ts";
 import { updateDesk, type DeskPatch } from "../../lib/office/layout.ts";
-import { adminRefusal, deskFields, editorUrl, resolvePerson, splitEquipment } from "../lib/office.ts";
+import { adminRefusal, deskFields, editorUrl, splitEquipment } from "../lib/office.ts";
+import { resolvePerson } from "../lib/people.ts";
 import { defineManfrodTool } from "../lib/define-tool.ts";
 
 const NO_OWNER = ["none", "nobody", "-", "brak", "nikt"];
