@@ -314,7 +314,7 @@ async function startWork(): Promise<number> {
   return started;
 }
 
-export async function runNightly(): Promise<{ judged: number; unsatisfied: number; reviewed: number; started: number }> {
+export async function runCycle(): Promise<{ judged: number; unsatisfied: number; reviewed: number; started: number }> {
   await syncPulls();
   const { judged, unsatisfied } = await reviewSatisfaction(config.selfReviewChannelId ?? null);
   const findings = await findingsWithStatus(["open", "in_progress", "proposed"]);

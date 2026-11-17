@@ -20,7 +20,8 @@ import { clearTranscriptsOlderThan } from "../rehearsal/store.ts";
 import { runAutoMerge } from "../self-modify-merge/index.ts";
 import { cleanUpClosedPulls } from "../self-modify-pulls.ts";
 import { deliverProactive } from "../proactive.ts";
-import { runMorning as selfReviewMorning, runNightly as selfReviewNightly } from "../self-review/index.ts";
+import { runCycle as selfReviewCycle, runMorning as selfReviewMorning } from "../self-review/index.ts";
+import { CYCLE_CRONS as SELF_REVIEW_CRONS } from "../self-review/rules.ts";
 import { scheduleCronSkills, scheduleFirmowidEvening, scheduleFirmowidMorning, scheduleReminders } from "../schedulers.ts";
 import { refresh as refreshGitleaks } from "../security/gitleaks.ts";
 import { runAbsenceFollowUp } from "../nudges/absence.ts";
@@ -46,8 +47,9 @@ const tz = (cron: string) => `TZ=Europe/Warsaw ${cron}`;
 
 const cronFunctions = new Set<unknown>();
 
-const cronFunction = (id: string, cron: string, run: () => Promise<unknown>) => {
-  const fn = inngest.createFunction({ id, triggers: [{ cron: tz(cron) }], retries: 2, concurrency: 1 }, async ({ step }) =>
+const cronFunction = (id: string, cron: string | string[], run: () => Promise<unknown>) => {
+  const triggers = (Array.isArray(cron) ? cron : [cron]).map((entry) => ({ cron: tz(entry) }));
+  const fn = inngest.createFunction({ id, triggers, retries: 2, concurrency: 1 }, async ({ step }) =>
     step.run(id, async () => (await run()) ?? null),
   );
   cronFunctions.add(fn);
@@ -283,7 +285,7 @@ const allFunctions = [
   cronFunction("self-modify-rehearsals", "*/5 * * * *", () => runRehearsals()),
   cronFunction("capability-sync", "*/10 * * * *", () => syncCapabilityRequests()),
   cronFunction("gitleaks-refresh", "0 3 * * *", () => refreshGitleaks()),
-  cronFunction("self-review", "30 3 * * *", () => selfReviewNightly()),
+  cronFunction("self-review", SELF_REVIEW_CRONS, () => selfReviewCycle()),
   cronFunction("self-review-outreach", "30 9 * * 1-5", () => selfReviewMorning()),
   mcpExpiry,
   maintenance,

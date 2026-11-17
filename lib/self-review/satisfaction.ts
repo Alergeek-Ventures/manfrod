@@ -14,7 +14,8 @@ const { messages, messageFeedback, selfReviewSessions } = tables;
 const log = logger("SelfReview.Satisfaction");
 
 const QUIET_HOURS = 2;
-const LOOKBACK_HOURS = 24 + QUIET_HOURS;
+const LONGEST_GAP_HOURS = 55.5;
+const LOOKBACK_HOURS = LONGEST_GAP_HOURS + QUIET_HOURS + 12;
 const SESSIONS_PER_RUN = 150;
 const MESSAGES_PER_SESSION = 40;
 const REPLY_CHOICES = 8;
@@ -84,7 +85,7 @@ async function judge(input: JudgeInput): Promise<{ verdict: Exclude<Verdict, "sk
   return { verdict: result.answers.verdict.choice as Exclude<Verdict, "skipped">, reply: String(result.answers.reply.choice) };
 }
 
-async function sessionsToJudge(now: number, excludeChannelId: string | null): Promise<{ sessionKey: string; last: Date }[]> {
+export async function sessionsToJudge(now: number, excludeChannelId: string | null): Promise<{ sessionKey: string; last: Date }[]> {
   const quietBefore = new Date(now - QUIET_HOURS * 3_600_000).toISOString();
   const last = sql<string | Date>`max(${messages.receivedAt})`;
   const rows = await db
@@ -145,7 +146,7 @@ async function recordInferred(sessionKey: string, history: Message[], reply: Mes
   return false;
 }
 
-async function markJudged(sessionKey: string, judgedUntil: Date, verdict: Verdict): Promise<void> {
+export async function markJudged(sessionKey: string, judgedUntil: Date, verdict: Verdict): Promise<void> {
   await db
     .insert(selfReviewSessions)
     .values({ sessionKey, judgedUntil, verdict })

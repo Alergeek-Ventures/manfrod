@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Message } from "../../lib/db/schema.ts";
-import { feedbackSince, freeSlots, hasEnoughEvidence, NEW_SYSTEM_SINCE } from "../../lib/self-review/rules.ts";
+import { CYCLE_CRONS, feedbackSince, freeSlots, hasEnoughEvidence, MAX_OPEN_PULLS, NEW_SYSTEM_SINCE } from "../../lib/self-review/rules.ts";
 import { humanReplied, judgeInput } from "../../lib/self-review/satisfaction.ts";
 import { formatTranscript, parseFixed, parseRanking, parseTriage } from "../../lib/self-review/triage.ts";
 
@@ -26,9 +26,11 @@ describe("hasEnoughEvidence", () => {
   });
 
   it("never opens more than two pull requests at once", () => {
-    expect(freeSlots(0)).toBe(2);
-    expect(freeSlots(2)).toBe(0);
-    expect(freeSlots(3)).toBe(0);
+    expect(MAX_OPEN_PULLS).toBe(5);
+    expect(freeSlots(0)).toBe(5);
+    expect(freeSlots(3)).toBe(2);
+    expect(freeSlots(5)).toBe(0);
+    expect(freeSlots(6)).toBe(0);
   });
 });
 
@@ -166,5 +168,31 @@ describe("commits that may already fix a finding", () => {
     });
     expect(withoutBrokenFixes([commit("aaa"), commit("bbb")], new Set(["bbb"])).map((entry) => entry.sha)).toEqual(["aaa"]);
     expect(withoutBrokenFixes([commit("aaa")], new Set())).toHaveLength(1);
+  });
+});
+
+describe("self-review schedule", () => {
+  const warsaw = (date: Date) =>
+    date.toLocaleString("en-GB", { timeZone: "Europe/Warsaw", weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false });
+
+  it("runs on weekdays at 03:30 and every two hours from 8 to 20, never on weekends", async () => {
+    const { Cron } = await import("croner");
+    const from = new Date("2026-11-15T23:00:00Z");
+    const until = new Date("2026-11-22T23:00:00Z");
+    const runs = CYCLE_CRONS.flatMap((cron) =>
+      new Cron(cron, { timezone: "Europe/Warsaw", paused: true }).nextRuns(60, from).filter((run) => run < until),
+    ).sort((a, b) => a.getTime() - b.getTime());
+    const day = ["03:30", "08:00", "10:00", "12:00", "14:00", "16:00", "18:00", "20:00"];
+    expect(runs.map(warsaw)).toEqual(["Mon", "Tue", "Wed", "Thu", "Fri"].flatMap((weekday) => day.map((time) => `${weekday} ${time}`)));
+  });
+
+  it("is registered as one cron function with both schedules and concurrency 1", async () => {
+    const { functions } = await import("../../lib/inngest/functions.ts");
+    const found = functions.filter((fn) => (fn as unknown as { opts: { id: string } }).opts.id === "self-review");
+    expect(found).toHaveLength(1);
+    expect((found[0] as unknown as { opts: unknown }).opts).toMatchObject({
+      triggers: CYCLE_CRONS.map((cron) => ({ cron: `TZ=Europe/Warsaw ${cron}` })),
+      concurrency: 1,
+    });
   });
 });
