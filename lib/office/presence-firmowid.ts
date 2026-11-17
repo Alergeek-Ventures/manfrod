@@ -6,6 +6,27 @@ import { dateIsoInZone, isValidIsoDate } from "../time.ts";
 import type { LeaveRequest, SessionDay } from "./presence-resolve.ts";
 
 export const SESSION_FETCH_LIMIT = 300;
+const CACHE_MS = 15 * 60_000;
+
+const cache = new Map<string, { at: number; value: Record<string, any> }>();
+
+export function clearFirmowidCache(): void {
+  cache.clear();
+}
+
+type FirmowidAccess = NonNullable<Awaited<ReturnType<typeof firmowidAccess>>>;
+
+async function cachedCall(userId: string, access: FirmowidAccess, tool: string, args: Record<string, unknown>) {
+  const key = `${userId}:${tool}:${JSON.stringify(args)}`;
+  const hit = cache.get(key);
+  if (hit && Date.now() - hit.at < CACHE_MS) return { ok: true as const, value: hit.value };
+  const result = await callTool(access.mcpUrl, access.token, tool, args);
+  if (result.ok) {
+    for (const [stale, entry] of cache) if (Date.now() - entry.at >= CACHE_MS) cache.delete(stale);
+    cache.set(key, { at: Date.now(), value: result.value });
+  }
+  return result;
+}
 
 const log = logger("Office.Presence");
 
@@ -44,12 +65,12 @@ export async function fetchFirmowidSignals(userId: string, from: string, date: s
     const access = await firmowidAccess(userId);
     if (!access) return empty;
     const [sessions, leaves] = await Promise.all([
-      callTool(access.mcpUrl, access.token, "list_sessions", {
+      cachedCall(userId, access, "list_sessions", {
         input: { after_date: from },
         limit: SESSION_FETCH_LIMIT,
         sort: [{ field: "start_datetime", direction: "desc" }],
       }),
-      callTool(access.mcpUrl, access.token, "list_leave_requests", { input: { start_date: date, end_date: date } }),
+      cachedCall(userId, access, "list_leave_requests", { input: { start_date: date, end_date: date } }),
     ]);
     if (!sessions.ok) log.warn(`list_sessions failed for ${userId}: ${sessions.error}`);
     if (!leaves.ok) log.warn(`list_leave_requests failed for ${userId}: ${leaves.error}`);
