@@ -7,7 +7,7 @@ import { liveUnjudged, recordVerdict } from "../self-modify-merge/store.ts";
 import { reopenFinding } from "../self-review/store.ts";
 import { deactivatedSlackIds, post } from "../slack/api.ts";
 import { REHEARSAL_KIND } from "./guard.ts";
-import { jevJudge, outcome, transcriptFrom, type Judge, type RehearsalVerdict, type Transcript } from "./judge.ts";
+import { sonnetJudge, outcome, transcriptFrom, type Judge, type RehearsalVerdict, type Transcript } from "./judge.ts";
 import type { Scenario, Target } from "./scenarios.ts";
 import { failedStart, finish, forMerges, markRunning, pendingLive, running } from "./store.ts";
 
@@ -89,7 +89,7 @@ async function judged(judge: Judge, target: Target | null, scenario: Scenario, t
   }
 }
 
-export async function collect(judge: Judge = jevJudge, now = new Date()): Promise<number> {
+export async function collect(judge: Judge = sonnetJudge, now = new Date()): Promise<number> {
   const merges = new Map((await liveUnjudged()).map((merge) => [merge.id, merge]));
   let finished = 0;
   for (const rehearsal of await running(PER_RUN)) {
@@ -167,7 +167,7 @@ export async function settle(): Promise<number> {
   return settled;
 }
 
-export async function runRehearsals(judge: Judge = jevJudge): Promise<{ started: number; finished: number; settled: number }> {
+export async function runRehearsals(judge: Judge = sonnetJudge): Promise<{ started: number; finished: number; settled: number }> {
   const started = await startPending();
   const finished = await collect(judge);
   const settled = await settle();
