@@ -9,6 +9,7 @@ import { addAccess, overlappingAbsences, putAbsence, setFact, upcomingAbsences }
 import { generateText, system, user } from "../llm/index.ts";
 import { decideAction, type MemoryAction } from "./action-decider.ts";
 import { logger } from "../log.ts";
+import { listVisits, recordVisit } from "../office/presence-store.ts";
 import { post } from "../slack/api.ts";
 import { isValidIsoDate, localToday, weekdayName, withWeekday } from "../time.ts";
 import { embedQuery } from "../voyage.ts";
@@ -211,6 +212,8 @@ async function dispatchAction(action: string, result: Result, message: BufferedM
       return createMemory(result, message, batch, writeAccess);
     case "create_absence":
       return createAbsence(result, message, batch, writeAccess);
+    case "create_visit":
+      return createVisit(result, message, batch, writeAccess);
     case "create_meeting":
       await setFact(`meeting:${channelId}:${message.ts || "0"}`, message.text ?? "", writeAccess, "system");
       return;
@@ -269,6 +272,43 @@ async function createAbsence(result: Result, message: BufferedMessage, batch: Ba
   const proposal = escalationProposal(batch, writeAccess, "absence");
   const asked = proposal !== null && (await postEscalationQuestion(batch.channelId, message, node, proposal, writeAccess, key, absence));
   await sendEvent(asked ? EVENTS.absenceAsked : EVENTS.absenceRecorded, absence);
+}
+
+export type VisitDraft = { startsOn: string; endsOn: string; userIds: string[]; guests: number; note: string };
+
+export function visitFromResult(result: Result, authorUserId: string | null, today: string, text: string): VisitDraft | null {
+  const valid = (value: unknown) => (typeof value === "string" && isValidIsoDate(value) ? value : null);
+  const startsOn = valid(result.start_date);
+  if (!startsOn || startsOn < today) return null;
+  const endsOn = valid(result.end_date) ?? startsOn;
+  if (endsOn < startsOn) return null;
+  const guests = Number.isInteger(result.guests) ? Math.min(Math.max(result.guests as number, 0), 100) : 0;
+  const userIds = result.author_coming === true && authorUserId ? [authorUserId] : [];
+  if (guests === 0 && userIds.length === 0) return null;
+  const note = typeof result.note === "string" && result.note.trim() !== "" ? result.note.trim().slice(0, 300) : text.slice(0, 300);
+  return { startsOn, endsOn, userIds, guests, note };
+}
+
+export const visitAllowed = (channelId: string, writeAccess: string[]) =>
+  !channelId.startsWith("D") && writeAccess.length > 0 && writeAccess.every((level) => level === "internal");
+
+async function createVisit(result: Result, message: BufferedMessage, batch: Batch, writeAccess: string[]) {
+  if (!visitAllowed(batch.channelId, writeAccess)) {
+    log.debug(`Classifier create_visit: skipping outside team channels (${batch.channelId})`);
+    return;
+  }
+  const userId = authorId(batch, message);
+  const draft = visitFromResult(result, userId, localToday(), message.text ?? "");
+  if (!draft) {
+    log.debug("Classifier create_visit: no usable dates or people, skipping");
+    return;
+  }
+  if ((await listVisits(draft.startsOn, draft.endsOn)).length > 0) {
+    log.debug(`Classifier create_visit: a visit on ${draft.startsOn}..${draft.endsOn} is already recorded, skipping`);
+    return;
+  }
+  const recorded = await recordVisit({ ...draft, createdBy: userId });
+  if (!recorded.ok) log.warn(`Classifier create_visit: not recorded: ${recorded.error}`);
 }
 
 async function askHuman(result: Result, message: BufferedMessage, batch: Batch, writeAccess: string[]) {

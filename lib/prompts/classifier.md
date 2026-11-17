@@ -27,6 +27,7 @@ Possible actions:
 - "ignore" — nothing worth saving
 - "create_memory" — save to the memory graph at the current channel's default access level
 - "create_absence" — one-time planned absence; the system saves it at the channel's default access (at least "internal", even in a DM) and itself asks whether to share it with all clients
+- "create_visit" — people announce they are coming to the office on given days (colleagues from another city, guests); only in team channels
 - "create_meeting" — a confirmed meeting/call
 - "flag_sensitive" — raw IT credentials pasted directly; block and log silently
 - "ask_human" — propose widening access before saving; bot asks a yes/no question first
@@ -85,6 +86,19 @@ Possible actions:
   same Firmowid offer and creates an infinite ask-offer loop. Use ignore here (or create_memory if
   it states a genuinely new fact) — never create_absence for a message that is itself about
   saving/adding/confirming an absence in Firmowid.
+
+── CREATE_VISIT ─────────────────────────────────────────────────────────
+- Someone announces that people will come to the office on given days: colleagues from
+  another office or city, a team day, outside guests ("w czwartek przyjeżdżamy z Wrocławia
+  w 4 osoby", "jutro wpada do biura 3 osoby od klienta")
+- Require a LITERAL visit signal in the message itself: a verb of coming to the office
+  ("przyjeżdżamy", "przyjeżdża", "wpadamy do biura", "będziemy w biurze", "coming to the
+  office") together with a day. Do NOT infer a visit from a trip elsewhere, a meeting at a
+  client's place, a question ("może przyjedziecie?") or a plan that is not decided yet
+- Only in team channels (company_channel, project_internal) — never from client channels
+  or DMs; there use create_memory or ignore as usual
+- NOT a visit: one person saying they will be in the office themselves ("jutro jestem w
+  biurze") → ignore
 
 ── CREATE_MEETING ───────────────────────────────────────────────────────
 - All parties confirmed: the meeting WILL happen
@@ -159,11 +173,12 @@ rule above wins:
 
 ── OUTPUT ───────────────────────────────────────────────────────────────
 For a batch of messages I send you, respond ONLY as a JSON array (no extra text), one object per message in the same order:
-[{"action": "<action>", "reasoning": "<max 1 sentence>", "note": "<string or null>", "project": "<slug or null>", "start_date": "YYYY-MM-DD or null", "end_date": "YYYY-MM-DD or null", "replaces": true or false}, ...]
+[{"action": "<action>", "reasoning": "<max 1 sentence>", "note": "<string or null>", "project": "<slug or null>", "start_date": "YYYY-MM-DD or null", "end_date": "YYYY-MM-DD or null", "replaces": true or false, "guests": <integer or null>, "author_coming": true or false}, ...]
 
-Valid actions: "ignore", "create_memory", "create_absence", "create_meeting", "flag_sensitive", "ask_human"
+Valid actions: "ignore", "create_memory", "create_absence", "create_visit", "create_meeting", "flag_sensitive", "ask_human"
 
-"note" — REQUIRED for create_memory, create_absence and ask_human (null otherwise).
+"note" — REQUIRED for create_memory, create_absence, create_visit and ask_human (null otherwise).
+For create_visit, a short description of who is coming, e.g. "zespół z Wrocławia".
 A self-contained, third-person reformulation of the fact, in the same language as the message.
 Never store the raw message wording. Name the person explicitly (use the User field) and resolve
 every relative date ("jutro", "w piątek", "za tydzień") to an absolute date using the current
@@ -182,9 +197,14 @@ posted in a project's channel is not automatically about that project, e.g. in #
 wants Firmowid to show who is working right now" is about Firmowid, not Manfrod. When unsure, use
 the channel's project.
 
-"start_date"/"end_date" — REQUIRED for create_absence (null otherwise): the resolved absence
-period as absolute ISO dates, computed against the current date provided with the batch.
+"start_date"/"end_date" — REQUIRED for create_absence and create_visit (null otherwise): the resolved
+absence or visit period as absolute ISO dates, computed against the current date provided with the batch.
 A single-day absence has start_date == end_date. "jutro" means current date + 1 day.
 
 "replaces" — for create_absence: true when the message changes an absence already recorded for
 the author, false otherwise.
+
+"guests"/"author_coming" — for create_visit: author_coming is true when the author is one of the
+people coming ("przyjeżdżamy"); guests is how many OTHER people come besides the author, e.g.
+"przyjeżdżamy w 4 osoby" → author_coming true, guests 3; "przyjeżdża 3 osoby z Wrocławia" →
+author_coming false, guests 3. null/false for other actions.
