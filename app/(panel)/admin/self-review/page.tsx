@@ -67,7 +67,11 @@ export default async function SelfReviewPage({ searchParams }: { searchParams: P
     <div className="flex flex-col gap-6 py-4 md:py-6">
       <SectionCards
         metrics={[
-          { label: "Ratings to triage", value: data.untriaged, sublabel: "picked up by the next nightly run" },
+          {
+            label: "Ratings to triage",
+            value: data.untriaged,
+            sublabel: "picked up by the next run (weekdays at 03:30 and every two hours from 8 to 20)",
+          },
           { label: "Waiting", value: inGroup("waiting").length, sublabel: `${waitingCases.length} rater question(s) open` },
           { label: "In progress", value: inGroup("progress").length, sublabel: `${data.openPulls} self-modify PR(s) open` },
           { label: "Done", value: inGroup("done").length, sublabel: "merged fixes" },
@@ -96,7 +100,7 @@ export default async function SelfReviewPage({ searchParams }: { searchParams: P
         <Card>
           <CardContent>
             {findings.length === 0 ? (
-              <NoData>Findings appear after the nightly self-review groups bad ratings into problems.</NoData>
+              <NoData>Findings appear after self-review groups bad ratings into problems.</NoData>
             ) : (
               <Table>
                 <TableHeader>

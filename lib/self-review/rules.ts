@@ -1,6 +1,7 @@
 export const SELF_REVIEW_KIND = "self_review";
 export const SELF_REVIEW_SLACK_ID = "system:self-review";
-export const MAX_OPEN_PULLS = 2;
+export const MAX_OPEN_PULLS = 5;
+export const CYCLE_CRONS = ["30 3 * * 1-5", "0 8-20/2 * * 1-5"];
 export const MIN_RATERS = 2;
 export const CATEGORIES = ["prompt", "skill", "routine", "tool"] as const;
 export const ACTIVE_STATUSES = ["in_progress", "proposed"] as const;

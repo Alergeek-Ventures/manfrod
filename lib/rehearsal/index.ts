@@ -141,7 +141,7 @@ export function outcomeText(
       ? "there was no scenario to rehearse."
       : `rehearsed ${rehearsals.length} scenario(s) on the new version of #${merge.pullNumber}.`;
   const reopened =
-    verdict === "still_broken" && merge.findingId ? "\nI reopened the finding, so the nightly self-review picks it up again." : "";
+    verdict === "still_broken" && merge.findingId ? "\nI reopened the finding, so the next self-review run picks it up again." : "";
   return `${HEADLINES[verdict]}: ${summary}${lines.length > 0 ? `\n${lines.join("\n")}` : ""}${reopened}`;
 }
 

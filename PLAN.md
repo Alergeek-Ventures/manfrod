@@ -49,3 +49,17 @@ Self-modify pull requests that only change Markdown in `agent/skills/<name>/SKIL
 ## Status
 
 2026-11-17: plan written, implementation starting.
+
+## Layer 2: self-review on weekdays at 03:30 and every two hours from 8 to 20
+
+Branch `feat/self-review-every-two-hours`, stacked on `feat/self-modify-skill-automerge`.
+
+User decision 2026-11-17: self-review runs Monday to Friday at 03:30 and at 08, 10, 12, 14, 16, 18 and 20 (Europe/Warsaw), nothing on weekends, and at most 5 self-modify pull requests may be open at once. Every run may start findings of every category.
+
+1. `MAX_OPEN_PULLS` is 5 (`freeSlots`, `publish-proposal`, AGENTS.md).
+2. One `self-review` cron function with two triggers, `30 3 * * 1-5` and `0 8-20/2 * * 1-5`, concurrency 1, runs `runCycle`: sync pulls, satisfaction judging (2 h quiet window), triage, start work.
+3. The satisfaction lookback covers the longest gap, Friday 20:00 to Monday 03:30 (55.5 h), plus the quiet window and 12 h margin; `self_review_sessions.judged_until` keeps a conversation from being judged twice.
+4. `SESSIONS_PER_RUN`, `UNRESOLVED_AFTER_HOURS` and the morning outreach stay as they are; "nightly" wording is gone.
+
+Status: done.
+
