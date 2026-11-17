@@ -66,13 +66,13 @@ async function runOneTimeTrigger(args: Record<string, string>) {
   await sendProactiveOrThrow(args.user_id, args.prompt, args.trigger_id);
 }
 
-async function skillRunnerAuth(): Promise<HandoffAuth> {
+async function skillRunnerAuth(skillName: string): Promise<HandoffAuth> {
   const id = await systemUserId("system:skill-runner", "Skill Runner", "skill-runner@system.manfrod");
   return {
     authenticator: "manfrod",
     principalType: "service",
     principalId: id,
-    attributes: { userId: id, slackUserId: "system:skill-runner", kind: "skill_channel" },
+    attributes: { userId: id, slackUserId: "system:skill-runner", kind: "skill_channel", skillName },
   };
 }
 
@@ -90,7 +90,7 @@ export async function runSkill(skillName: string, userId: string | null, titleSo
       throw new JobError("missing_channel");
     }
     await agentRuntime().sendToSlack({ channelId: skill.channel }, skill.body, {
-      ...(await skillRunnerAuth()),
+      ...(await skillRunnerAuth(skillName)),
     });
     log.info(`SkillRunner: '${skillName}' started`);
     return;

@@ -28,8 +28,8 @@ Self-modify pull requests that only change Markdown in `agent/skills/<name>/SKIL
 
 ## Steps
 
-1. Implement 1–5, 8, 9 (gate, review, merge cron, channel posts, setting, migration). Status: todo
-2. Implement 6, 7 (APP_COMMIT, live detection, verification task and impact tool). Status: todo
+1. Implement 1–5, 8, 9 (gate, review, merge cron, channel posts, setting, migration). Status: done (`lib/self-modify-merge/`, migration 0029, Agent tab switch)
+2. Implement 6, 7 (APP_COMMIT, live detection, verification task and impact tool). Status: done (`self-modify-impact` tool; CI step in its own commit, to show the user)
 3. Independent review, fix loop. Status: todo
 4. PR (draft). Status: todo
 

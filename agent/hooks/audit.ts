@@ -36,7 +36,11 @@ export default defineHook({
       const tool = toolCtx(ctx);
       startTurn(ctx.session.id, tool.userId);
       if (tool.sessionKey) setActiveAuthor(tool.sessionKey, tool.userId);
-      emit("thinking", { ...eventCtx(tool), meta: baseMeta(tool) });
+      const skillName = (ctx.session.auth.current ?? ctx.session.auth.initiator)?.attributes.skillName;
+      emit("thinking", {
+        ...eventCtx(tool),
+        meta: { ...baseMeta(tool), kind: tool.kind, skill_name: typeof skillName === "string" ? skillName : null },
+      });
     },
 
     "step.started"(event, ctx) {
