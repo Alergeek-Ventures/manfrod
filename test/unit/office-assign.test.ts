@@ -76,6 +76,20 @@ describe("assignDesks", () => {
     expect(result.displaced.map((person) => person.key)).toEqual(["user:ala"]);
   });
 
+  it("keeps a swap where the owner sits at someone else's desk", () => {
+    const result = assignDesks({
+      desks: [desk("o1", 0, 0, "olga"), desk("a1", 5, 0)],
+      people: [user("olga"), user("ala")],
+      awayUserIds: new Set(),
+      manual: [
+        { deskId: "o1", userId: "ala", guestName: null, name: "ala" },
+        { deskId: "a1", userId: "olga", guestName: null, name: "olga" },
+      ],
+    });
+    expect(seats(result)).toEqual({ o1: "ala:manual", a1: "olga:manual" });
+    expect(result.displaced).toEqual([]);
+  });
+
   it("prefers the previous plan, then the most recent desk", () => {
     const result = assignDesks({
       desks: DESKS,

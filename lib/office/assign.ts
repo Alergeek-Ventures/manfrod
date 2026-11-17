@@ -97,13 +97,19 @@ export function assignDesks(input: AssignInput): AssignResult {
   const listed = [...input.people].filter((person, index, all) => all.findIndex((other) => other.key === person.key) === index);
   const comingUsers = new Set(listed.flatMap((person) => (person.userId ? [person.userId] : [])));
   const displaced: AssignPerson[] = [];
+  const holdingManual = new Set(input.manual.flatMap((reservation) => (reservation.userId ? [reservation.userId] : [])));
 
   for (const reservation of input.manual) {
     const desk = deskById.get(reservation.deskId);
     const key = personKey(reservation);
     if (!desk || taken.has(desk.id) || seated.has(key)) continue;
     const person = { key, userId: reservation.userId, guestName: reservation.guestName, name: reservation.name };
-    if (desk.ownerUserId && desk.ownerUserId !== reservation.userId && comingUsers.has(desk.ownerUserId)) {
+    if (
+      desk.ownerUserId &&
+      desk.ownerUserId !== reservation.userId &&
+      comingUsers.has(desk.ownerUserId) &&
+      !holdingManual.has(desk.ownerUserId)
+    ) {
       displaced.push(listed.find((candidate) => candidate.key === key) ?? { ...person, groups: [] });
       continue;
     }

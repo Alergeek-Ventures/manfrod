@@ -1,4 +1,4 @@
-import { and, asc, eq, gte, sql } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, sql } from "drizzle-orm";
 import { db, tables } from "./db/index.ts";
 import type { Desk, DeskReservation, User } from "./db/schema.ts";
 import { recordedAwayUserIds } from "./office/away.ts";
@@ -68,6 +68,10 @@ export async function reserveDesk(
   try {
     const reservation = await db.transaction(async (tx) => {
       if (userId) await tx.delete(deskReservations).where(and(eq(deskReservations.userId, userId), eq(deskReservations.date, date)));
+      if ((options.source ?? "manual") === "manual")
+        await tx
+          .delete(deskReservations)
+          .where(and(eq(deskReservations.deskId, desk.id), eq(deskReservations.date, date), eq(deskReservations.source, "plan")));
       const [created] = await tx
         .insert(deskReservations)
         .values({
@@ -95,6 +99,24 @@ export async function cancelReservation(userId: string, label: string, date: str
     .delete(deskReservations)
     .where(and(eq(deskReservations.deskId, desk.id), eq(deskReservations.date, date), eq(deskReservations.userId, userId)));
   return (result.rowCount ?? 0) > 0;
+}
+
+export async function cancelReservationsForDate(userId: string, date: string): Promise<string[]> {
+  const removed = await db
+    .delete(deskReservations)
+    .where(and(eq(deskReservations.userId, userId), eq(deskReservations.date, date)))
+    .returning({ deskId: deskReservations.deskId });
+  if (removed.length === 0) return [];
+  const rows = await db
+    .select({ label: desks.label })
+    .from(desks)
+    .where(
+      inArray(
+        desks.id,
+        removed.map((row) => row.deskId),
+      ),
+    );
+  return rows.map((row) => row.label);
 }
 
 export async function listReservationsForDate(date: string): Promise<ReservationWithDesk[]> {

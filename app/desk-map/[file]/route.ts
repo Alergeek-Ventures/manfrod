@@ -1,6 +1,8 @@
 import type { NextRequest } from "next/server";
 import { logger } from "@/lib/log.ts";
+import { getLayout } from "@/lib/office/layout.ts";
 import { renderDeskMapPng } from "@/lib/office/map.ts";
+import { planAwayUserIds } from "@/lib/office/plan-store.ts";
 import { dateFromMapFile, verifyDeskMapSignature } from "@/lib/office/url.ts";
 
 const log = logger("DeskMap.Route");
@@ -12,7 +14,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const { searchParams } = request.nextUrl;
   if (!verifyDeskMapSignature(date, searchParams.get("v"), searchParams.get("sig"))) return new Response("Forbidden.", { status: 403 });
   try {
-    const png = await renderDeskMapPng(date);
+    const awayUserIds = await planAwayUserIds((await getLayout()).id, date);
+    const png = await renderDeskMapPng(date, awayUserIds ? { awayUserIds } : {});
     return new Response(new Uint8Array(png), {
       headers: { "Content-Type": "image/png", "Cache-Control": "public, max-age=60, must-revalidate" },
     });
