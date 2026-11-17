@@ -42,7 +42,7 @@ jobs:
           COOLIFY_APP_UUID: ${{ vars.COOLIFY_APP_UUID }}
           APP_COMMIT: ${{ github.sha }}
         run: |
-          body=$(jq -n --arg value "$APP_COMMIT" '{key: "APP_COMMIT", value: $value, is_literal: true}')
+          body=$(jq -n --arg value "$APP_COMMIT" '{key: "APP_COMMIT", value: $value, is_literal: true, is_buildtime: true, is_runtime: false}')
           send() {
             curl -sS -o /tmp/coolify-env.json -w '%{http_code}' -X "$1" \
               "https://coolify.alergeek.me/api/v1/applications/${COOLIFY_APP_UUID}/envs" \
