@@ -165,11 +165,11 @@ export async function upcomingPeriods(today: string, days: number) {
   return { ok: true as const, value: holidayPeriods(result.value).filter((period) => period.end >= today && period.start <= limit) };
 }
 
-export async function publicHolidayDates(from: string, to: string): Promise<Set<string>> {
+export async function publicHolidayDates(from: string, to: string): Promise<Set<string> | null> {
   const result = await listPublicHolidays(config.holidayCalendarId, new Date(`${from}T00:00:00Z`), new Date(`${addDays(to, 1)}T00:00:00Z`));
   if (!result.ok) {
     log.warn(`HolidayCheck: could not read the holiday calendar: ${result.error}`);
-    return new Set();
+    return null;
   }
   return new Set(result.value.map((holiday) => holiday.date));
 }

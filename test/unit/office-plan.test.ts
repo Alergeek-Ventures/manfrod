@@ -1,10 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { OfficeDayPrediction } from "../../lib/office/presence.ts";
 
 const slack = vi.hoisted(() => ({
   post: vi.fn(async (_endpoint: string, _body: Record<string, any>) => ({
     ok: true as const,
-    body: { ts: "111.222" } as Record<string, any>,
+    body: { ts: "111.222", view: { id: "V1" } } as Record<string, any>,
   })),
   openDm: vi.fn(async (slackId: string) => `D-${slackId}`),
   getPermalink: vi.fn(async () => "https://slack.test/p1"),
@@ -20,6 +20,11 @@ const store = vi.hoisted(() => ({
   savePlan: vi.fn(async () => ({})),
   updatePlan: vi.fn(async () => ({})),
   planAwayUserIds: vi.fn(async () => new Set<string>()),
+  claimHeadsUp: vi.fn(async (_layoutId: string, dates: string[]) => dates),
+  setHeadsUpTs: vi.fn(async () => undefined),
+  releaseHeadsUp: vi.fn(async () => undefined),
+  setUnpostedStatus: vi.fn(async (_layoutId: string, dates: string[]) => dates),
+  withPlanLock: vi.fn(async (_layoutId: string, _date: string, run: (exec: unknown) => Promise<unknown>) => run(tx)),
 }));
 const layout = vi.hoisted(() => ({ loadOffice: vi.fn(), getLayout: vi.fn(async () => ({ id: "layout-1" })) }));
 const presence = vi.hoisted(() => ({ listVisits: vi.fn(async () => [] as unknown[]), setPresence: vi.fn(async () => ({})) }));
@@ -85,15 +90,22 @@ beforeEach(() => {
   plan.refreshPlan.mockResolvedValue({ ok: true, updated: true, plan: null, prepared: null });
 });
 
+beforeAll(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-11-17T10:00:00Z"));
+});
+
+afterAll(() => vi.useRealTimers());
+
 describe("summarizeDay", () => {
   const desk = (id: string, ownerUserId: string | null = null) => ({ id, label: id, ownerUserId, active: true });
-  const person = (userId: string, status: string) => ({
+  const person = (userId: string, status: string, source = "explicit_chat") => ({
     userId,
     name: userId,
     slackId: `U${userId}`,
     status,
     confidence: 1,
-    sources: [],
+    sources: [source],
     reason: "",
   });
   const prediction = (people: ReturnType<typeof person>[], visits: Record<string, unknown>[] = [], guests = 0) =>
@@ -105,19 +117,38 @@ describe("summarizeDay", () => {
       guests,
       expectedInOffice: people.filter((p) => p.status === "office").length + guests,
     }) as unknown as OfficeDayPrediction;
-  const day = (pred: OfficeDayPrediction, reservations: Record<string, unknown>[] = [], threshold = 6) =>
+  const day = (
+    pred: OfficeDayPrediction,
+    reservations: Record<string, unknown>[] = [],
+    threshold = 6,
+    members = ["ala", "bob", "cyd", "dan", "olga"],
+  ) =>
     summarizeDay({
       date: DATE,
       office: { layout: { crowdedThreshold: threshold }, desks: [desk("a"), desk("b"), desk("c"), desk("o1", "olga")] } as never,
       prediction: pred,
       reservations: reservations as never,
       stated: [],
+      memberIds: new Set(members),
     });
 
   it("is quiet with three people and free desks", () => {
     const result = day(prediction([person("ala", "office"), person("bob", "office"), person("olga", "office"), person("cyd", "remote")]));
     expect(result).toMatchObject({ demand: 2, supply: 3, expectedInOffice: 3, crowded: false, reasons: [] });
     expect([...result.away]).toEqual(["cyd"]);
+  });
+
+  it("treats only stated, leave, absence or a Firmowid session as away, never a habit", () => {
+    const result = day(
+      prediction([
+        person("ala", "remote", "firmowid_habit"),
+        person("bob", "remote", "reservation_habit"),
+        person("cyd", "leave", "firmowid_leave"),
+        person("dan", "remote", "firmowid_session"),
+        person("olga", "leave", "absence"),
+      ]),
+    );
+    expect([...result.away].sort()).toEqual(["cyd", "dan", "olga"]);
   });
 
   it("is crowded when owners' desks are needed", () => {
@@ -133,9 +164,9 @@ describe("summarizeDay", () => {
     expect(result).toMatchObject({ demand: 1, supply: 2, crowded: false });
   });
 
-  it("is crowded with a visit and names its guests", () => {
+  it("is crowded with a visit of two guests and names them", () => {
     const result = day(prediction([person("ala", "office")], [{ id: "v1", note: "zespół z Wrocławia", guests: 2, userIds: ["ala"] }], 2));
-    expect(result.crowded).toBe(true);
+    expect(result).toMatchObject({ crowded: true, visitExtraPeople: 2, crowdedWithoutVisits: false });
     expect(result.reasons).toContain("przyjeżdża: zespół z Wrocławia");
     expect(result.people.map((p) => [p.name, p.groups])).toEqual([
       ["ala", ["visit:v1"]],
@@ -144,12 +175,30 @@ describe("summarizeDay", () => {
     ]);
   });
 
+  it("counts visiting non-members as extra people but not locals", () => {
+    const locals = day(
+      prediction([person("ala", "office"), person("bob", "office")], [{ id: "v1", note: "my", guests: 0, userIds: ["ala", "bob"] }]),
+    );
+    expect(locals).toMatchObject({ visitExtraPeople: 0, crowded: false });
+    const client = day(prediction([person("ala", "office")], [{ id: "v2", note: "klient", guests: 1, userIds: [] }], 1));
+    expect(client).toMatchObject({ visitExtraPeople: 1, crowded: false });
+    const wroclaw = day(
+      prediction(
+        [person("ala", "office"), person("wro1", "office", "visit"), person("wro2", "office", "visit")],
+        [{ id: "v3", note: "Wrocław", guests: 0, userIds: ["wro1", "wro2"] }],
+      ),
+    );
+    expect(wroclaw).toMatchObject({ visitExtraPeople: 2, crowded: true });
+  });
+
   it("is crowded at the threshold", () => {
     expect(day(prediction([person("ala", "office"), person("olga", "office")]), [], 2).reasons).toEqual(["~2 osoby w biurze (próg: 2)"]);
   });
 });
 
 describe("desk-plan cron", () => {
+  const calm = { crowded: false, crowdedWithoutVisits: false, expectedInOffice: 3, reasons: [] };
+
   it("does nothing without a plan channel", async () => {
     layout.loadOffice.mockResolvedValue(office(null));
     expect(await runDeskPlan(TODAY)).toEqual({ skipped: "no_plan_channel" });
@@ -157,45 +206,87 @@ describe("desk-plan cron", () => {
     expect(plan.evaluateDay).not.toHaveBeenCalled();
   });
 
+  it("skips the run when the holiday calendar can't be read", async () => {
+    holidays.publicHolidayDates.mockResolvedValueOnce(null as never);
+    expect(await runDeskPlan(TODAY)).toEqual({ skipped: "no_holidays" });
+    holidays.publicHolidayDates.mockResolvedValueOnce(null as never);
+    expect(await runDeskPlanHeadsUp(TODAY)).toEqual({ skipped: "no_holidays" });
+    expect(plan.evaluateDay).not.toHaveBeenCalled();
+  });
+
   it("plans Monday on Friday and skips holidays", async () => {
     holidays.publicHolidayDates.mockResolvedValueOnce(new Set(["2026-11-23"]));
-    plan.evaluateDay.mockResolvedValue({ crowded: false, expectedInOffice: 3 });
-    expect(await runDeskPlan("2026-11-20")).toEqual({ date: "2026-11-24", action: "skip", expected: 3 });
+    plan.evaluateDay.mockResolvedValue(calm);
+    expect(await runDeskPlan("2026-11-20")).toMatchObject({ date: "2026-11-24", action: "skip", expected: 3 });
     expect(plan.postPlan).not.toHaveBeenCalled();
   });
 
   it("posts a crowded day without a plan", async () => {
-    const evaluation = { crowded: true, expectedInOffice: 9, reasons: ["przyjeżdża: Wrocław"] };
-    plan.evaluateDay.mockResolvedValue(evaluation);
+    plan.evaluateDay.mockResolvedValue({
+      crowded: true,
+      crowdedWithoutVisits: false,
+      expectedInOffice: 9,
+      reasons: ["przyjeżdża: Wrocław"],
+    });
     plan.postPlan.mockResolvedValue({ ok: true });
     expect(await runDeskPlan(TODAY)).toMatchObject({ date: DATE, action: "post", ok: true });
-    expect(plan.postPlan).toHaveBeenCalledWith(DATE, { today: TODAY, evaluation });
+    expect(plan.postPlan).toHaveBeenCalledWith(DATE, { today: TODAY });
   });
 
-  it("refreshes a posted plan only through refreshPlan and respects a decline", async () => {
+  it("posts a requested day even when calm", async () => {
+    store.getPlan.mockResolvedValueOnce({ status: "requested" });
+    plan.postPlan.mockResolvedValue({ ok: true });
+    expect(await runDeskPlan(TODAY)).toMatchObject({ action: "post", requested: true });
+    expect(plan.evaluateDay).not.toHaveBeenCalled();
+  });
+
+  it("after a decline posts only when crowded for other reasons", async () => {
+    store.getPlan.mockResolvedValue({ status: "declined" });
+    plan.evaluateDay.mockResolvedValueOnce({ ...calm, crowded: true });
+    expect(await runDeskPlan(TODAY)).toMatchObject({ action: "skip" });
+    plan.evaluateDay.mockResolvedValueOnce({ ...calm, crowded: true, crowdedWithoutVisits: true });
+    plan.postPlan.mockResolvedValue({ ok: true });
+    expect(await runDeskPlan(TODAY)).toMatchObject({ action: "post" });
+  });
+
+  it("refreshes a posted plan through refreshPlan and leaves one being posted alone", async () => {
     store.getPlan.mockResolvedValueOnce({ status: "posted" });
     plan.refreshPlan.mockResolvedValueOnce({ ok: true, updated: false });
     expect(await runDeskPlan(TODAY)).toEqual({ date: DATE, action: "refresh", updated: false });
     expect(plan.refreshPlan).toHaveBeenCalledWith(DATE, { today: TODAY });
-    store.getPlan.mockResolvedValueOnce({ status: "declined" });
-    expect(await runDeskPlan(TODAY)).toMatchObject({ action: "skip", reason: "declined" });
-    expect(plan.evaluateDay).not.toHaveBeenCalled();
+    store.getPlan.mockResolvedValueOnce({ status: "posting" });
+    expect(await runDeskPlan(TODAY)).toMatchObject({ action: "skip", reason: "posting" });
+    expect(plan.postPlan).not.toHaveBeenCalled();
   });
 
-  it("sends one heads-up per visit date that has no plan row", async () => {
-    presence.listVisits.mockResolvedValue([{ startsOn: "2026-11-19", endsOn: "2026-11-19", note: "zespół z Wrocławia" }]);
-    plan.evaluateDay.mockResolvedValue({ expectedInOffice: 9, visitNotes: ["zespół z Wrocławia"] });
-    expect(await runDeskPlanHeadsUp(TODAY)).toMatchObject({ sent: ["2026-11-19"] });
+  it("sends one heads-up for a multi-day visit, claimed before posting", async () => {
+    presence.listVisits.mockResolvedValue([{ startsOn: "2026-11-19", endsOn: "2026-11-20", note: "zespół z Wrocławia" }]);
+    plan.evaluateDay.mockResolvedValue({ crowded: true, expectedInOffice: 9 });
+    expect(await runDeskPlanHeadsUp(TODAY)).toMatchObject({ sent: [["2026-11-19", "2026-11-20"]] });
+    expect(calls("chat.postMessage")).toHaveLength(1);
     const [message] = calls("chat.postMessage");
-    expect(message).toMatchObject({
-      channel: "C123",
-      text: "W czwartek ~9 osób (przyjeżdża: zespół z Wrocławia). Przygotować plan biurek?",
-    });
-    expect(message.blocks[1].elements.map((element: any) => element.action_id)).toEqual([PLAN_ACTION.prepare, PLAN_ACTION.skip]);
-    expect(store.savePlan).toHaveBeenCalledWith("layout-1", "2026-11-19", { status: "heads_up", channelId: "C123", headsUpTs: "111.222" });
+    expect(message.text).toBe("W czwartek 19.11 – piątek 20.11 ~9 osób (przyjeżdża: zespół z Wrocławia). Przygotować plan biurek?");
+    expect(message.blocks[1].elements[0].value).toBe("2026-11-19,2026-11-20");
+    expect(store.claimHeadsUp.mock.invocationCallOrder[0]).toBeLessThan(slack.post.mock.invocationCallOrder[0]);
+    expect(store.setHeadsUpTs).toHaveBeenCalledWith("layout-1", ["2026-11-19", "2026-11-20"], "111.222");
+  });
 
-    store.listPlans.mockResolvedValueOnce([{ date: "2026-11-19" }]);
+  it("does not post when another run already claimed the dates, and releases a failed claim", async () => {
+    presence.listVisits.mockResolvedValue([{ startsOn: "2026-11-19", endsOn: "2026-11-19", note: "Wrocław" }]);
+    plan.evaluateDay.mockResolvedValue({ crowded: true, expectedInOffice: 9 });
+    store.claimHeadsUp.mockResolvedValueOnce([]);
     expect(await runDeskPlanHeadsUp(TODAY)).toMatchObject({ sent: [] });
+    expect(calls("chat.postMessage")).toHaveLength(0);
+    slack.post.mockResolvedValueOnce({ ok: false, error: "channel_not_found" } as never);
+    expect(await runDeskPlanHeadsUp(TODAY)).toMatchObject({ sent: [] });
+    expect(store.releaseHeadsUp).toHaveBeenCalledWith("layout-1", ["2026-11-19"]);
+  });
+
+  it("skips a heads-up for a visit that does not make the office crowded", async () => {
+    presence.listVisits.mockResolvedValue([{ startsOn: "2026-11-19", endsOn: "2026-11-19", note: "klient" }]);
+    plan.evaluateDay.mockResolvedValue({ crowded: false, expectedInOffice: 4 });
+    expect(await runDeskPlanHeadsUp(TODAY)).toMatchObject({ sent: [] });
+    expect(store.claimHeadsUp).not.toHaveBeenCalled();
   });
 });
 
@@ -246,8 +337,10 @@ describe("plan interactions", () => {
       ],
     });
     await actions.handlePlanAction(payload(PLAN_ACTION.change, DATE));
-    const [open] = calls("views.open");
-    expect(open.trigger_id).toBe("trigger");
+    expect(calls("views.open")[0]).toMatchObject({ trigger_id: "trigger" });
+    expect(slack.post.mock.calls[0][0]).toBe("views.open");
+    const [open] = calls("views.update");
+    expect(open.view_id).toBe("V1");
     expect(open.view.callback_id).toBe(PLAN_CALLBACK.change);
     expect(open.view.blocks[0].element.options.map((option: any) => option.value)).toEqual(["A1", "O1"]);
 
@@ -274,7 +367,7 @@ describe("plan interactions", () => {
     };
     map.loadMapState.mockResolvedValue(state);
     await actions.handlePlanAction(payload(PLAN_ACTION.swap, DATE));
-    expect(calls("views.open")[0].view.blocks[0].element.options).toEqual([
+    expect(calls("views.update")[0].view.blocks[0].element.options).toEqual([
       { text: { type: "plain_text", text: "Name bob (O1)" }, value: "bob" },
     ]);
 
@@ -305,15 +398,33 @@ describe("plan interactions", () => {
     expect(calls("chat.update")[0].blocks[1].elements[0].text).toContain("nieaktualna");
   });
 
-  it("Przygotuj posts the plan and Nie trzeba declines it", async () => {
-    plan.postPlan.mockResolvedValueOnce({ ok: true, permalink: "https://slack.test/p1", posted: true });
-    await actions.handlePlanAction(payload(PLAN_ACTION.prepare, "2026-11-19"));
-    expect(plan.postPlan).toHaveBeenCalledWith("2026-11-19");
-    expect(calls("chat.update")[0].blocks.some((block: any) => block.type === "actions")).toBe(false);
+  it("tells the clicker when the modal can't be opened", async () => {
+    slack.post.mockResolvedValueOnce({ ok: false, error: "expired_trigger_id" } as never);
+    await actions.handlePlanAction(payload(PLAN_ACTION.swap, DATE));
+    expect(calls("views.update")).toHaveLength(0);
+    expect(calls("chat.postEphemeral")[0].text).toContain("Nie udało się otworzyć okna");
+  });
 
-    store.getPlan.mockResolvedValueOnce({ status: "heads_up" });
-    await actions.handlePlanAction(payload(PLAN_ACTION.skip, "2026-11-19"));
-    expect(store.updatePlan).toHaveBeenCalledWith("layout-1", "2026-11-19", { status: "declined" });
+  it("Przygotuj requests all the heads-up dates and posts the nearest one", async () => {
+    plan.postPlan.mockResolvedValueOnce({ ok: true, permalink: "https://slack.test/p1", posted: true });
+    await actions.handlePlanAction(payload(PLAN_ACTION.prepare, "2026-11-16,2026-11-19,2026-11-20"));
+    expect(store.setUnpostedStatus).toHaveBeenCalledWith("layout-1", ["2026-11-19", "2026-11-20"], "requested");
+    expect(plan.postPlan).toHaveBeenCalledWith("2026-11-19", { today: TODAY });
+    const closed = calls("chat.update")[0];
+    expect(closed.blocks.some((block: any) => block.type === "actions")).toBe(false);
+    expect(JSON.stringify(closed.blocks)).toContain("piątek 20.11");
+  });
+
+  it("Przygotuj refuses past dates", async () => {
+    await actions.handlePlanAction(payload(PLAN_ACTION.prepare, "2026-11-16"));
+    expect(plan.postPlan).not.toHaveBeenCalled();
+    expect(calls("chat.postEphemeral")[0].text).toContain("minął");
+  });
+
+  it("Nie trzeba declines every date of the heads-up", async () => {
+    await actions.handlePlanAction(payload(PLAN_ACTION.skip, "2026-11-19,2026-11-20"));
+    expect(store.setUnpostedStatus).toHaveBeenCalledWith("layout-1", ["2026-11-19", "2026-11-20"], "declined");
+    expect(calls("chat.update")).toHaveLength(1);
   });
 
   it("ignores unknown people", async () => {

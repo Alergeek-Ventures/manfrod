@@ -3,6 +3,7 @@ import {
   altText,
   decodeSwap,
   headsUpMessage,
+  parseDates,
   PLAN_ACTION,
   PLAN_ACTION_IDS,
   planMessage,
@@ -12,9 +13,10 @@ import {
 } from "../../lib/office/plan-message.ts";
 import {
   crowding,
-  dayPhrase,
+  dayLabel,
+  daysLabel,
   fallbackIntro,
-  headsUpDates,
+  headsUpGroups,
   headsUpText,
   nextWorkday,
   peopleCount,
@@ -23,24 +25,37 @@ import {
 } from "../../lib/office/plan-rules.ts";
 
 const TUESDAY = "2026-11-17";
-const base = { visitNotes: [], demand: 2, supply: 5, expectedInOffice: 3, threshold: 6 };
+const base = { visitNotes: [], visitExtraPeople: 0, demand: 2, supply: 5, expectedInOffice: 3, threshold: 6 };
 
 describe("crowding", () => {
   it("stays quiet with a few people and enough free desks", () => {
-    expect(crowding(base)).toEqual({ crowded: false, reasons: [] });
+    expect(crowding(base)).toEqual({ crowded: false, crowdedWithoutVisits: false, reasons: [] });
   });
 
-  it("is crowded when a visit is recorded", () => {
-    expect(crowding({ ...base, visitNotes: ["zespół z Wrocławia"] })).toEqual({
+  it("is crowded when a visit brings at least two extra people", () => {
+    expect(crowding({ ...base, visitNotes: ["zespół z Wrocławia"], visitExtraPeople: 2 })).toEqual({
       crowded: true,
+      crowdedWithoutVisits: false,
       reasons: ["przyjeżdża: zespół z Wrocławia"],
     });
   });
 
-  it("is crowded when owners' desks are needed", () => {
-    expect(crowding({ ...base, demand: 6, supply: 5 }).reasons).toEqual([
-      "6 osób bez własnego biurka, a wolnych biurek bez właściciela jest 5",
+  it("ignores a visit of one extra person", () => {
+    expect(crowding({ ...base, visitNotes: ["klient"], visitExtraPeople: 1 })).toEqual({
+      crowded: false,
+      crowdedWithoutVisits: false,
+      reasons: [],
+    });
+    expect(crowding({ ...base, visitNotes: ["klient"], visitExtraPeople: 1, expectedInOffice: 6 }).reasons).toEqual([
+      "~6 osób w biurze (próg: 6)",
     ]);
+  });
+
+  it("is crowded when owners' desks are needed", () => {
+    expect(crowding({ ...base, demand: 6, supply: 5 })).toMatchObject({
+      crowdedWithoutVisits: true,
+      reasons: ["6 osób bez własnego biurka, a wolnych biurek bez właściciela jest 5"],
+    });
     expect(crowding({ ...base, demand: 5, supply: 5 }).crowded).toBe(false);
   });
 
@@ -69,37 +84,54 @@ describe("workdays", () => {
     expect(workdaysAfter(TUESDAY, 5, new Set())).toEqual(["2026-11-18", "2026-11-19", "2026-11-20", "2026-11-23", "2026-11-24"]);
   });
 
-  it("asks once about visits 2–5 workdays ahead without a plan row", () => {
+  it("groups each visit's dates 2–5 workdays ahead into one heads-up", () => {
     const visits = [
-      { startsOn: "2026-11-18", endsOn: "2026-11-18" },
-      { startsOn: "2026-11-19", endsOn: "2026-11-20" },
-      { startsOn: "2026-11-24", endsOn: "2026-11-24" },
-      { startsOn: "2026-11-25", endsOn: "2026-11-25" },
+      { startsOn: "2026-11-18", endsOn: "2026-11-18", note: "jutro" },
+      { startsOn: "2026-11-19", endsOn: "2026-11-27", note: "Wrocław" },
+      { startsOn: "2026-11-20", endsOn: "2026-11-20", note: "klient" },
     ];
-    expect(headsUpDates(TUESDAY, visits, new Set(), new Set())).toEqual(["2026-11-19", "2026-11-20", "2026-11-24"]);
-    expect(headsUpDates(TUESDAY, visits, new Set(["2026-11-19", "2026-11-20"]), new Set())).toEqual(["2026-11-24"]);
+    expect(headsUpGroups(TUESDAY, visits, new Set(), new Set())).toEqual([
+      { dates: ["2026-11-19", "2026-11-20", "2026-11-23", "2026-11-24"], notes: ["Wrocław", "klient"] },
+    ]);
+  });
+
+  it("never asks again about a visit that already had a heads-up", () => {
+    const visits = [
+      { startsOn: "2026-11-19", endsOn: "2026-11-27", note: "Wrocław" },
+      { startsOn: "2026-11-24", endsOn: "2026-11-24", note: "klient" },
+    ];
+    const asked = new Set(["2026-11-19", "2026-11-20", "2026-11-23", "2026-11-24"]);
+    expect(headsUpGroups(TUESDAY, visits, asked, new Set())).toEqual([]);
+    expect(headsUpGroups("2026-11-20", visits, asked, new Set())).toEqual([]);
   });
 });
 
 describe("planCronAction", () => {
-  it("posts only crowded days without a plan and never after a decline", () => {
-    expect(planCronAction(null, true)).toBe("post");
-    expect(planCronAction("heads_up", true)).toBe("post");
-    expect(planCronAction(null, false)).toBe("skip");
-    expect(planCronAction("declined", true)).toBe("skip");
-    expect(planCronAction("posted", false)).toBe("refresh");
+  const crowded = { crowded: true, crowdedWithoutVisits: false };
+  const busy = { crowded: true, crowdedWithoutVisits: true };
+  const calm = { crowded: false, crowdedWithoutVisits: false };
+
+  it("posts crowded days, requested days, and declined days only when crowded without the visit", () => {
+    expect(planCronAction(null, crowded)).toBe("post");
+    expect(planCronAction("heads_up", crowded)).toBe("post");
+    expect(planCronAction(null, calm)).toBe("skip");
+    expect(planCronAction("requested", calm)).toBe("post");
+    expect(planCronAction("declined", crowded)).toBe("skip");
+    expect(planCronAction("declined", busy)).toBe("post");
+    expect(planCronAction("posting", busy)).toBe("skip");
+    expect(planCronAction("posted", calm)).toBe("refresh");
   });
 });
 
 describe("texts", () => {
-  it("phrases days relative to today", () => {
-    expect(dayPhrase("2026-11-18", TUESDAY)).toBe("jutro");
-    expect(dayPhrase("2026-11-19", TUESDAY)).toBe("w czwartek");
-    expect(dayPhrase("2026-12-01", TUESDAY)).toBe("we wtorek 1.12");
-    expect(headsUpText("2026-11-19", TUESDAY, 9, ["zespół z Wrocławia"])).toBe(
-      "W czwartek ~9 osób (przyjeżdża: zespół z Wrocławia). Przygotować plan biurek?",
+  it("names days by weekday and date so refreshed messages don't go stale", () => {
+    expect(dayLabel("2026-11-18")).toBe("w środę 18.11");
+    expect(dayLabel("2026-12-01")).toBe("we wtorek 1.12");
+    expect(daysLabel(["2026-11-19", "2026-11-20"])).toBe("w czwartek 19.11 – piątek 20.11");
+    expect(headsUpText(["2026-11-19"], 9, ["zespół z Wrocławia"])).toBe(
+      "W czwartek 19.11 ~9 osób (przyjeżdża: zespół z Wrocławia). Przygotować plan biurek?",
     );
-    expect(fallbackIntro("2026-11-18", TUESDAY, 3, [])).toBe("Jutro ~3 osoby w biurze. Plan biurek poniżej.");
+    expect(fallbackIntro("2026-11-18", 3, [])).toBe("W środę 18.11 ~3 osoby w biurze. Plan biurek poniżej.");
   });
 });
 
@@ -149,8 +181,12 @@ describe("plan message", () => {
   });
 
   it("builds the heads-up and swap messages", () => {
-    const headsUp = headsUpMessage("2026-11-19", "W czwartek ~9 osób. Przygotować plan biurek?");
-    expect(headsUp.blocks[1].elements.map((element: any) => element.action_id)).toEqual([PLAN_ACTION.prepare, PLAN_ACTION.skip]);
+    const headsUp = headsUpMessage(["2026-11-19", "2026-11-20"], "W czwartek ~9 osób. Przygotować plan biurek?");
+    expect(headsUp.blocks[1].elements.map((element: any) => [element.action_id, element.value])).toEqual([
+      [PLAN_ACTION.prepare, "2026-11-19,2026-11-20"],
+      [PLAN_ACTION.skip, "2026-11-19,2026-11-20"],
+    ]);
+    expect(parseDates("2026-11-20,bad,2026-11-19,2026-11-20")).toEqual(["2026-11-19", "2026-11-20"]);
     const request = { date: "2026-11-19", from: "u1", to: "u2", fromDesk: "d1", toDesk: "d2" };
     const swap = swapRequestMessage(request, "Zamienisz się?");
     const values = swap.blocks[1].elements.map((element: any) => element.value);

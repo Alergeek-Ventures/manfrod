@@ -7,11 +7,35 @@ vi.mock("../../lib/office/presence-firmowid.ts", () => ({
   fetchFirmowidSignals: async () => ({ sessionDays: null, leaveRequests: null }),
 }));
 
+const slack = vi.hoisted(() => ({
+  fail: false,
+  posted: 0,
+  updates: [] as Record<string, any>[],
+}));
+
+vi.mock("../../lib/slack/api.ts", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/slack/api.ts")>()),
+  getPermalink: async () => "https://slack.test/p",
+  post: async (endpoint: string, body: Record<string, any>) => {
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    if (endpoint === "chat.postMessage") {
+      if (slack.fail) return { ok: false, error: "channel_not_found" };
+      slack.posted += 1;
+      return { ok: true, body: { ts: `${1000 + slack.posted}.1` } };
+    }
+    if (endpoint === "chat.update") slack.updates.push(body);
+    return { ok: true, body: {} };
+  },
+}));
+
+vi.mock("../../lib/nudges/compose.ts", () => ({ decide: async () => null }));
+
 const { db, tables } = await import("../../lib/db/index.ts");
 const layout = await import("../../lib/office/layout.ts");
-const { preparePlan } = await import("../../lib/office/plan.ts");
-const { planAwayUserIds, updatePlan } = await import("../../lib/office/plan-store.ts");
+const { postPlan, preparePlan, refreshPlan } = await import("../../lib/office/plan.ts");
+const { getPlan, planAwayUserIds, updatePlan } = await import("../../lib/office/plan-store.ts");
 const { recordVisit } = await import("../../lib/office/presence-store.ts");
+const desksLib = await import("../../lib/desks.ts");
 const { addDays, localToday } = await import("../../lib/time.ts");
 const { and, eq, inArray } = await import("drizzle-orm");
 
@@ -26,6 +50,7 @@ const userIds: string[] = [];
 const deskIds: string[] = [];
 const visitIds: string[] = [];
 let layoutId = "";
+let originalChannel: string | null = null;
 
 async function user(name: string) {
   const [created] = await db
@@ -54,7 +79,9 @@ describe.skipIf(!enabled)("preparePlan", () => {
   let recent: Awaited<ReturnType<typeof desk>>;
 
   beforeAll(async () => {
-    layoutId = (await layout.getLayout()).id;
+    const current = await layout.getLayout();
+    layoutId = current.id;
+    originalChannel = current.planChannelId;
     owner = await user("Olga");
     returning = await user("Piotr");
     ala = await user("Ala");
@@ -123,5 +150,93 @@ describe.skipIf(!enabled)("preparePlan", () => {
       .set({ status: "office" })
       .where(and(eq(tables.officePresence.userId, owner.id), eq(tables.officePresence.date, date)));
     expect(await planAwayUserIds(layoutId, date)).not.toContain(owner.id);
+  });
+
+  it("does not let a manual booking evict someone else's plan seat", async () => {
+    const seat = (await db.select().from(tables.deskReservations).where(eq(tables.deskReservations.date, date))).find(
+      (row) => row.source === "plan" && row.userId === bob.id,
+    )!;
+    const [label] = (await db.select().from(tables.desks).where(eq(tables.desks.id, seat.deskId))).map((row) => row.label);
+    expect(await desksLib.reserveDesk(label, { userId: ala.id }, date, { awayUserIds: new Set([owner.id]) })).toEqual({
+      ok: false,
+      error: "taken",
+    });
+    const mine = (await db.select().from(tables.deskReservations).where(eq(tables.deskReservations.date, date))).find(
+      (row) => row.userId === ala.id,
+    );
+    expect(mine?.source).toBe("plan");
+  });
+
+  it("merges a visit recorded twice by the same author", async () => {
+    const first = await recordVisit({ startsOn: date, endsOn: date, userIds: [], guests: 1, note: "klient", createdBy: ala.id });
+    const second = await recordVisit({
+      startsOn: date,
+      endsOn: addDays(date, 1),
+      userIds: [],
+      guests: 2,
+      note: "klient",
+      createdBy: ala.id,
+    });
+    expect(first.ok && second.ok).toBe(true);
+    if (!first.ok || !second.ok) return;
+    visitIds.push(first.visit.id);
+    expect(second).toMatchObject({ duplicate: true, visit: { id: first.visit.id, guests: 2, endsOn: addDays(date, 1) } });
+  });
+});
+
+describe.skipIf(!enabled)("posting and refreshing a plan", () => {
+  const postDate = weekdayAhead(52);
+  let planner: { id: string } | null = null;
+
+  beforeAll(async () => {
+    layoutId = (await layout.getLayout()).id;
+    planner = await user("Planer");
+    await db.insert(tables.officePresence).values({ userId: planner.id, date: postDate, status: "office", source: "chat" });
+    await db.update(tables.officeLayouts).set({ planChannelId: "CTESTPLAN" }).where(eq(tables.officeLayouts.id, layoutId));
+  });
+
+  afterAll(async () => {
+    await db.update(tables.officeLayouts).set({ planChannelId: originalChannel }).where(eq(tables.officeLayouts.id, layoutId));
+    await db.delete(tables.deskPlans).where(and(eq(tables.deskPlans.layoutId, layoutId), eq(tables.deskPlans.date, postDate)));
+    await db
+      .delete(tables.deskReservations)
+      .where(and(eq(tables.deskReservations.date, postDate), eq(tables.deskReservations.source, "plan")));
+    if (planner) await db.delete(tables.users).where(eq(tables.users.id, planner.id));
+  });
+
+  const planSeats = async () =>
+    (await db.select().from(tables.deskReservations).where(eq(tables.deskReservations.date, postDate))).filter(
+      (row) => row.source === "plan",
+    );
+
+  it("removes the plan and its seats when posting fails", async () => {
+    slack.fail = true;
+    const result = await postPlan(postDate);
+    slack.fail = false;
+    expect(result).toEqual({ ok: false, error: "channel_not_found" });
+    expect(await getPlan(layoutId, postDate)).toBeNull();
+    expect(await planSeats()).toEqual([]);
+  });
+
+  it("posts once when two posts race", async () => {
+    const before = slack.posted;
+    const results = await Promise.all([postPlan(postDate), postPlan(postDate)]);
+    expect(slack.posted - before).toBe(1);
+    expect(results.filter((result) => result.ok && result.posted)).toHaveLength(1);
+    const plan = await getPlan(layoutId, postDate);
+    expect(plan).toMatchObject({ status: "posted", messageTs: `${1000 + slack.posted}.1`, claimedAt: null });
+    expect(plan?.reason).toMatch(/^W .+ \d+\.\d{2} ~/);
+    expect((await planSeats()).some((row) => row.userId === planner!.id)).toBe(true);
+  });
+
+  it("survives concurrent refreshes and leaves the newest version in Slack", async () => {
+    slack.updates.length = 0;
+    const results = await Promise.all([1, 2, 3].map(() => refreshPlan(postDate, { force: true })));
+    expect(results.every((result) => result.ok && result.updated)).toBe(true);
+    const plan = await getPlan(layoutId, postDate);
+    const last = slack.updates.at(-1)!;
+    const image = last.blocks.find((block: any) => block.type === "image");
+    expect(image.image_url).toContain(`v=${plan!.version}&`);
+    expect(new Set((await planSeats()).map((row) => row.userId)).size).toBe((await planSeats()).length);
   });
 });

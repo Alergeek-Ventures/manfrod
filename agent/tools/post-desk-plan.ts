@@ -15,11 +15,11 @@ export default defineManfrodTool({
   async execute({ date }, ctx) {
     if (!ctx.readableLevels.includes("internal")) return "Desk plans are only available in team channels and DMs.";
     const today = localToday();
-    const day = date ?? nextWorkday(today, await publicHolidayDates(today, addDays(today, 14)));
+    const day = date ?? nextWorkday(today, (await publicHolidayDates(today, addDays(today, 14))) ?? new Set());
     if (!isValidIsoDate(day)) return `Invalid date '${date}'. Use YYYY-MM-DD.`;
     if (day < today) return "Can't plan desks for a past day.";
     const evaluation = await evaluateDay(day, { today });
-    const posted = await postPlan(day, { today, evaluation });
+    const posted = await postPlan(day, { today });
     if (!posted.ok)
       return posted.error === "no_plan_channel"
         ? "No office channel for desk plans is set; an admin can set it in the office editor."

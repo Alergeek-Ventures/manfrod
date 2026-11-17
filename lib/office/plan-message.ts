@@ -1,4 +1,5 @@
 import type { SlackBody } from "../slack/api.ts";
+import { isValidIsoDate } from "../time.ts";
 
 export const PLAN_ACTION = {
   away: "desk_plan_away",
@@ -88,17 +89,43 @@ export function planMessage(input: PlanMessageInput): { text: string; blocks: Sl
   return { text: `${input.title}: ${input.intro}`, blocks };
 }
 
-export function headsUpMessage(date: string, text: string): { text: string; blocks: SlackBody[] } {
+export function headsUpMessage(dates: string[], text: string): { text: string; blocks: SlackBody[] } {
+  const value = dates.join(",");
   return {
     text,
     blocks: [
       section(text),
       {
         type: "actions",
-        block_id: `desk_plan_heads_up:${date}`,
-        elements: [button(PLAN_ACTION.prepare, "Przygotuj", date, "primary"), button(PLAN_ACTION.skip, "Nie trzeba", date)],
+        block_id: `desk_plan_heads_up:${dates[0]}`,
+        elements: [button(PLAN_ACTION.prepare, "Przygotuj", value, "primary"), button(PLAN_ACTION.skip, "Nie trzeba", value)],
       },
     ],
+  };
+}
+
+export function parseDates(value: unknown): string[] {
+  if (typeof value !== "string") return [];
+  return [...new Set(value.split(",").filter(isValidIsoDate))].sort();
+}
+
+export function loadingModal(callbackId: string, title: string): SlackBody {
+  return {
+    type: "modal",
+    callback_id: callbackId,
+    title: { type: "plain_text", text: clip(title, 24) },
+    close: { type: "plain_text", text: "Zamknij" },
+    blocks: [section("Sprawdzam wolne miejsca…")],
+  };
+}
+
+export function noticeModal(callbackId: string, title: string, text: string): SlackBody {
+  return {
+    type: "modal",
+    callback_id: callbackId,
+    title: { type: "plain_text", text: clip(title, 24) },
+    close: { type: "plain_text", text: "Zamknij" },
+    blocks: [section(text)],
   };
 }
 
