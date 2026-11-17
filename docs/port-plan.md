@@ -53,7 +53,7 @@ agent/                 eve agent root
   tools/               one file per tool (kebab-case name) + dynamic MCP/Linear tools
   lib/                 tool helpers and the defineManfrodTool wrapper
   skills/              native eve skills (SKILL.md), loaded with eve__skill
-  routines/            background prompts run by Inngest (cron skills, Firmowid check-ins)
+  routines/<name>/     ROUTINE.md: instructions for everything Manfrod does on its own (cron skills, Firmowid check-ins, nudges)
 app/                   Next.js admin UI, OAuth routes, health, Inngest proxy
 components/            shared UI
 lib/                   domain code shared by agent and web

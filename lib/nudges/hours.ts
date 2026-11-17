@@ -16,6 +16,7 @@ import { addDays, dateIsoInZone, formatLocal, localToday, weekdayName, zonedToUt
 import { run } from "./compose.ts";
 import { firmowidAccess, isAbsent, meetings, nudgeablePeople, SlackWorkspace, type SlackThread } from "./signals.ts";
 import { handled, isEnabled, recordDelivery } from "./store.ts";
+import { routineText } from "../routines.ts";
 
 const SESSION_SAMPLE = 80;
 const PATTERN_DAYS = 28;
@@ -23,10 +24,6 @@ const SLACK_LOOKBACK_HOURS = 48;
 
 const { channelMappings, projectMemberships, projects } = tables;
 const log = logger("Nudges.Hours");
-
-const GUIDANCE = `It is the evening of a workday. Check whether this person's Firmowid sessions for today cover the work they apparently did. If they have no session today, ask whether to add today's hours: propose concrete entries (Firmowid project, start–end, short title) built from the signals below, or simply ask what they worked on if there are no signals. If they have sessions but the signals clearly show work that is missing (meetings, commits or a stretch of activity for another project, or hours outside any session), propose adding just that. Use the Firmowid project names given. Keep it to a short question with the proposed entries, not a report of the signals. If today's sessions already cover the day, or the pattern shows they don't work on this weekday, do not send.`;
-
-const FOLLOW_UP = `Gdy odpowie: najpierw ustal dokładnie, co wpisać (projekt, godziny, tytuł), jeśli czegoś brakuje. Potem dodaj wszystkie wpisy jednym wywołaniem firmowid__add_sessions: project_id z firmowid__list_projects, tytuł, is_remote (null, jeśli nie wiadomo) oraz start_datetime i end_datetime z offsetem strefy Europe/Warsaw (np. 2026-11-04T09:00:00+01:00). Wpisy nie mogą nachodzić na siebie ani na inne sesje z tego dnia; trwającej sesji nie ruszaj. Jeśli Firmowid odrzuci wpis (błąd wskazuje sessions.<index>), popraw go albo dopytaj. Na koniec potwierdź krótko, co wpisałeś. Jeśli napisze, że nie pracował albo że nic nie trzeba, przyjmij to i nie wracaj do tego.`;
 
 export interface DaySession {
   start: Date;
@@ -256,7 +253,17 @@ export async function runEveningHours(today = localToday()): Promise<number> {
       ]
         .filter(Boolean)
         .join("\n\n");
-      if (await run({ kind: "hours", period: today, person, guidance: GUIDANCE, context, followUp: FOLLOW_UP })) sent += 1;
+      if (
+        await run({
+          kind: "hours",
+          period: today,
+          person,
+          guidance: routineText("evening-hours", "Message"),
+          context,
+          followUp: routineText("evening-hours", "When they reply"),
+        })
+      )
+        sent += 1;
     } catch (error) {
       log.error(`Nudges.Hours: failed for ${person.id}: ${(error as Error).message}`);
     }

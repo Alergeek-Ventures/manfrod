@@ -9,6 +9,7 @@ import { addDays, dateIsoInZone, isoWeek, localToday, secondsOfDay } from "../ti
 import { run } from "./compose.ts";
 import { describeMeetings, firmowidAccess, isAbsent, meetings, nudgeablePeople } from "./signals.ts";
 import { handled, isEnabled, recordDelivery } from "./store.ts";
+import { routineText } from "../routines.ts";
 
 const DEFAULT_SEND_AT = 15 * 3600;
 const EARLIEST_SEND_AT = 13 * 3600;
@@ -16,10 +17,6 @@ const BEFORE_END_SECONDS = 90 * 60;
 const SESSION_SAMPLE = 80;
 
 const log = logger("Nudges.Weekly");
-
-const GUIDANCE = `It is Friday afternoon. Write a short wrap-up of this person's week and a look at the next one. Useful: hours logged in Firmowid this week, workdays with no session (offer to add them), and what is notable next week: a holiday or long weekend, their own leave, a day packed with meetings, colleagues away that matter to them, desk bookings. Mention only what is there. If there is nothing worth saying, do not send.`;
-
-const FOLLOW_UP = `Gdy odpowie: jeśli chce uzupełnić godziny, dopytaj o projekt, godziny i tytuł, a potem dodaj brakujące sesje jednym wywołaniem firmowid__add_sessions (project_id z firmowid__list_projects, czasy z offsetem strefy Europe/Warsaw). Jeśli chce zarezerwować biurko albo zgłosić urlop, użyj zwykłych narzędzi.`;
 
 export interface DayLog {
   date: string;
@@ -123,7 +120,17 @@ export async function runWeeklyWrapUps(today = localToday()): Promise<number> {
         await recordDelivery(person.id, "weekly", period, false, "Nothing to report.");
         continue;
       }
-      if (await run({ kind: "weekly", period, person, guidance: GUIDANCE, context, followUp: FOLLOW_UP })) sent += 1;
+      if (
+        await run({
+          kind: "weekly",
+          period,
+          person,
+          guidance: routineText("weekly-wrap-up", "Message"),
+          context,
+          followUp: routineText("weekly-wrap-up", "When they reply"),
+        })
+      )
+        sent += 1;
     } catch (error) {
       log.error(`Nudges.Weekly: failed for ${person.id}: ${(error as Error).message}`);
     }

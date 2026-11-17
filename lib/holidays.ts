@@ -6,6 +6,7 @@ import { listPublicHolidays } from "./google.ts";
 import { logger } from "./log.ts";
 import { deliverProactive } from "./proactive.ts";
 import { addDays, localToday } from "./time.ts";
+import { routineText } from "./routines.ts";
 
 export const ASK_DAYS_AHEAD = 14;
 export const RECHECK_DAYS = 3;
@@ -143,29 +144,14 @@ export function describePeriod(period: Period): string {
   return lines.join("\n");
 }
 
-function prompt(period: Period, action: HolidayAction): string {
-  const opening =
-    action === "ask"
-      ? `[Proaktywnie: zbliżające się święta]\nZbliża się wolne, a ta osoba nie ma nic zapisanego na ten czas:\n${describePeriod(period)}`
-      : `[Proaktywnie: przypomnienie o świętach]\nKilka dni temu ta osoba nie wiedziała jeszcze, co robi w tym czasie:\n${describePeriod(period)}`;
-  const ask =
-    action === "ask"
-      ? `Napisz jedną krótką, ciepłą wiadomość jak pomocny asystent: przypomnij o wolnym${
-          period.bridges.length > 0
-            ? ", podsuń dni pomostowe (ile dni urlopu daje ile dni wolnego) i zaproponuj, że od razu zapiszesz urlop"
-            : ""
-        }, i zapytaj, czy w święto ma wolne, czy pracuje. Bez listy pytań i bez nadmiaru emoji.`
-      : "Przypomnij się raz, jednym krótkim zdaniem, bez naciskania. Więcej o to nie zapytasz.";
-  return `${opening}
-
-${ask}
-
-Gdy odpowie, zapisz to i nie dopytuj więcej:
-- bierze urlop (np. na dni pomostowe) → report-vacation na te dni, potem record-holiday-plan(period: "${period.start}", status: "off")
-- ma wolne tylko w święto → record-holiday-plan(period: "${period.start}", status: "off")
-- pracuje w święto → record-holiday-plan(period: "${period.start}", status: "working")
-- jeszcze nie wie → record-holiday-plan(period: "${period.start}", status: "unsure")
-- nie chce dostawać takich pytań → set-proactive-preferences z kind "holidays" wyłączonym`;
+export function prompt(period: Period, action: HolidayAction): string {
+  const values = {
+    period: describePeriod(period),
+    period_start: period.start,
+    bridge_days: period.bridges.length > 0 ? `, ${routineText("holiday-check", "Bridge days")}` : "",
+  };
+  const opening = routineText("holiday-check", action === "ask" ? "Ask" : "Reminder", values);
+  return `${opening}\n\n${routineText("holiday-check", "When they reply", values)}`;
 }
 
 export async function upcomingPeriods(today: string, days: number) {

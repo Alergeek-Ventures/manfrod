@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { Cron } from "croner";
 
@@ -17,7 +17,9 @@ export interface Routine extends RoutineMeta {
 
 const routinesDir = () => path.join(process.cwd(), "agent", "routines");
 
-const routinePath = (name: string) => path.join(routinesDir(), `${name}.md`);
+export const ROUTINE_FILE = "ROUTINE.md";
+
+const routinePath = (name: string) => path.join(routinesDir(), name, ROUTINE_FILE);
 
 function unquote(value: string): string {
   const match = /^(["'])(.*)\1$/.exec(value);
@@ -63,9 +65,8 @@ export function list(): RoutineMeta[] {
   } catch {
     return [];
   }
-  return entries.flatMap((entry) => {
-    if (!entry.endsWith(".md")) return [];
-    const name = entry.slice(0, -".md".length);
+  return entries.flatMap((name) => {
+    if (!existsSync(routinePath(name))) return [];
     const parsed = parse(read(name) ?? "");
     return parsed ? [meta(name, parsed.frontmatter)] : [];
   });
@@ -82,6 +83,29 @@ export function getBody(name: string): string | null {
 export function get(name: string): Routine | null {
   const parsed = parse(read(name) ?? "");
   return parsed ? { ...meta(name, parsed.frontmatter), body: parsed.body } : null;
+}
+
+export function section(body: string, heading: string): string | null {
+  const lines = body.split("\n");
+  const start = lines.findIndex((line) => line.trim() === `## ${heading}`);
+  if (start === -1) return null;
+  const end = lines.findIndex((line, index) => index > start && line.startsWith("## "));
+  return lines
+    .slice(start + 1, end === -1 ? undefined : end)
+    .join("\n")
+    .trim();
+}
+
+export function fill(template: string, values: Record<string, string>): string {
+  return template.replaceAll(/\{\{(\w+)\}\}/g, (match, key: string) => values[key] ?? match);
+}
+
+export function routineText(name: string, heading?: string, values: Record<string, string> = {}): string {
+  const body = getBody(name);
+  if (body === null) throw new Error(`Routine ${name} is missing (agent/routines/${name}/${ROUTINE_FILE}).`);
+  const text = heading ? section(body, heading) : body;
+  if (!text) throw new Error(`Routine ${name} has no "## ${heading}" section.`);
+  return fill(text, values);
 }
 
 export type ParsedCron = { kind: "standard"; cron: Cron } | { kind: "random"; start: string; end: string; dates: Cron } | null;
