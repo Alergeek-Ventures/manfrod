@@ -1,7 +1,9 @@
 import { z } from "zod";
 import { getUser, isAdmin } from "../../lib/accounts.ts";
+import { cancelReservationsForDate } from "../../lib/desks.ts";
 import { clearPresence, setPresence } from "../../lib/office/presence.ts";
 import { isValidIsoDate, withWeekday } from "../../lib/time.ts";
+import { refreshNote } from "../lib/desk-plan.ts";
 import { resolvePerson } from "../lib/people.ts";
 import { defineManfrodTool } from "../lib/define-tool.ts";
 
@@ -37,10 +39,19 @@ export default defineManfrodTool({
       const cleared = await Promise.all(days.map((date) => clearPresence(target.id, date)));
       const removed = days.filter((_, index) => cleared[index]);
       return removed.length > 0
-        ? `Removed ${who}'s statement for ${removed.map(withWeekday).join(", ")}; it will be predicted again.`
+        ? `Removed ${who}'s statement for ${removed.map(withWeekday).join(", ")}; it will be predicted again.${await refreshNote(removed)}`
         : `${who} had no statement for those days.`;
     }
     await Promise.all(days.map((date) => setPresence(target.id, date, status, "chat", note?.trim() || null)));
-    return `Saved: ${who} ${STATUS_LABEL[status]} on ${days.map(withWeekday).join(", ")}.`;
+    const freed =
+      status === "office"
+        ? []
+        : (
+            await Promise.all(
+              days.map(async (date) => (await cancelReservationsForDate(target.id, date)).map((label) => `${label} (${date})`)),
+            )
+          ).flat();
+    const released = freed.length > 0 ? ` Released their desk reservations: ${freed.join(", ")}.` : "";
+    return `Saved: ${who} ${STATUS_LABEL[status]} on ${days.map(withWeekday).join(", ")}.${released}${await refreshNote(days)}`;
   },
 });

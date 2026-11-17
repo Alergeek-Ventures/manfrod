@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { listReservationsForDate, reserveDesk } from "../../lib/desks.ts";
+import { awayUserIdsFor } from "../../lib/office/away-for.ts";
+import { refreshNote } from "../lib/desk-plan.ts";
 import { withDate } from "../lib/office.ts";
 import { defineManfrodTool } from "../lib/define-tool.ts";
 
@@ -12,8 +14,11 @@ export default defineManfrodTool({
   }),
   execute: ({ desk_label, date, note }, ctx) =>
     withDate(date, async (day) => {
-      const result = await reserveDesk(desk_label, { userId: ctx.userId }, day, { note: note ?? null });
-      if (result.ok) return `Reserved desk ${result.reservation.desk.label} for ${day}.`;
+      const result = await reserveDesk(desk_label, { userId: ctx.userId }, day, {
+        note: note ?? null,
+        awayUserIds: await awayUserIdsFor(day),
+      });
+      if (result.ok) return `Reserved desk ${result.reservation.desk.label} for ${day}.${await refreshNote([day])}`;
       switch (result.error) {
         case "not_found":
           return `No desk found with label '${desk_label}'.`;

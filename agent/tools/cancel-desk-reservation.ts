@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { cancelReservation } from "../../lib/desks.ts";
+import { refreshNote } from "../lib/desk-plan.ts";
 import { withDate } from "../lib/office.ts";
 import { defineManfrodTool } from "../lib/define-tool.ts";
 
@@ -12,7 +13,7 @@ export default defineManfrodTool({
   execute: ({ desk_label, date }, ctx) =>
     withDate(date, async (day) =>
       (await cancelReservation(ctx.userId, desk_label, day))
-        ? `Cancelled your reservation for desk '${desk_label}' on ${day}.`
+        ? `Cancelled your reservation for desk '${desk_label}' on ${day}.${await refreshNote([day])}`
         : `You don't have a reservation for desk '${desk_label}' on that date.`,
     ),
 });

@@ -12,7 +12,8 @@ against `[Current Context]`, workdays only.
 "jutro zdalnie", "w czwartek będę w biurze", "w piątek mnie nie ma" →
 `set-office-presence` with the dates and `office`, `remote` or `leave`.
 When they take it back ("jednak nie wiem") → status `clear`. Confirm in a few
-words. Time off (urlop, L4, wolne) is also an absence: call `report-vacation`
+words. Remote or away also frees their desk bookings for those days, and a
+posted desk plan is updated by the tool. Time off (urlop, L4, wolne) is also an absence: call `report-vacation`
 too, as the vacation-tracking skill says.
 
 ## People coming to the office

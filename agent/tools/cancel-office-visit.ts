@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { getUser, isAdmin, isUuid } from "../../lib/accounts.ts";
 import { cancelVisit, getVisit } from "../../lib/office/presence.ts";
+import { datesBetween, refreshNote } from "../lib/desk-plan.ts";
 import { defineManfrodTool } from "../lib/define-tool.ts";
 
 export default defineManfrodTool({
@@ -16,6 +17,7 @@ export default defineManfrodTool({
     const allowed = visit.createdBy === ctx.userId || visit.userIds.includes(ctx.userId) || isAdmin(await getUser(ctx.userId));
     if (!allowed) return "Only the person who recorded the visit, the people in it or an admin can cancel it.";
     const cancelled = await cancelVisit(id);
-    return cancelled ? `Cancelled the visit ${visit.startsOn}..${visit.endsOn}: ${visit.note}.` : "That visit is already cancelled.";
+    if (!cancelled) return "That visit is already cancelled.";
+    return `Cancelled the visit ${visit.startsOn}..${visit.endsOn}: ${visit.note}.${await refreshNote(datesBetween(visit.startsOn, visit.endsOn))}`;
   },
 });

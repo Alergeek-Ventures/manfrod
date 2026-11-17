@@ -3,6 +3,7 @@ import { listUsers } from "../../lib/accounts.ts";
 import { listVisits, recordVisit } from "../../lib/office/presence.ts";
 import { describeVisit } from "../../lib/office/presence-format.ts";
 import { isValidIsoDate } from "../../lib/time.ts";
+import { datesBetween, refreshNote } from "../lib/desk-plan.ts";
 import { resolvePerson } from "../lib/people.ts";
 import { defineManfrodTool } from "../lib/define-tool.ts";
 
@@ -44,7 +45,7 @@ export default defineManfrodTool({
     });
     if (!recorded.ok) return ERRORS[recorded.error];
     const names = new Map(everyone.map((user) => [user.id, user.name ?? user.slackId]));
-    const lines = [`Recorded: ${describeVisit(recorded.visit, names)}`];
+    const lines = [`Recorded: ${describeVisit(recorded.visit, names)}${await refreshNote(datesBetween(start_date, endsOn))}`];
     if (existing.length > 0)
       lines.push(
         `Other visits already recorded on those days (cancel duplicates with cancel-office-visit):\n${existing.map((visit) => `- ${describeVisit(visit, names)}`).join("\n")}`,
