@@ -3,7 +3,6 @@ import { z } from "zod";
 import { callUserMcpTool, listUserMcpTools } from "../../lib/mcp/tools.ts";
 import { channelAudience } from "../../lib/memory/access.ts";
 import { getConnection } from "../../lib/linear/index.ts";
-import { runWithSecrets } from "../../lib/secrets.ts";
 import {
   commentIssue,
   createIssue,
@@ -16,6 +15,7 @@ import {
 } from "../../lib/linear/calls.ts";
 import { linearProjectForChannel, linearProjectForPerson, linearRequester } from "../lib/linear.ts";
 import { toolCtx } from "../../lib/agent/context.ts";
+import { runGuarded } from "../../lib/rehearsal/guard.ts";
 
 const issueFields = {
   description: z.string().optional().describe("Markdown description"),
@@ -58,7 +58,7 @@ const updateIssueInput = z.object({
 export default defineDynamic({
   events: {
     "turn.started": async (_event, ctx) => {
-      const { userId, msgCtx, sessionKey } = toolCtx(ctx);
+      const { userId, msgCtx, sessionKey, kind } = toolCtx(ctx);
       const entries: Record<string, any> = {};
 
       if (userId) {
@@ -71,7 +71,7 @@ export default defineDynamic({
             description: remote.description,
             inputSchema: remote.inputSchema as any,
             execute: (input: unknown) =>
-              runWithSecrets({ toolName, userId, sessionKey, destinationHost }, input, (resolved) =>
+              runGuarded(kind, { toolName, userId, sessionKey, destinationHost }, input, (resolved) =>
                 callUserMcpTool(userId, providerId, remoteName, resolved),
               ),
           });
@@ -85,7 +85,7 @@ export default defineDynamic({
           description: LIST_ISSUES,
           inputSchema: z.object(listIssuesFields),
           execute: (input: { limit?: number; state?: string }) =>
-            runWithSecrets({ toolName: "linear-list-issues", userId, sessionKey }, input, ({ limit, state }) =>
+            runGuarded(kind, { toolName: "linear-list-issues", userId, sessionKey }, input, ({ limit, state }) =>
               listIssues(projectId, limit, state),
             ),
         });
@@ -93,7 +93,7 @@ export default defineDynamic({
           description: 'Gets a single Linear issue by its identifier (e.g. "ENG-123").',
           inputSchema: z.object({ identifier: z.string().describe("Issue identifier, e.g. ENG-123") }),
           execute: (input: { identifier: string }) =>
-            runWithSecrets({ toolName: "linear-get-issue", userId, sessionKey }, input, ({ identifier }) =>
+            runGuarded(kind, { toolName: "linear-get-issue", userId, sessionKey }, input, ({ identifier }) =>
               getIssue(projectId, identifier),
             ),
         });
@@ -104,7 +104,7 @@ export default defineDynamic({
             limit: z.number().int().optional().describe("Max results to return (default 25)"),
           }),
           execute: (input: { term: string; limit?: number }) =>
-            runWithSecrets({ toolName: "linear-search-issues", userId, sessionKey }, input, ({ term, limit }) =>
+            runGuarded(kind, { toolName: "linear-search-issues", userId, sessionKey }, input, ({ term, limit }) =>
               searchIssues(projectId, term, limit),
             ),
         });
@@ -112,13 +112,13 @@ export default defineDynamic({
           description: "Lists Linear projects owned by this project's connected team.",
           inputSchema: z.object({}),
           execute: (input: Record<string, never>) =>
-            runWithSecrets({ toolName: "linear-list-projects", userId, sessionKey }, input, () => listProjects(projectId)),
+            runGuarded(kind, { toolName: "linear-list-projects", userId, sessionKey }, input, () => listProjects(projectId)),
         });
         entries["linear-list-cycles"] = defineTool({
           description: "Lists recent cycles for this project's connected Linear team.",
           inputSchema: z.object({ limit: z.number().int().optional().describe("Max cycles to return (default 10)") }),
           execute: (input: { limit?: number }) =>
-            runWithSecrets({ toolName: "linear-list-cycles", userId, sessionKey }, input, ({ limit }) => getCycles(projectId, limit)),
+            runGuarded(kind, { toolName: "linear-list-cycles", userId, sessionKey }, input, ({ limit }) => getCycles(projectId, limit)),
         });
       }
 
@@ -127,7 +127,7 @@ export default defineDynamic({
           description: `${LIST_ISSUES} In a direct message, name the project's channel.`,
           inputSchema: z.object({ channel: projectChannel, ...listIssuesFields }),
           execute: (input: { channel: string; limit?: number; state?: string }) =>
-            runWithSecrets({ toolName: "linear-list-issues", userId, sessionKey }, input, ({ channel, limit, state }) =>
+            runGuarded(kind, { toolName: "linear-list-issues", userId, sessionKey }, input, ({ channel, limit, state }) =>
               inPersonProject(channel, userId, (id) => listIssues(id, limit, state)),
             ),
         });
@@ -136,7 +136,7 @@ export default defineDynamic({
             'Gets a single Linear issue by its identifier (e.g. "ENG-123") from the Linear team of the project whose channel you name.',
           inputSchema: z.object({ channel: projectChannel, identifier: z.string().describe("Issue identifier, e.g. ENG-123") }),
           execute: (input: { channel: string; identifier: string }) =>
-            runWithSecrets({ toolName: "linear-get-issue", userId, sessionKey }, input, ({ channel, identifier }) =>
+            runGuarded(kind, { toolName: "linear-get-issue", userId, sessionKey }, input, ({ channel, identifier }) =>
               inPersonProject(channel, userId, (id) => getIssue(id, identifier)),
             ),
         });
@@ -148,7 +148,7 @@ export default defineDynamic({
             limit: z.number().int().optional().describe("Max results to return (default 25)"),
           }),
           execute: (input: { channel: string; term: string; limit?: number }) =>
-            runWithSecrets({ toolName: "linear-search-issues", userId, sessionKey }, input, ({ channel, term, limit }) =>
+            runGuarded(kind, { toolName: "linear-search-issues", userId, sessionKey }, input, ({ channel, term, limit }) =>
               inPersonProject(channel, userId, (id) => searchIssues(id, term, limit)),
             ),
         });
@@ -160,7 +160,7 @@ export default defineDynamic({
             "Creates an issue in this project's connected Linear team. Confirm the title and details with the user first unless they were explicit. Returns the new issue's identifier and URL.",
           inputSchema: createIssueInput,
           execute: (input: z.infer<typeof createIssueInput>) =>
-            runWithSecrets({ toolName: "linear-create-issue", userId, sessionKey, keepPlaceholders: true }, input, async (resolved) =>
+            runGuarded(kind, { toolName: "linear-create-issue", userId, sessionKey, keepPlaceholders: true }, input, async (resolved) =>
               createIssue(projectId, resolved, await linearRequester(userId)),
             ),
         });
@@ -169,7 +169,8 @@ export default defineDynamic({
             "Updates an issue in this project's connected Linear team: title, description, priority, assignee, state, project, parent, due date, estimate or cycle. Labels are added, not replaced.",
           inputSchema: updateIssueInput,
           execute: (input: z.infer<typeof updateIssueInput>) =>
-            runWithSecrets(
+            runGuarded(
+              kind,
               { toolName: "linear-update-issue", userId, sessionKey, keepPlaceholders: true },
               input,
               async ({ identifier, ...fields }) => updateIssue(projectId, identifier, fields, await linearRequester(userId)),
@@ -182,7 +183,8 @@ export default defineDynamic({
             body: z.string().describe("Markdown comment body"),
           }),
           execute: (input: { identifier: string; body: string }) =>
-            runWithSecrets(
+            runGuarded(
+              kind,
               { toolName: "linear-comment-issue", userId, sessionKey, keepPlaceholders: true },
               input,
               async ({ identifier, body }) => commentIssue(projectId, identifier, body, await linearRequester(userId)),

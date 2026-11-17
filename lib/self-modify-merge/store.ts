@@ -5,7 +5,7 @@ import type { SelfModifyMerge } from "../db/schema.ts";
 const { selfModifyMerges } = tables;
 
 export type Decision = "merging" | "merged" | "retry" | "blocked" | "skipped";
-export type Verdict = "better" | "no_change" | "worse" | "not_enough_data";
+export type Verdict = "fixed" | "still_broken" | "unclear";
 
 export const MAX_ATTEMPTS = 3;
 const RETRY_BASE_MINUTES = 10;
@@ -139,8 +139,27 @@ export async function attachThread(id: string, channelId: string, threadTs: stri
   await db.update(selfModifyMerges).set({ channelId, threadTs }).where(eq(selfModifyMerges.id, id));
 }
 
-export async function attachVerification(id: string, taskId: string, channelId: string, threadTs: string): Promise<void> {
-  await db.update(selfModifyMerges).set({ taskId, channelId, threadTs }).where(eq(selfModifyMerges.id, id));
+export async function recordTarget(
+  id: string,
+  target: { source: string; title: string; problem: string; expected: string; findingId: string | null },
+): Promise<void> {
+  await db
+    .update(selfModifyMerges)
+    .set({
+      targetSource: target.source,
+      targetTitle: target.title,
+      targetProblem: target.problem,
+      targetExpected: target.expected,
+      findingId: target.findingId,
+    })
+    .where(eq(selfModifyMerges.id, id));
+}
+
+export async function liveUnjudged(): Promise<SelfModifyMerge[]> {
+  return db
+    .select()
+    .from(selfModifyMerges)
+    .where(and(eq(selfModifyMerges.decision, "merged"), isNotNull(selfModifyMerges.liveAt), isNull(selfModifyMerges.verdict)));
 }
 
 export async function mergedPull(pullNumber: number): Promise<SelfModifyMerge | null> {

@@ -1,6 +1,7 @@
 import { defineTool, type ToolContext, type ToolLabelDefinition } from "eve/tools";
 import type { z } from "zod";
 import { toolCtx, type ToolCtx } from "../../lib/agent/context.ts";
+import { blockedInRehearsal, simulated } from "../../lib/rehearsal/guard.ts";
 import { runWithSecrets } from "../../lib/secrets.ts";
 
 export function defineManfrodTool<S extends z.ZodObject>(definition: {
@@ -17,6 +18,7 @@ export function defineManfrodTool<S extends z.ZodObject>(definition: {
     ...(definition.label ? { label: definition.label } : {}),
     execute: (input: z.infer<S>, ctx) => {
       const context = toolCtx(ctx);
+      if (blockedInRehearsal(context.kind, ctx.toolName)) return Promise.resolve(simulated(ctx.toolName, input));
       const use = {
         toolName: ctx.toolName,
         userId: context.userId,

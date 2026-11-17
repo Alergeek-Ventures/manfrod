@@ -11,13 +11,13 @@ import {
   type ComparedFile,
 } from "../github.ts";
 import { logger } from "../log.ts";
-import { resolveAccess } from "../memory/access.ts";
 import { getRecentSessionMessages } from "../memory/messages.ts";
 import { isProposal, publishedHead, recordedOpenPulls } from "../self-modify-pulls.ts";
-import { findingForPull, linkedCases, selfReviewUserId } from "../self-review/store.ts";
+import { runRehearsals } from "../rehearsal/index.ts";
+import { planRehearsals, targetFor } from "../rehearsal/scenarios.ts";
+import { insertPlanned } from "../rehearsal/store.ts";
+import { findingForPull, linkedCases } from "../self-review/store.ts";
 import { post } from "../slack/api.ts";
-import { createTask } from "../tasks/index.ts";
-import { formatLocal } from "../time.ts";
 import {
   ciState,
   containsMerge,
@@ -33,7 +33,6 @@ import { JUDGES, securityReview, type Evidence, type ReviewedFile } from "./revi
 import { autoMergeEnabled } from "./settings.ts";
 import {
   attachThread,
-  attachVerification,
   awaitingDeploy,
   claimLive,
   decisionFor,
@@ -43,6 +42,7 @@ import {
   mergingRows,
   recordDecision,
   recordRetry,
+  recordTarget,
   releaseLive,
   settled,
   startMerging,
@@ -51,8 +51,6 @@ import {
 
 const log = logger("SelfModify.Merge");
 const TARGET_BRANCH = "main";
-const CHECK_EVERY_MINUTES = 30;
-const VERIFY_DAYS = 5;
 const MERGE_TIMEOUT_MINUTES = 15;
 const EVIDENCE_CONVERSATIONS = 4;
 const EVIDENCE_MESSAGES = 20;
@@ -231,17 +229,32 @@ async function evaluate(pull: FoundPull): Promise<Outcome> {
   return "merged";
 }
 
+async function prepareRehearsals(pull: FoundPull): Promise<number> {
+  const row = await decisionFor(pull.number, pull.headSha);
+  const target = row ? await targetFor(pull.number, pull.title) : null;
+  if (!row || !target) return 0;
+  await recordTarget(row.id, target);
+  const planned = await planRehearsals(target, pull.number);
+  await insertPlanned(row.id, planned);
+  return planned.length;
+}
+
 async function announceMerged(pull: FoundPull, targets: string[], mergeSha: string | null, note: string): Promise<void> {
   const commit = mergeSha ? `squash commit ${mergeSha.slice(0, 7)}` : "GitHub did not say which squash commit";
   const followUp = mergeSha
-    ? "Once it is live I'll check whether conversations that use it go better."
-    : "Without the commit I can't tell when it is live, so it won't be checked after the deploy.";
+    ? "Once it is live I'll replay the scenario it was meant to fix on the new version and judge the result."
+    : "Without the commit I can't tell when it is live, so it won't be rehearsed after the deploy.";
   await decide(
     pull,
     { decision: "merged", reason: null, targets, mergeSha },
     `:rocket: Merged ${link(pull)} automatically (${targets.join(", ")}; ${commit})${note}. CI is green and the security review passed. ${followUp}`,
   );
   log.info(`SelfModify.Merge: merged #${pull.number} as ${mergeSha}`);
+  try {
+    await prepareRehearsals(pull);
+  } catch (error) {
+    log.error(`SelfModify.Merge: could not prepare the rehearsal of #${pull.number}: ${(error as Error).message}`);
+  }
 }
 
 export async function processPull(pullNumber: number): Promise<Outcome> {
@@ -276,12 +289,6 @@ export async function settleMerging(now = new Date()): Promise<number> {
   return settledCount;
 }
 
-function verificationGoal(pullNumber: number, url: string | null, targets: string[], liveAt: Date): string {
-  return `Pull request #${pullNumber}${url ? ` (${url})` : ""} changed ${targets.join(", ")} and was merged automatically; it is live in production since ${formatLocal(liveAt)}. Find out whether the conversations that use it go better than before.
-
-On every check call self-modify-impact with pull_number ${pullNumber}: it lists uses and negative ratings (👎 and the ones inferred from conversations) before and after the deploy, with links. Inferred ratings arrive the night after a conversation, so don't judge on a few fresh uses. When the numbers support a verdict, or on the last check, call self-modify-impact again with pull_number ${pullNumber}, the verdict (better, no_change, worse or not_enough_data) and a one or two sentence summary: that posts the verdict in this thread and closes the task. On worse, say so and recommend reverting the pull request; never revert or change anything yourself. post-slack-message does not work for you here.`;
-}
-
 export async function detectLive(): Promise<number> {
   const appCommit = config.appCommit;
   if (!appCommit) return 0;
@@ -292,42 +299,14 @@ export async function detectLive(): Promise<number> {
       if (!containsMerge(comparison?.status ?? null)) continue;
       const channelId = row.channelId ?? config.selfReviewChannelId;
       if (!channelId || !(await claimLive(row.id))) continue;
-      const text = `:white_check_mark: #${row.pullNumber} is live in production (${appCommit.slice(0, 7)}). I'll compare conversations that use ${row.targets.join(", ")} before and after it every ${CHECK_EVERY_MINUTES} minutes on workdays, for up to ${VERIFY_DAYS} days.`;
-      let threadTs = row.threadTs;
-      if (!threadTs) {
-        const root = await post("chat.postMessage", { channel: channelId, text });
-        if (!root.ok) {
-          await releaseLive(row.id);
-          log.error(`SelfModify.Merge: #${row.pullNumber} is live but the thread could not be started: ${root.error}`);
-          continue;
-        }
-        threadTs = root.body.ts as string;
-        await attachThread(row.id, channelId, threadTs);
-      }
-      const pull = await getPull(row.pullNumber);
-      const ownerUserId = await selfReviewUserId();
-      const now = new Date();
-      let task;
-      try {
-        task = await createTask({
-          ownerUserId,
-          title: `Check the effect of #${row.pullNumber}`,
-          goal: verificationGoal(row.pullNumber, pull?.url ?? null, row.targets, now),
-          successCriteria: `A verdict on #${row.pullNumber} was posted in this thread with self-modify-impact.`,
-          plan: null,
-          channelId,
-          threadTs,
-          ...(await resolveAccess(ownerUserId, channelId)),
-          checkEveryMinutes: CHECK_EVERY_MINUTES,
-          firstCheckAt: null,
-          deadline: new Date(now.getTime() + VERIFY_DAYS * 86_400_000),
-        });
-      } catch (error) {
+      const text = `:test_tube: #${row.pullNumber} is live in production (${appCommit.slice(0, 7)}). I'm replaying the scenario it was meant to fix on the new version and will post the verdict here.`;
+      const posted = await post("chat.postMessage", { channel: channelId, text, ...(row.threadTs ? { thread_ts: row.threadTs } : {}) });
+      if (!posted.ok) {
         await releaseLive(row.id);
-        throw error;
+        log.error(`SelfModify.Merge: #${row.pullNumber} is live but could not be announced: ${posted.error}`);
+        continue;
       }
-      await attachVerification(row.id, task.id, channelId, threadTs);
-      if (row.threadTs) await post("chat.postMessage", { channel: channelId, thread_ts: threadTs, text });
+      if (!row.threadTs) await attachThread(row.id, channelId, posted.body.ts as string);
       live += 1;
     } catch (error) {
       log.error(`SelfModify.Merge: live check failed for #${row.pullNumber}: ${(error as Error).message}`);
@@ -338,6 +317,11 @@ export async function detectLive(): Promise<number> {
 
 export async function runAutoMerge(): Promise<{ live: number; settled: number; outcomes: Record<number, Outcome> }> {
   const live = await detectLive();
+  try {
+    await runRehearsals();
+  } catch (error) {
+    log.error(`SelfModify.Merge: rehearsals failed: ${(error as Error).message}`);
+  }
   const outcomes: Record<number, Outcome> = {};
   if (!config.selfReviewChannelId) return { live, settled: 0, outcomes };
   const settledCount = await settleMerging();

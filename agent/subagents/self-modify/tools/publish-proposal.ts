@@ -140,7 +140,12 @@ export default defineManfrodTool({
     const commit = await createCommit(commit_message, tree, state.headSha ?? state.baseSha);
 
     let { branch, pullNumber, pullUrl } = state;
-    const published = { headSha: commit, reviewVerdict: openFindings ? ("overridden" as const) : ("approve" as const) };
+    const published = {
+      headSha: commit,
+      reviewVerdict: openFindings ? ("overridden" as const) : ("approve" as const),
+      description,
+      requestedByUserId: requester.kind === "admin" ? ctx.userId : null,
+    };
     if (branch) {
       if (pullNumber) await recordPublished(pullNumber, published);
       await moveBranch(branch, commit);

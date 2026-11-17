@@ -34,6 +34,7 @@ import {
   recurringReminders,
   selfModifyMerges,
   selfModifyPulls,
+  selfModifyRehearsals,
   selfReviewCases,
   selfReviewFindings,
   sentDms,
@@ -78,6 +79,7 @@ export type SelfReviewFinding = typeof selfReviewFindings.$inferSelect;
 export type SelfReviewCase = typeof selfReviewCases.$inferSelect;
 export type SelfModifyPull = typeof selfModifyPulls.$inferSelect;
 export type SelfModifyMerge = typeof selfModifyMerges.$inferSelect;
+export type SelfModifyRehearsal = typeof selfModifyRehearsals.$inferSelect;
 export type NudgeDelivery = typeof nudgeDeliveries.$inferSelect;
 export type NudgePreference = typeof nudgePreferences.$inferSelect;
 export type ChannelNudge = typeof channelNudges.$inferSelect;

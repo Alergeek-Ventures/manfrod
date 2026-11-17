@@ -77,10 +77,19 @@ export type PublishedVerdict = "approve" | "overridden";
 export interface Published {
   headSha: string;
   reviewVerdict: PublishedVerdict;
+  description?: string | null;
+  requestedByUserId?: string | null;
 }
 
+const publishedColumns = (published: Published | null) => ({
+  headSha: published?.headSha ?? null,
+  reviewVerdict: published?.reviewVerdict ?? null,
+  description: published?.description ?? null,
+  requestedByUserId: published?.requestedByUserId ?? null,
+});
+
 export async function recordPublished(pullNumber: number, published: Published): Promise<void> {
-  await db.update(selfModifyPulls).set(published).where(eq(selfModifyPulls.pullNumber, pullNumber));
+  await db.update(selfModifyPulls).set(publishedColumns(published)).where(eq(selfModifyPulls.pullNumber, pullNumber));
 }
 
 export async function publishedHead(pullNumber: number): Promise<{ headSha: string | null; reviewVerdict: string | null } | null> {
@@ -103,7 +112,7 @@ export async function recordPull(pullNumber: number, branch: string, sessionId: 
   }
   await db
     .insert(selfModifyPulls)
-    .values({ pullNumber, branch, sessionId, headSha: published?.headSha ?? null, reviewVerdict: published?.reviewVerdict ?? null })
+    .values({ pullNumber, branch, sessionId, ...publishedColumns(published) })
     .onConflictDoUpdate({
       target: selfModifyPulls.pullNumber,
       set: {
@@ -111,8 +120,7 @@ export async function recordPull(pullNumber: number, branch: string, sessionId: 
         sessionId,
         status: "open",
         closedAt: null,
-        headSha: published?.headSha ?? null,
-        reviewVerdict: published?.reviewVerdict ?? null,
+        ...publishedColumns(published),
       },
     });
 }

@@ -7,6 +7,7 @@ import { cost } from "../../lib/pricing.ts";
 import { createMessage } from "../../lib/memory/messages.ts";
 import { logger } from "../../lib/log.ts";
 import { toolCtx, type ToolCtx } from "../../lib/agent/context.ts";
+import { isRehearsal } from "../../lib/rehearsal/guard.ts";
 
 const log = logger("Agent.Server");
 const actionIds = new Map<string, string>();
@@ -33,17 +34,15 @@ function outputText(output: unknown): string {
 export default defineHook({
   events: {
     "turn.started"(_event, ctx) {
+      if (isRehearsal(toolCtx(ctx).kind)) return;
       const tool = toolCtx(ctx);
       startTurn(ctx.session.id, tool.userId);
       if (tool.sessionKey) setActiveAuthor(tool.sessionKey, tool.userId);
-      const skillName = (ctx.session.auth.current ?? ctx.session.auth.initiator)?.attributes.skillName;
-      emit("thinking", {
-        ...eventCtx(tool),
-        meta: { ...baseMeta(tool), kind: tool.kind, skill_name: typeof skillName === "string" ? skillName : null },
-      });
+      emit("thinking", { ...eventCtx(tool), meta: baseMeta(tool) });
     },
 
     "step.started"(event, ctx) {
+      if (isRehearsal(toolCtx(ctx).kind)) return;
       const tool = toolCtx(ctx);
       const turn = turnFor(ctx.session.id) ?? startTurn(ctx.session.id, tool.userId);
       turn.stepStartedAt = Date.now();
@@ -56,6 +55,7 @@ export default defineHook({
     },
 
     "step.completed"(event, ctx) {
+      if (isRehearsal(toolCtx(ctx).kind)) return;
       const tool = toolCtx(ctx);
       const turn = turnFor(ctx.session.id);
       const model = turn?.modelId ?? "unknown";
@@ -83,6 +83,7 @@ export default defineHook({
     },
 
     "step.failed"(event, ctx) {
+      if (isRehearsal(toolCtx(ctx).kind)) return;
       const tool = toolCtx(ctx);
       emit("llm_call_failed", {
         ...eventCtx(tool),
@@ -98,6 +99,7 @@ export default defineHook({
     },
 
     "actions.requested"(event, ctx) {
+      if (isRehearsal(toolCtx(ctx).kind)) return;
       const tool = toolCtx(ctx);
       const turn = turnFor(ctx.session.id);
       log.info(`Agent.Server executing ${event.data.actions.length} tool(s) for user ${tool.userId}`);
@@ -115,6 +117,7 @@ export default defineHook({
     },
 
     "action.result"(event, ctx) {
+      if (isRehearsal(toolCtx(ctx).kind)) return;
       const tool = toolCtx(ctx);
       const result = event.data.result;
       const callId = result.callId;
@@ -134,6 +137,7 @@ export default defineHook({
     },
 
     async "message.completed"(event, ctx) {
+      if (isRehearsal(toolCtx(ctx).kind)) return;
       const tool = toolCtx(ctx);
       const text = event.data.message ?? "";
       if (event.data.finishReason === "tool-calls") {
@@ -163,12 +167,15 @@ export default defineHook({
     },
 
     "turn.completed"(_event, ctx) {
+      if (isRehearsal(toolCtx(ctx).kind)) return;
       finish(ctx);
     },
     "turn.failed"(_event, ctx) {
+      if (isRehearsal(toolCtx(ctx).kind)) return;
       finish(ctx);
     },
     "turn.cancelled"(_event, ctx) {
+      if (isRehearsal(toolCtx(ctx).kind)) return;
       finish(ctx);
     },
   },

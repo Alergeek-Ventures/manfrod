@@ -33,8 +33,20 @@ const state = vi.hoisted(() => ({
     threadTs: string | null;
   }[],
   live: new Set<string>(),
-  taskError: null as Error | null,
-  tasks: [] as string[],
+  postFails: false,
+  rehearsalRuns: 0,
+  target: {
+    source: "finding",
+    title: null as string | null,
+    problem: "Booked without asking",
+    expected: "Asks first",
+    findingId: "f1",
+  } as Record<string, unknown>,
+  planned: [
+    { userId: "person", channelId: "C1", evidenceLink: "https://slack.example/1", scenario: { history: [], message: "book" } },
+  ] as unknown[],
+  inserted: [] as { mergeId: string; planned: unknown[] }[],
+  targets: [] as { id: string; target: Record<string, unknown> }[],
 }));
 
 vi.mock("../../lib/config.ts", async (importOriginal) => {
@@ -45,11 +57,19 @@ vi.mock("../../lib/config.ts", async (importOriginal) => {
     config: Object.defineProperties({}, { ...descriptors, appCommit: { get: () => state.appCommit } }),
   };
 });
-vi.mock("../../lib/tasks/index.ts", () => ({
-  createTask: async (input: { threadTs: string }) => {
-    if (state.taskError) throw state.taskError;
-    state.tasks.push(input.threadTs);
-    return { id: `task-${state.tasks.length}` };
+vi.mock("../../lib/rehearsal/index.ts", () => ({
+  runRehearsals: async () => {
+    state.rehearsalRuns += 1;
+    return { started: 0, finished: 0, settled: 0 };
+  },
+}));
+vi.mock("../../lib/rehearsal/scenarios.ts", () => ({
+  targetFor: async (pullNumber: number, title: string) => ({ ...state.target, title: state.target.title ?? title, pullNumber }),
+  planRehearsals: async () => state.planned,
+}));
+vi.mock("../../lib/rehearsal/store.ts", () => ({
+  insertPlanned: async (mergeId: string, planned: unknown[]) => {
+    state.inserted.push({ mergeId, planned });
   },
 }));
 vi.mock("../../lib/memory/access.ts", () => ({ resolveAccess: async () => ({ readableLevels: [], writeAccess: [] }) }));
@@ -118,7 +138,9 @@ vi.mock("../../lib/self-modify-merge/store.ts", async (importOriginal) => {
       state.live.delete(id);
     },
     attachThread: async () => undefined,
-    attachVerification: async () => undefined,
+    recordTarget: async (id: string, target: Record<string, unknown>) => {
+      state.targets.push({ id, target });
+    },
   };
 });
 
@@ -136,6 +158,7 @@ vi.mock("../../lib/self-review/store.ts", () => ({
 }));
 vi.mock("../../lib/slack/api.ts", () => ({
   post: async (_endpoint: string, body: { channel: string; text: string }) => {
+    if (state.postFails) return { ok: false, error: "channel_not_found" };
     state.posts.push(body);
     return { ok: true, body: { ts: "1.0" } };
   },
@@ -163,8 +186,11 @@ beforeEach(() => {
   state.appCommit = undefined;
   state.deploys = [];
   state.live = new Set();
-  state.taskError = null;
-  state.tasks = [];
+  state.postFails = false;
+  state.rehearsalRuns = 0;
+  state.inserted = [];
+  state.targets = [];
+  state.target = { source: "finding", title: null, problem: "Booked without asking", expected: "Asks first", findingId: "f1" };
 });
 
 describe("auto-merge", () => {
@@ -321,17 +347,16 @@ describe("auto-merge", () => {
     expect(row()).toMatchObject({ decision: "merging" });
   });
 
-  it("releases the live claim when the verification task can't be created, then retries", async () => {
+  it("releases the live claim when the announcement can't be posted, then retries", async () => {
     state.appCommit = "a".repeat(40);
     state.deploys = [{ id: "m1", pullNumber: 42, mergeSha: "squash", targets: ["skill:x"], channelId: "C_SELF_REVIEW", threadTs: "1.0" }];
-    state.taskError = new Error("database down");
+    state.postFails = true;
     expect(await detectLive()).toBe(0);
     expect(state.live.has("m1")).toBe(false);
-    expect(state.posts).toEqual([]);
-    state.taskError = null;
+    state.postFails = false;
     expect(await detectLive()).toBe(1);
-    expect(state.tasks).toEqual(["1.0"]);
-    expect(state.posts).toHaveLength(1);
+    expect(state.posts[0]).toMatchObject({ channel: "C_SELF_REVIEW", thread_ts: "1.0" });
+    expect(state.posts[0].text).toContain("replaying the scenario");
     expect(await detectLive()).toBe(0);
   });
 
@@ -340,6 +365,35 @@ describe("auto-merge", () => {
     state.deploys = [{ id: "m2", pullNumber: 42, mergeSha: "squash", targets: ["skill:x"], channelId: null, threadTs: null }];
     expect(await detectLive()).toBe(1);
     expect(state.posts[0]).toMatchObject({ channel: "C_SELF_REVIEW" });
-    expect(state.tasks).toEqual(["1.0"]);
+    expect(state.posts[0]).not.toHaveProperty("thread_ts");
+  });
+
+  it("stores the target and the planned scenarios when it merges", async () => {
+    state.rows.set("42:head1", { decision: "merging", headSha: "head1", reason: null });
+    expect(await processPull(42)).toBe("ignored");
+    state.rows.clear();
+    expect(await processPull(42)).toBe("merged");
+    expect(state.targets).toHaveLength(1);
+    expect(state.targets[0].target).toMatchObject({ source: "finding", problem: "Booked without asking", findingId: "f1" });
+    expect(state.inserted).toHaveLength(1);
+    expect(state.inserted[0].planned).toEqual(state.planned);
+  });
+
+  it("stores an admin request as the target too", async () => {
+    state.target = {
+      source: "request",
+      title: "Answer in Polish",
+      problem: "Answered in English",
+      expected: "Answers in Polish",
+      findingId: null,
+    };
+    expect(await processPull(42)).toBe("merged");
+    expect(state.targets[0].target).toMatchObject({ source: "request", expected: "Answers in Polish", findingId: null });
+  });
+
+  it("rehearses on every run, even with the kill switch off", async () => {
+    state.enabled = [false];
+    await runAutoMerge();
+    expect(state.rehearsalRuns).toBe(1);
   });
 });

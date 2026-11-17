@@ -4,6 +4,7 @@ import { getUser, isAdmin } from "../../lib/accounts.ts";
 import type { ToolCtx } from "../../lib/agent/context.ts";
 import type { SelfReviewFinding } from "../../lib/db/schema.ts";
 import { ACTIVE_STATUSES, SELF_REVIEW_KIND, SELF_REVIEW_SLACK_ID } from "../../lib/self-review/rules.ts";
+import { isRehearsal } from "../../lib/rehearsal/guard.ts";
 import { SELF_MODIFY_BRANCH_PREFIX } from "../../lib/self-modify-pulls.ts";
 import { getFinding } from "../../lib/self-review/store.ts";
 
@@ -17,7 +18,8 @@ export const MAX_BYTES = 500_000;
 const ALLOWED = ["agent/", "lib/", "app/", "components/", "hooks/", "test/", "db/migrations/", "db/drizzle/"];
 const BLOCKED = [
   "agent/agent.ts",
-  "agent/hooks/audit.ts",
+  "agent/channels/jobs.ts",
+  "agent/hooks/",
   "agent/lib/define-tool.ts",
   "agent/lib/e2b-sandbox.ts",
   "agent/lib/http.ts",
@@ -28,7 +30,7 @@ const BLOCKED = [
   "agent/tools/http-request.ts",
   "agent/tools/request-capability.ts",
   "agent/tools/request-secret.ts",
-  "agent/tools/self-modify-impact.ts",
+  "agent/tools/integrations.ts",
   "lib/accounts.ts",
   "lib/agent/context.ts",
   "lib/auth.ts",
@@ -39,10 +41,12 @@ const BLOCKED = [
   "lib/github.ts",
   "lib/github/",
   "lib/inngest/functions.ts",
+  "lib/inngest/runtime.ts",
   "app/github/",
   "app/(panel)/admin/access/actions.ts",
   "lib/sandboxes.ts",
   "lib/secrets.ts",
+  "lib/rehearsal/",
   "lib/security/",
   "lib/self-modify-lessons.ts",
   "lib/self-modify-merge/",
@@ -79,6 +83,7 @@ export interface Change {
 export type Requester = { kind: "admin"; name: string | null } | { kind: "self_review"; finding: SelfReviewFinding };
 
 export async function authorize(ctx: ToolCtx): Promise<Requester | string> {
+  if (isRehearsal(ctx.kind)) return "Self-modify does not run in a rehearsal.";
   const user = await getUser(ctx.userId);
   if (isAdmin(user)) return { kind: "admin", name: user?.name ?? null };
   if (ctx.kind === SELF_REVIEW_KIND && ctx.findingId && user?.slackId === SELF_REVIEW_SLACK_ID) {

@@ -140,6 +140,13 @@ export async function resolveFinding(id: string, status: Extract<FindingStatus, 
   await db.update(selfReviewFindings).set({ status, resolvedAt: new Date() }).where(eq(selfReviewFindings.id, id));
 }
 
+export async function reopenFinding(id: string): Promise<void> {
+  await db
+    .update(selfReviewFindings)
+    .set({ status: "open", resolvedAt: null, notifiedAt: null, startedAt: null, sessionChannelId: null, sessionThreadTs: null })
+    .where(eq(selfReviewFindings.id, id));
+}
+
 export async function markNotified(id: string): Promise<void> {
   await db.update(selfReviewFindings).set({ notifiedAt: new Date() }).where(eq(selfReviewFindings.id, id));
 }

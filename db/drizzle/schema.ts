@@ -644,7 +644,11 @@ export const selfModifyMerges = pgTable("self_modify_merges", {
 	mergeSha: text("merge_sha"),
 	channelId: text("channel_id"),
 	threadTs: text("thread_ts"),
-	taskId: uuid("task_id"),
+	findingId: uuid("finding_id"),
+	targetSource: text("target_source"),
+	targetTitle: text("target_title"),
+	targetProblem: text("target_problem"),
+	targetExpected: text("target_expected"),
 	verdict: text(),
 	mergedAt: timestamp("merged_at", { mode: 'date' }),
 	liveAt: timestamp("live_at", { mode: 'date' }),
@@ -653,7 +657,29 @@ export const selfModifyMerges = pgTable("self_modify_merges", {
 	uniqueIndex("self_modify_merges_head_index").using("btree", table.pullNumber.asc().nullsLast().op("int4_ops"), table.headSha.asc().nullsLast().op("text_ops")),
 	index("self_modify_merges_merged_at_index").using("btree", table.mergedAt.asc().nullsLast().op("timestamp_ops")),
 	check("self_modify_merges_decision", sql`decision = ANY (ARRAY['merging'::text, 'merged'::text, 'retry'::text, 'blocked'::text, 'skipped'::text])`),
-	check("self_modify_merges_verdict", sql`(verdict IS NULL) OR (verdict = ANY (ARRAY['better'::text, 'no_change'::text, 'worse'::text, 'not_enough_data'::text]))`),
+	check("self_modify_merges_verdict", sql`(verdict IS NULL) OR (verdict = ANY (ARRAY['fixed'::text, 'still_broken'::text, 'unclear'::text]))`),
+]);
+
+export const selfModifyRehearsals = pgTable("self_modify_rehearsals", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	mergeId: uuid("merge_id").notNull(),
+	userId: uuid("user_id").notNull(),
+	channelId: text("channel_id"),
+	evidenceLink: text("evidence_link"),
+	scenario: jsonb(),
+	status: text().default('pending').notNull(),
+	sessionId: text("session_id"),
+	transcript: jsonb(),
+	verdict: text(),
+	reason: text(),
+	startedAt: timestamp("started_at", { mode: 'date' }),
+	finishedAt: timestamp("finished_at", { mode: 'date' }),
+	insertedAt: timestamp("inserted_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
+}, (table) => [
+	index("self_modify_rehearsals_merge_index").using("btree", table.mergeId.asc().nullsLast().op("uuid_ops")),
+	index("self_modify_rehearsals_status_index").using("btree", table.status.asc().nullsLast().op("text_ops")),
+	check("self_modify_rehearsals_status", sql`status = ANY (ARRAY['pending'::text, 'running'::text, 'done'::text, 'failed'::text])`),
+	check("self_modify_rehearsals_verdict", sql`(verdict IS NULL) OR (verdict = ANY (ARRAY['fixed'::text, 'still_broken'::text, 'unclear'::text]))`),
 ]);
 
 export const selfModifyReviews = pgTable("self_modify_reviews", {
@@ -678,6 +704,8 @@ export const selfModifyPulls = pgTable("self_modify_pulls", {
 	learnedAt: timestamp("learned_at", { mode: 'date' }),
 	learnAttempts: integer("learn_attempts").default(0).notNull(),
 	headSha: text("head_sha"),
+	description: text(),
+	requestedByUserId: uuid("requested_by_user_id"),
 	reviewVerdict: text("review_verdict"),
 }, (table) => [
 	index().using("btree", table.status.asc().nullsLast().op("text_ops")),

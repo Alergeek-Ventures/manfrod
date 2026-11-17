@@ -146,8 +146,19 @@ describe("auto-merge eligibility", () => {
 
   it("keeps the merge-deciding code out of self-modify's reach", () => {
     expect(pathViolation("lib/self-modify-merge/eligibility.ts")).toBe("protected path");
-    expect(pathViolation("agent/tools/self-modify-impact.ts")).toBe("protected path");
-    for (const path of ["lib/inngest/functions.ts", "lib/config.ts", "agent/hooks/audit.ts", "app/(panel)/admin/access/actions.ts"]) {
+    for (const path of [
+      "lib/inngest/functions.ts",
+      "lib/inngest/runtime.ts",
+      "lib/config.ts",
+      "agent/hooks/audit.ts",
+      "agent/hooks/card-stream.ts",
+      "agent/channels/jobs.ts",
+      "agent/tools/integrations.ts",
+      "agent/lib/define-tool.ts",
+      "lib/rehearsal/guard.ts",
+      "agent/subagents/self-modify/hooks/rehearsal.ts",
+      "app/(panel)/admin/access/actions.ts",
+    ]) {
       expect(pathViolation(path), path).toBe("protected path");
     }
     expect(pathViolation("agent/skills/desk-booking/SKILL.md")).toBeNull();
@@ -303,5 +314,21 @@ describe("security review", () => {
     expect(parseVerdict('{"verdict":"block","reason":"exfiltration"}')).toEqual({ pass: false, reason: "exfiltration" });
     expect(parseVerdict("looks fine to me")).toBeNull();
     expect(parseVerdict('{"verdict":"maybe","reason":"?"}')).toBeNull();
+  });
+});
+
+describe("deployed commit", () => {
+  it("is read from the file baked into the image and must be a full SHA", async () => {
+    const { mkdtempSync, writeFileSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const { readAppCommit } = await import("../../lib/config.ts");
+    const dir = mkdtempSync(join(tmpdir(), "app-commit-"));
+    const sha = "0123456789abcdef0123456789abcdef01234567";
+    writeFileSync(join(dir, "ok"), `${sha}\n`);
+    writeFileSync(join(dir, "empty"), "");
+    expect(readAppCommit(join(dir, "ok"))).toBe(sha);
+    expect(readAppCommit(join(dir, "empty"))).toBeUndefined();
+    expect(readAppCommit(join(dir, "missing"))).toBeUndefined();
   });
 });

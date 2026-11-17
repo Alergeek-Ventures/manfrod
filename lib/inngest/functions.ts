@@ -15,6 +15,7 @@ import { deleteCommitsBefore } from "../github/store.ts";
 import { backfillRepository, COMMIT_RETENTION_DAYS, completePush, pendingBackfills, syncAll, syncInstallation } from "../github/sync.ts";
 import { runHolidayCheck } from "../holidays.ts";
 import { deleteSandboxFilesOlderThan } from "../sandbox-files.ts";
+import { clearTranscriptsOlderThan } from "../rehearsal/store.ts";
 import { runAutoMerge } from "../self-modify-merge/index.ts";
 import { cleanUpClosedPulls } from "../self-modify-pulls.ts";
 import { deliverProactive } from "../proactive.ts";
@@ -236,6 +237,7 @@ const maintenance = cronFunction("maintenance", "*/5 * * * *", async () => {
 const cleanup = cronFunction("events-cleanup", "40 * * * *", async () => {
   await deleteLogsOlderThan(24);
   await deleteOlderThan(7);
+  await clearTranscriptsOlderThan(7);
   await sweep();
   await pruneJobs(7);
   await deleteSandboxFilesOlderThan(30);
