@@ -1,11 +1,14 @@
-import { and, desc, eq, gt, isNotNull, isNull } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { db, tables } from "../db/index.ts";
 import type { SelfModifyMerge } from "../db/schema.ts";
 
 const { selfModifyMerges } = tables;
 
-export type Decision = "merged" | "blocked" | "skipped";
+export type Decision = "merging" | "merged" | "retry" | "blocked" | "skipped";
 export type Verdict = "better" | "no_change" | "worse" | "not_enough_data";
+
+export const MAX_ATTEMPTS = 3;
+const RETRY_BASE_MINUTES = 10;
 
 export interface NewDecision {
   pullNumber: number;
@@ -18,27 +21,80 @@ export interface NewDecision {
   threadTs?: string | null;
 }
 
-export async function decided(pullNumber: number, headSha: string): Promise<boolean> {
+export const retryDelayMinutes = (attempts: number) => RETRY_BASE_MINUTES * 2 ** Math.max(attempts - 1, 0);
+
+export function settled(row: Pick<SelfModifyMerge, "decision" | "retryAt"> | null, now = new Date()): boolean {
+  if (!row) return false;
+  if (row.decision !== "retry") return true;
+  return row.retryAt !== null && row.retryAt > now;
+}
+
+export async function decisionFor(pullNumber: number, headSha: string): Promise<SelfModifyMerge | null> {
   const [row] = await db
-    .select({ id: selfModifyMerges.id })
+    .select()
     .from(selfModifyMerges)
     .where(and(eq(selfModifyMerges.pullNumber, pullNumber), eq(selfModifyMerges.headSha, headSha)))
     .limit(1);
-  return !!row;
+  return row ?? null;
 }
 
 export async function recordDecision(input: NewDecision): Promise<void> {
+  const values = {
+    decision: input.decision,
+    reason: input.reason,
+    targets: input.targets,
+    mergeSha: input.mergeSha ?? null,
+    channelId: input.channelId ?? null,
+    threadTs: input.threadTs ?? null,
+    mergedAt: input.decision === "merged" ? new Date() : null,
+    retryAt: null,
+  };
   await db
     .insert(selfModifyMerges)
-    .values({ ...input, mergedAt: input.decision === "merged" ? new Date() : null })
-    .onConflictDoNothing();
+    .values({ pullNumber: input.pullNumber, headSha: input.headSha, ...values })
+    .onConflictDoUpdate({ target: [selfModifyMerges.pullNumber, selfModifyMerges.headSha], set: values });
+}
+
+export async function startMerging(pullNumber: number, headSha: string, targets: string[]): Promise<void> {
+  const values = { decision: "merging", reason: null, targets, mergedAt: new Date(), retryAt: null };
+  await db
+    .insert(selfModifyMerges)
+    .values({ pullNumber, headSha, ...values })
+    .onConflictDoUpdate({ target: [selfModifyMerges.pullNumber, selfModifyMerges.headSha], set: values });
+}
+
+export async function recordRetry(pullNumber: number, headSha: string, reason: string, targets: string[]): Promise<number> {
+  const [row] = await db
+    .insert(selfModifyMerges)
+    .values({ pullNumber, headSha, decision: "retry", reason, targets, attempts: 1, retryAt: retryAt(1) })
+    .onConflictDoUpdate({
+      target: [selfModifyMerges.pullNumber, selfModifyMerges.headSha],
+      set: {
+        decision: "retry",
+        reason,
+        targets,
+        mergedAt: null,
+        attempts: sql`${selfModifyMerges.attempts} + 1`,
+        retryAt: sql`timezone('UTC'::text, now()) + make_interval(mins => ${RETRY_BASE_MINUTES} * power(2, ${selfModifyMerges.attempts})::int)`,
+      },
+    })
+    .returning({ attempts: selfModifyMerges.attempts });
+  return row.attempts;
+}
+
+function retryAt(attempts: number): Date {
+  return new Date(Date.now() + retryDelayMinutes(attempts) * 60_000);
+}
+
+export async function mergingRows(): Promise<SelfModifyMerge[]> {
+  return db.select().from(selfModifyMerges).where(eq(selfModifyMerges.decision, "merging"));
 }
 
 export async function mergedSince(since: Date): Promise<Date[]> {
   const rows = await db
     .select({ mergedAt: selfModifyMerges.mergedAt })
     .from(selfModifyMerges)
-    .where(and(eq(selfModifyMerges.decision, "merged"), gt(selfModifyMerges.mergedAt, since)));
+    .where(and(inArray(selfModifyMerges.decision, ["merged", "merging"]), gt(selfModifyMerges.mergedAt, since)));
   return rows.flatMap((row) => (row.mergedAt ? [row.mergedAt] : []));
 }
 
@@ -59,8 +115,17 @@ export async function awaitingDeploy(): Promise<SelfModifyMerge[]> {
     .where(and(eq(selfModifyMerges.decision, "merged"), isNotNull(selfModifyMerges.mergeSha), isNull(selfModifyMerges.liveAt)));
 }
 
-export async function markLive(id: string, taskId: string | null): Promise<void> {
-  await db.update(selfModifyMerges).set({ liveAt: new Date(), taskId }).where(eq(selfModifyMerges.id, id));
+export async function claimLive(id: string): Promise<boolean> {
+  const rows = await db
+    .update(selfModifyMerges)
+    .set({ liveAt: new Date() })
+    .where(and(eq(selfModifyMerges.id, id), isNull(selfModifyMerges.liveAt)))
+    .returning({ id: selfModifyMerges.id });
+  return rows.length > 0;
+}
+
+export async function attachVerification(id: string, taskId: string, channelId: string, threadTs: string): Promise<void> {
+  await db.update(selfModifyMerges).set({ taskId, channelId, threadTs }).where(eq(selfModifyMerges.id, id));
 }
 
 export async function mergedPull(pullNumber: number): Promise<SelfModifyMerge | null> {

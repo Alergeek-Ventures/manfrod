@@ -17,6 +17,8 @@ RUN apt-get update \
 ENV NODE_ENV=production PORT=35233 XDG_CACHE_HOME=/tmp
 COPY --from=build /app /app
 RUN mkdir -p /app/.eve/.workflow-data && chown -R node:node /app/.eve
+ARG APP_COMMIT=""
+RUN printf '%s' "$APP_COMMIT" > /app/.app-commit
 USER node
 EXPOSE 35233
 CMD ["sh", "-c", "node scripts/migrate.mjs && exec node_modules/.bin/next start --port ${PORT}"]

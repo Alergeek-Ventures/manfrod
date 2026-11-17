@@ -17,6 +17,7 @@ export const MAX_BYTES = 500_000;
 const ALLOWED = ["agent/", "lib/", "app/", "components/", "hooks/", "test/", "db/migrations/", "db/drizzle/"];
 const BLOCKED = [
   "agent/agent.ts",
+  "agent/hooks/audit.ts",
   "agent/lib/define-tool.ts",
   "agent/lib/e2b-sandbox.ts",
   "agent/lib/http.ts",
@@ -33,10 +34,13 @@ const BLOCKED = [
   "lib/auth.ts",
   "lib/auth-client.ts",
   "lib/auth-constants.ts",
+  "lib/config.ts",
   "lib/db/index.ts",
   "lib/github.ts",
   "lib/github/",
+  "lib/inngest/functions.ts",
   "app/github/",
+  "app/(panel)/admin/access/actions.ts",
   "lib/sandboxes.ts",
   "lib/secrets.ts",
   "lib/security/",

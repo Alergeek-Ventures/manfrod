@@ -14,7 +14,7 @@ import {
   type TreeEntry,
 } from "../../../../lib/github.ts";
 import { matches as secretRule } from "../../../../lib/security/gitleaks.ts";
-import { latestReview, PROPOSAL_FOOTER, recordPull, reviewRounds } from "../../../../lib/self-modify-pulls.ts";
+import { latestReview, PROPOSAL_FOOTER, recordPublished, recordPull, reviewRounds } from "../../../../lib/self-modify-pulls.ts";
 import { MAX_OPEN_PULLS } from "../../../../lib/self-review/rules.ts";
 import { attachCapabilityPull } from "../../../../lib/tasks/capabilities.ts";
 import { attachPull, countActive } from "../../../../lib/self-review/store.ts";
@@ -140,7 +140,9 @@ export default defineManfrodTool({
     const commit = await createCommit(commit_message, tree, state.headSha ?? state.baseSha);
 
     let { branch, pullNumber, pullUrl } = state;
+    const published = { headSha: commit, reviewVerdict: openFindings ? ("overridden" as const) : ("approve" as const) };
     if (branch) {
+      if (pullNumber) await recordPublished(pullNumber, published);
       await moveBranch(branch, commit);
     } else {
       branch = `${BRANCH_PREFIX}${randomBytes(4).toString("hex")}`;
@@ -160,7 +162,7 @@ export default defineManfrodTool({
     } else {
       await updatePull(pullNumber, title, body);
     }
-    await recordPull(pullNumber, branch, runtime.session.id);
+    await recordPull(pullNumber, branch, runtime.session.id, published);
     if (ctx.capabilityRequestId) await attachCapabilityPull(ctx.capabilityRequestId, pullNumber, pullUrl);
     proposal.update((current) => ({ ...current, branch, headSha: commit, pullNumber, pullUrl }));
 

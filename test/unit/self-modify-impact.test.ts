@@ -51,3 +51,19 @@ describe("self-modify-impact", () => {
     expect(verdictText(7, null, "better", "fewer 👎")).not.toContain("revert");
   });
 });
+
+describe("deployed commit", () => {
+  it("is read from the file baked into the image and must be a full SHA", async () => {
+    const { mkdtempSync, writeFileSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const { readAppCommit } = await import("../../lib/config.ts");
+    const dir = mkdtempSync(join(tmpdir(), "app-commit-"));
+    const sha = "0123456789abcdef0123456789abcdef01234567";
+    writeFileSync(join(dir, "ok"), `${sha}\n`);
+    writeFileSync(join(dir, "empty"), "");
+    expect(readAppCommit(join(dir, "ok"))).toBe(sha);
+    expect(readAppCommit(join(dir, "empty"))).toBeUndefined();
+    expect(readAppCommit(join(dir, "missing"))).toBeUndefined();
+  });
+});

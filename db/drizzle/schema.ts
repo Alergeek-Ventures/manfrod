@@ -639,6 +639,8 @@ export const selfModifyMerges = pgTable("self_modify_merges", {
 	decision: text().notNull(),
 	reason: text(),
 	targets: text().array().default(sql`'{}'::text[]`).notNull(),
+	attempts: integer().default(0).notNull(),
+	retryAt: timestamp("retry_at", { mode: 'date' }),
 	mergeSha: text("merge_sha"),
 	channelId: text("channel_id"),
 	threadTs: text("thread_ts"),
@@ -650,7 +652,7 @@ export const selfModifyMerges = pgTable("self_modify_merges", {
 }, (table) => [
 	uniqueIndex("self_modify_merges_head_index").using("btree", table.pullNumber.asc().nullsLast().op("int4_ops"), table.headSha.asc().nullsLast().op("text_ops")),
 	index("self_modify_merges_merged_at_index").using("btree", table.mergedAt.asc().nullsLast().op("timestamp_ops")),
-	check("self_modify_merges_decision", sql`decision = ANY (ARRAY['merged'::text, 'blocked'::text, 'skipped'::text])`),
+	check("self_modify_merges_decision", sql`decision = ANY (ARRAY['merging'::text, 'merged'::text, 'retry'::text, 'blocked'::text, 'skipped'::text])`),
 	check("self_modify_merges_verdict", sql`(verdict IS NULL) OR (verdict = ANY (ARRAY['better'::text, 'no_change'::text, 'worse'::text, 'not_enough_data'::text]))`),
 ]);
 
@@ -675,9 +677,12 @@ export const selfModifyPulls = pgTable("self_modify_pulls", {
 	closedAt: timestamp("closed_at", { mode: 'date' }),
 	learnedAt: timestamp("learned_at", { mode: 'date' }),
 	learnAttempts: integer("learn_attempts").default(0).notNull(),
+	headSha: text("head_sha"),
+	reviewVerdict: text("review_verdict"),
 }, (table) => [
 	index().using("btree", table.status.asc().nullsLast().op("text_ops")),
 	check("self_modify_pulls_status", sql`status = ANY (ARRAY['open'::text, 'closed'::text])`),
+	check("self_modify_pulls_review_verdict", sql`(review_verdict IS NULL) OR (review_verdict = ANY (ARRAY['approve'::text, 'overridden'::text]))`),
 ]);
 
 export const agentSettings = pgTable("agent_settings", {

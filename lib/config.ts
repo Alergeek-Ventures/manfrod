@@ -1,8 +1,23 @@
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 const env = (key: string): string | undefined => {
   const value = process.env[key];
   return value === undefined || value === "" ? undefined : value;
 };
+
+export const APP_COMMIT_FILE = ".app-commit";
+
+let bakedCommit: { value: string | undefined } | null = null;
+
+export function readAppCommit(file = path.join(process.cwd(), APP_COMMIT_FILE)): string | undefined {
+  try {
+    const value = readFileSync(file, "utf8").trim();
+    return /^[0-9a-f]{40}$/.test(value) ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 export const config = {
   timezone: "Europe/Warsaw",
@@ -113,7 +128,8 @@ export const config = {
     return env("GITHUB_REPOSITORY") ?? "Alergeek-Ventures/manfrod";
   },
   get appCommit() {
-    return env("APP_COMMIT");
+    bakedCommit ??= { value: readAppCommit() };
+    return bakedCommit.value;
   },
   get typesafeApiKey() {
     return env("TYPESAFE_AI_API_KEY");

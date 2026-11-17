@@ -72,7 +72,27 @@ export async function reviewRounds(sessionId: string): Promise<number> {
   return Number(row?.rounds ?? 0);
 }
 
-export async function recordPull(pullNumber: number, branch: string, sessionId: string): Promise<void> {
+export type PublishedVerdict = "approve" | "overridden";
+
+export interface Published {
+  headSha: string;
+  reviewVerdict: PublishedVerdict;
+}
+
+export async function recordPublished(pullNumber: number, published: Published): Promise<void> {
+  await db.update(selfModifyPulls).set(published).where(eq(selfModifyPulls.pullNumber, pullNumber));
+}
+
+export async function publishedHead(pullNumber: number): Promise<{ headSha: string | null; reviewVerdict: string | null } | null> {
+  const [row] = await db
+    .select({ headSha: selfModifyPulls.headSha, reviewVerdict: selfModifyPulls.reviewVerdict })
+    .from(selfModifyPulls)
+    .where(eq(selfModifyPulls.pullNumber, pullNumber))
+    .limit(1);
+  return row ?? null;
+}
+
+export async function recordPull(pullNumber: number, branch: string, sessionId: string, published: Published | null = null): Promise<void> {
   const [previous] = await db.select().from(selfModifyPulls).where(eq(selfModifyPulls.pullNumber, pullNumber)).limit(1);
   if (previous && previous.sessionId !== sessionId) {
     try {
@@ -83,10 +103,17 @@ export async function recordPull(pullNumber: number, branch: string, sessionId: 
   }
   await db
     .insert(selfModifyPulls)
-    .values({ pullNumber, branch, sessionId })
+    .values({ pullNumber, branch, sessionId, headSha: published?.headSha ?? null, reviewVerdict: published?.reviewVerdict ?? null })
     .onConflictDoUpdate({
       target: selfModifyPulls.pullNumber,
-      set: { branch, sessionId, status: "open", closedAt: null },
+      set: {
+        branch,
+        sessionId,
+        status: "open",
+        closedAt: null,
+        headSha: published?.headSha ?? null,
+        reviewVerdict: published?.reviewVerdict ?? null,
+      },
     });
 }
 

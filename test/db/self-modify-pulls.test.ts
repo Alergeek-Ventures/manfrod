@@ -13,7 +13,7 @@ vi.mock("../../lib/sandboxes.ts", () => ({
 }));
 
 const { db, tables } = await import("../../lib/db/index.ts");
-const { recordPull } = await import("../../lib/self-modify-pulls.ts");
+const { publishedHead, recordPublished, recordPull } = await import("../../lib/self-modify-pulls.ts");
 const { eq } = await import("drizzle-orm");
 
 describe.skipIf(!enabled)("recordPull", () => {
@@ -31,5 +31,13 @@ describe.skipIf(!enabled)("recordPull", () => {
     expect(killed).toEqual(["session-1"]);
     const [row] = await db.select().from(tables.selfModifyPulls).where(eq(tables.selfModifyPulls.pullNumber, pullNumber));
     expect(row.sessionId).toBe("session-2");
+  });
+
+  it("remembers the published head commit and the reviewer's verdict", async () => {
+    expect(await publishedHead(pullNumber)).toEqual({ headSha: null, reviewVerdict: null });
+    await recordPull(pullNumber, "manfrod/self-modify/abc", "session-2", { headSha: "c1", reviewVerdict: "approve" });
+    expect(await publishedHead(pullNumber)).toEqual({ headSha: "c1", reviewVerdict: "approve" });
+    await recordPublished(pullNumber, { headSha: "c2", reviewVerdict: "overridden" });
+    expect(await publishedHead(pullNumber)).toEqual({ headSha: "c2", reviewVerdict: "overridden" });
   });
 });

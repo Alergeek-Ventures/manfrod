@@ -9,6 +9,7 @@ export interface CheckRun {
   status: string;
   conclusion: string | null;
   url: string;
+  app: string | null;
 }
 
 export interface TreeEntry {
@@ -146,7 +147,14 @@ export async function createDraftPull(branch: string, base: string, title: strin
 
 export async function checkRuns(sha: string): Promise<CheckRun[]> {
   const result = await required<{
-    check_runs: { id: number; name: string; status: string; conclusion: string | null; html_url: string }[];
+    check_runs: {
+      id: number;
+      name: string;
+      status: string;
+      conclusion: string | null;
+      html_url: string;
+      app: { slug: string } | null;
+    }[];
   }>("GET", `/commits/${sha}/check-runs?per_page=100`);
   return result.check_runs.map((run) => ({
     id: run.id,
@@ -154,6 +162,7 @@ export async function checkRuns(sha: string): Promise<CheckRun[]> {
     status: run.status,
     conclusion: run.conclusion,
     url: run.html_url,
+    app: run.app?.slug ?? null,
   }));
 }
 
@@ -175,7 +184,10 @@ export async function getPull(number: number) {
     merged: boolean;
     html_url: string;
     title: string;
-    head: { ref: string; sha: string };
+    changed_files: number;
+    merge_commit_sha: string | null;
+    base: { ref: string };
+    head: { ref: string; sha: string; repo: { full_name: string } | null };
   }>("GET", `/pulls/${number}`);
   return (
     pull && {
@@ -188,6 +200,10 @@ export async function getPull(number: number) {
       title: pull.title,
       branch: pull.head.ref,
       headSha: pull.head.sha,
+      headRepository: pull.head.repo?.full_name ?? null,
+      baseRef: pull.base.ref,
+      changedFiles: pull.changed_files,
+      mergeCommitSha: pull.merge_commit_sha,
     }
   );
 }
@@ -270,6 +286,23 @@ export async function compareCommits(base: string, head: string): Promise<Compar
       })),
     }
   );
+}
+
+export async function pullFiles(number: number): Promise<ComparedFile[]> {
+  const files = await collectPages(
+    async (page) =>
+      (await repo<{ filename: string; status: string; changes: number; patch?: string; previous_filename?: string }[]>(
+        "GET",
+        `/pulls/${number}/files?per_page=${PAGE_SIZE}&page=${page}`,
+      )) ?? [],
+  );
+  return files.map((file) => ({
+    path: file.filename,
+    status: file.status,
+    changes: file.changes,
+    patch: file.patch ?? null,
+    previousPath: file.previous_filename ?? null,
+  }));
 }
 
 export async function fileAt(path: string, ref: string): Promise<string | null> {

@@ -31,6 +31,7 @@ export type Judge = (input: ReviewInput) => Promise<JudgeVerdict>;
 
 export interface SecurityReview {
   pass: boolean;
+  transient: boolean;
   reasons: string[];
 }
 
@@ -100,13 +101,14 @@ export const jevJudge: Judge = async (input) => {
 
 export async function securityReview(input: ReviewInput, judges: Record<string, Judge>): Promise<SecurityReview> {
   const names = Object.keys(judges);
-  if (names.length === 0) return { pass: false, reasons: ["no security judge ran"] };
+  if (names.length === 0) return { pass: false, transient: false, reasons: ["no security judge ran"] };
   const results = await Promise.allSettled(names.map((name) => judges[name](input)));
+  const blocked = results.some((result) => result.status === "fulfilled" && !result.value.pass);
   const reasons = results.flatMap((result, index) => {
     if (result.status === "rejected") return [`${names[index]} failed: ${(result.reason as Error)?.message ?? String(result.reason)}`];
     return result.value.pass ? [] : [`${names[index]}: ${result.value.reason}`];
   });
-  return { pass: reasons.length === 0, reasons };
+  return { pass: reasons.length === 0, transient: reasons.length > 0 && !blocked, reasons };
 }
 
 export const JUDGES: Record<string, Judge> = { "review model": reviewModelJudge, Jev: jevJudge };

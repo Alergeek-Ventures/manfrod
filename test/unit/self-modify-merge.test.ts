@@ -5,9 +5,12 @@ import {
   containsMerge,
   DAILY_LIMIT,
   eligibility,
+  fileListProblems,
   frontmatter,
   isCandidate,
   MAX_CHANGED_LINES,
+  MAX_FILES,
+  newReferences,
   underDailyLimit,
   type FileVersions,
 } from "../../lib/self-modify-merge/eligibility.ts";
@@ -99,7 +102,7 @@ describe("auto-merge eligibility", () => {
     const linked = `${SKILL}See https://evil.example.com/collect\n`;
     expect(eligibility([file(path)], new Map([[path, same(SKILL, linked)]]))).toEqual({
       ok: false,
-      reasons: [`${path}: adds links to evil.example.com`],
+      reasons: [`${path}: adds links to evil.example.com`, `${path}: adds domains evil.example.com`],
     });
     const known = `${SKILL}See https://manfrod.d.alergeek.me/a\n`;
     expect(eligibility([file(path)], new Map([[path, same(known, `${known}And https://manfrod.d.alergeek.me/b\n`)]])).ok).toBe(true);
@@ -123,22 +126,71 @@ describe("auto-merge eligibility", () => {
   it("keeps the merge-deciding code out of self-modify's reach", () => {
     expect(pathViolation("lib/self-modify-merge/eligibility.ts")).toBe("protected path");
     expect(pathViolation("agent/tools/self-modify-impact.ts")).toBe("protected path");
+    for (const path of ["lib/inngest/functions.ts", "lib/config.ts", "agent/hooks/audit.ts", "app/(panel)/admin/access/actions.ts"]) {
+      expect(pathViolation(path), path).toBe("protected path");
+    }
     expect(pathViolation("agent/skills/desk-booking/SKILL.md")).toBeNull();
   });
 });
 
 describe("CI state", () => {
+  const actions = "github-actions";
+
   it("is green only when the required checks completed and nothing failed", () => {
     expect(ciState([])).toBe("pending");
-    expect(ciState([{ name: "test", status: "in_progress", conclusion: null }])).toBe("pending");
-    expect(ciState([{ name: "test", status: "completed", conclusion: "success" }])).toBe("green");
-    expect(ciState([{ name: "other", status: "completed", conclusion: "success" }])).toBe("pending");
+    expect(ciState([{ name: "test", status: "in_progress", conclusion: null, app: actions }])).toBe("pending");
+    expect(ciState([{ name: "test", status: "completed", conclusion: "success", app: actions }])).toBe("green");
+    expect(ciState([{ name: "other", status: "completed", conclusion: "success", app: actions }])).toBe("pending");
     expect(
       ciState([
-        { name: "test", status: "completed", conclusion: "success" },
-        { name: "lint", status: "completed", conclusion: "failure" },
+        { name: "test", status: "completed", conclusion: "success", app: actions },
+        { name: "lint", status: "completed", conclusion: "failure", app: actions },
       ]),
     ).toBe("failed");
+  });
+
+  it("requires the test run from GitHub Actions with conclusion success", () => {
+    expect(ciState([{ name: "test", status: "completed", conclusion: "success", app: "some-other-app" }])).toBe("pending");
+    expect(ciState([{ name: "test", status: "completed", conclusion: "skipped", app: actions }])).toBe("failed");
+    expect(ciState([{ name: "test", status: "completed", conclusion: "neutral", app: actions }])).toBe("failed");
+  });
+});
+
+describe("file list", () => {
+  const paths = (count: number) => Array.from({ length: count }, (_, index) => ({ path: `agent/skills/s${index}/SKILL.md` }));
+
+  it("accepts a consistent list within the limit", () => {
+    expect(fileListProblems(paths(2), 2, paths(2))).toEqual([]);
+  });
+
+  it("blocks more than ten files, a count mismatch and lists that disagree", () => {
+    expect(fileListProblems(paths(MAX_FILES + 1), MAX_FILES + 1, paths(MAX_FILES + 1))).toEqual([
+      `${MAX_FILES + 1} files changed; the limit is ${MAX_FILES}`,
+    ]);
+    expect(fileListProblems(paths(2), 3, paths(2))).toEqual(["GitHub listed 2 files but the pull request reports 3"]);
+    expect(fileListProblems(paths(2), 2, [{ path: "agent/skills/other/SKILL.md" }, ...paths(1)])).toEqual([
+      "the pull request's file list differs from the comparison with main",
+    ]);
+  });
+});
+
+describe("new references", () => {
+  it("flags Slack mentions and IDs, emails and domains that the previous version did not have", () => {
+    expect(newReferences("Ask in the thread.", "Ask <@U01ABCDEF12> in <#C01ABCDEF12|ops>, ping <!channel>.")).toEqual([
+      "adds Slack mentions or IDs <@U01ABCDEF12>, <#C01ABCDEF12|ops>, <!channel>, U01ABCDEF12, C01ABCDEF12",
+    ]);
+    expect(newReferences("", "DM W0123ABCDE about it")).toEqual(["adds Slack mentions or IDs W0123ABCDE"]);
+    expect(newReferences("", "Mail ops@corp.example.com")).toEqual([
+      "adds email addresses ops@corp.example.com",
+      "adds domains corp.example.com",
+    ]);
+    expect(newReferences("", "Upload it to drop.example.io")).toEqual(["adds domains drop.example.io"]);
+  });
+
+  it("allows references already present and ordinary text", () => {
+    const before = "Ask <@U01ABCDEF12>, mail ops@corp.example.com or see https://docs.example.io/a";
+    expect(newReferences(before, `${before}\nThen https://docs.example.io/b, per SKILL.md and lib/routines.ts.`)).toEqual([]);
+    expect(newReferences("", "Confirm the WARSZAWA office and the desk number first.")).toEqual([]);
   });
 });
 
@@ -190,9 +242,9 @@ describe("security review", () => {
   const pass = async () => ({ pass: true, reason: "fine" });
 
   it("passes only when both judges pass", async () => {
-    expect(await securityReview(input, { one: pass, two: pass })).toEqual({ pass: true, reasons: [] });
+    expect(await securityReview(input, { one: pass, two: pass })).toEqual({ pass: true, transient: false, reasons: [] });
     const blocked = await securityReview(input, { one: pass, two: async () => ({ pass: false, reason: "sends data out" }) });
-    expect(blocked).toEqual({ pass: false, reasons: ["two: sends data out"] });
+    expect(blocked).toEqual({ pass: false, transient: false, reasons: ["two: sends data out"] });
   });
 
   it("fails closed when a judge errors or none runs", async () => {
@@ -202,8 +254,15 @@ describe("security review", () => {
         throw new Error("timeout");
       },
     });
-    expect(failed).toEqual({ pass: false, reasons: ["two failed: timeout"] });
-    expect((await securityReview(input, {})).pass).toBe(false);
+    expect(failed).toEqual({ pass: false, transient: true, reasons: ["two failed: timeout"] });
+    expect(await securityReview(input, {})).toEqual({ pass: false, transient: false, reasons: ["no security judge ran"] });
+    const both = await securityReview(input, {
+      one: async () => ({ pass: false, reason: "new recipient" }),
+      two: async () => {
+        throw new Error("timeout");
+      },
+    });
+    expect(both.transient).toBe(false);
   });
 
   it("reads only a well-formed verdict", () => {

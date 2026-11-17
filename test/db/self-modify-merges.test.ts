@@ -21,12 +21,15 @@ describe.skipIf(!enabled)("self-modify auto-merge store", () => {
     await db.delete(tables.messageFeedback).where(inArray(tables.messageFeedback.slackChannelId, [`C${tag}`]));
   });
 
-  it("records one decision per head SHA and counts recent merges", async () => {
-    expect(await store.decided(pullNumber, "head1")).toBe(false);
+  it("records one decision per head SHA and counts recent and pending merges", async () => {
+    expect(await store.decisionFor(pullNumber, "head1")).toBeNull();
     await store.recordDecision({ pullNumber, headSha: "head1", decision: "blocked", reason: "CI failed", targets: [] });
-    await store.recordDecision({ pullNumber, headSha: "head1", decision: "merged", reason: null, targets: [] });
-    expect(await store.decided(pullNumber, "head1")).toBe(true);
-    const before = (await store.mergedSince(new Date(Date.now() - 60_000))).length;
+    expect(store.settled(await store.decisionFor(pullNumber, "head1"))).toBe(true);
+    const since = new Date(Date.now() - 60_000);
+    const before = (await store.mergedSince(since)).length;
+    await store.startMerging(pullNumber, "head2", [`skill:${skill}`]);
+    expect((await store.mergedSince(since)).length).toBe(before + 1);
+    expect((await store.mergingRows()).some((row) => row.pullNumber === pullNumber && row.headSha === "head2")).toBe(true);
     await store.recordDecision({
       pullNumber,
       headSha: "head2",
@@ -37,13 +40,26 @@ describe.skipIf(!enabled)("self-modify auto-merge store", () => {
       channelId: "C1",
       threadTs: "1.0",
     });
-    expect((await store.mergedSince(new Date(Date.now() - 60_000))).length).toBe(before + 1);
+    expect((await store.mergedSince(since)).length).toBe(before + 1);
+    expect((await store.mergingRows()).some((row) => row.pullNumber === pullNumber)).toBe(false);
     expect(await store.lastThread(pullNumber)).toEqual({ channelId: "C1", threadTs: "1.0" });
     const merged = await store.mergedPull(pullNumber);
     expect(merged?.headSha).toBe("head2");
     expect((await store.awaitingDeploy()).some((row) => row.pullNumber === pullNumber)).toBe(true);
-    await store.markLive(merged!.id, null);
+    expect(await store.claimLive(merged!.id)).toBe(true);
+    expect(await store.claimLive(merged!.id)).toBe(false);
     expect((await store.awaitingDeploy()).some((row) => row.pullNumber === pullNumber)).toBe(false);
+  });
+
+  it("backs off between retries and counts the attempts", async () => {
+    expect(await store.recordRetry(pullNumber, "head3", "timeout", [])).toBe(1);
+    const first = await store.decisionFor(pullNumber, "head3");
+    expect(first?.decision).toBe("retry");
+    expect(store.settled(first)).toBe(true);
+    expect(store.settled(first, new Date(Date.now() + 11 * 60_000))).toBe(false);
+    expect(await store.recordRetry(pullNumber, "head3", "timeout", [])).toBe(2);
+    const second = await store.decisionFor(pullNumber, "head3");
+    expect(second!.retryAt!.getTime() - Date.now()).toBeGreaterThan(15 * 60_000);
   });
 
   it("counts skill loads and routine runs with their negative ratings", async () => {
