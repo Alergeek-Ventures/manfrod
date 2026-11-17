@@ -632,6 +632,28 @@ export const selfModifyLessons = pgTable("self_modify_lessons", {
 	index("self_modify_lessons_inserted_at_index").using("btree", table.insertedAt.asc().nullsLast().op("timestamp_ops")),
 ]);
 
+export const selfModifyMerges = pgTable("self_modify_merges", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	pullNumber: integer("pull_number").notNull(),
+	headSha: text("head_sha").notNull(),
+	decision: text().notNull(),
+	reason: text(),
+	targets: text().array().default(sql`'{}'::text[]`).notNull(),
+	mergeSha: text("merge_sha"),
+	channelId: text("channel_id"),
+	threadTs: text("thread_ts"),
+	taskId: uuid("task_id"),
+	verdict: text(),
+	mergedAt: timestamp("merged_at", { mode: 'date' }),
+	liveAt: timestamp("live_at", { mode: 'date' }),
+	insertedAt: timestamp("inserted_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
+}, (table) => [
+	uniqueIndex("self_modify_merges_head_index").using("btree", table.pullNumber.asc().nullsLast().op("int4_ops"), table.headSha.asc().nullsLast().op("text_ops")),
+	index("self_modify_merges_merged_at_index").using("btree", table.mergedAt.asc().nullsLast().op("timestamp_ops")),
+	check("self_modify_merges_decision", sql`decision = ANY (ARRAY['merged'::text, 'blocked'::text, 'skipped'::text])`),
+	check("self_modify_merges_verdict", sql`(verdict IS NULL) OR (verdict = ANY (ARRAY['better'::text, 'no_change'::text, 'worse'::text, 'not_enough_data'::text]))`),
+]);
+
 export const selfModifyReviews = pgTable("self_modify_reviews", {
 	id: uuid().defaultRandom().primaryKey().notNull(),
 	sessionId: text("session_id").notNull(),

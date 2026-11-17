@@ -112,6 +112,9 @@ export const config = {
   get githubRepository() {
     return env("GITHUB_REPOSITORY") ?? "Alergeek-Ventures/manfrod";
   },
+  get appCommit() {
+    return env("APP_COMMIT");
+  },
   get typesafeApiKey() {
     return env("TYPESAFE_AI_API_KEY");
   },

@@ -104,6 +104,11 @@ export async function getFinding(id: string): Promise<SelfReviewFinding | null> 
   return finding ?? null;
 }
 
+export async function findingForPull(pullNumber: number): Promise<SelfReviewFinding | null> {
+  const [finding] = await db.select().from(selfReviewFindings).where(eq(selfReviewFindings.pullNumber, pullNumber)).limit(1);
+  return finding ?? null;
+}
+
 export async function findingsWithStatus(statuses: FindingStatus[]): Promise<SelfReviewFinding[]> {
   return db
     .select()

@@ -174,7 +174,8 @@ export async function getPull(number: number) {
     draft: boolean;
     merged: boolean;
     html_url: string;
-    head: { ref: string };
+    title: string;
+    head: { ref: string; sha: string };
   }>("GET", `/pulls/${number}`);
   return (
     pull && {
@@ -184,7 +185,9 @@ export async function getPull(number: number) {
       draft: pull.draft,
       merged: pull.merged,
       url: pull.html_url,
+      title: pull.title,
       branch: pull.head.ref,
+      headSha: pull.head.sha,
     }
   );
 }
@@ -232,6 +235,70 @@ export async function openPulls(): Promise<OpenPull[]> {
 export async function mergeBase(base: string, headSha: string): Promise<string | null> {
   const compare = await repo<{ merge_base_commit: { sha: string } }>("GET", `/compare/${base}...${headSha}`);
   return compare?.merge_base_commit.sha ?? null;
+}
+
+export interface ComparedFile {
+  path: string;
+  status: string;
+  changes: number;
+  patch: string | null;
+  previousPath: string | null;
+}
+
+export interface Comparison {
+  status: string;
+  mergeBaseSha: string;
+  files: ComparedFile[];
+}
+
+export async function compareCommits(base: string, head: string): Promise<Comparison | null> {
+  const compare = await repo<{
+    status: string;
+    merge_base_commit: { sha: string };
+    files?: { filename: string; status: string; changes: number; patch?: string; previous_filename?: string }[];
+  }>("GET", `/compare/${base}...${head}`);
+  return (
+    compare && {
+      status: compare.status,
+      mergeBaseSha: compare.merge_base_commit.sha,
+      files: (compare.files ?? []).map((file) => ({
+        path: file.filename,
+        status: file.status,
+        changes: file.changes,
+        patch: file.patch ?? null,
+        previousPath: file.previous_filename ?? null,
+      })),
+    }
+  );
+}
+
+export async function fileAt(path: string, ref: string): Promise<string | null> {
+  const encoded = path.split("/").map(encodeURIComponent).join("/");
+  const file = await repo<{ type: string; encoding: string; content: string } | unknown[]>(
+    "GET",
+    `/contents/${encoded}?ref=${encodeURIComponent(ref)}`,
+  );
+  if (!file || Array.isArray(file) || file.type !== "file" || file.encoding !== "base64") return null;
+  return Buffer.from(file.content, "base64").toString("utf8");
+}
+
+export type MergeResult = { ok: true; sha: string } | { ok: false; status: number; message: string };
+
+export async function squashMerge(number: number, sha: string, title: string): Promise<MergeResult> {
+  const response = await fetch(`${API}/repos/${repository()}/pulls/${number}/merge`, {
+    method: "PUT",
+    headers: {
+      accept: "application/vnd.github+json",
+      authorization: `Bearer ${await installationToken()}`,
+      "x-github-api-version": "2022-11-28",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ sha, merge_method: "squash", commit_title: `${title} (#${number})` }),
+    signal: AbortSignal.timeout(60_000),
+  });
+  const body = (await response.json().catch(() => ({}))) as { sha?: string; merged?: boolean; message?: string };
+  if (response.ok && body.merged && body.sha) return { ok: true, sha: body.sha };
+  return { ok: false, status: response.status, message: (body.message ?? `HTTP ${response.status}`).slice(0, 500) };
 }
 
 export async function updatePull(number: number, title: string, body: string): Promise<void> {

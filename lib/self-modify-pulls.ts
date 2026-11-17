@@ -90,6 +90,15 @@ export async function recordPull(pullNumber: number, branch: string, sessionId: 
     });
 }
 
+export async function recordedOpenPulls(): Promise<number[]> {
+  const rows = await db
+    .select({ pullNumber: selfModifyPulls.pullNumber })
+    .from(selfModifyPulls)
+    .where(eq(selfModifyPulls.status, "open"))
+    .orderBy(selfModifyPulls.insertedAt);
+  return rows.map((row) => row.pullNumber);
+}
+
 export async function cleanUpPull(pullNumber: number): Promise<boolean> {
   const [row] = await db.select().from(selfModifyPulls).where(eq(selfModifyPulls.pullNumber, pullNumber)).limit(1);
   if (!row) return false;
