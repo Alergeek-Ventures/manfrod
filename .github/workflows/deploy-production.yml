@@ -36,6 +36,28 @@ jobs:
           path: .github/actions/av-secret-service
           persist-credentials: false
 
+      - name: Set APP_COMMIT in Coolify
+        env:
+          COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
+          COOLIFY_APP_UUID: ${{ vars.COOLIFY_APP_UUID }}
+          APP_COMMIT: ${{ github.sha }}
+        run: |
+          body=$(jq -n --arg value "$APP_COMMIT" '{key: "APP_COMMIT", value: $value, is_literal: true}')
+          send() {
+            curl -sS -o /tmp/coolify-env.json -w '%{http_code}' -X "$1" \
+              "https://coolify.alergeek.me/api/v1/applications/${COOLIFY_APP_UUID}/envs" \
+              -H "Authorization: Bearer ${COOLIFY_TOKEN}" \
+              -H "Content-Type: application/json" \
+              --data "$body"
+          }
+          status=$(send PATCH)
+          if [[ "$status" == 404 ]]; then status=$(send POST); fi
+          if [[ "$status" != 2* ]]; then
+            echo "Coolify returned HTTP $status"
+            cat /tmp/coolify-env.json
+            exit 1
+          fi
+
       - name: Deploy to Coolify
         uses: ./.github/actions/av-secret-service/coolify-deploy
         with:
