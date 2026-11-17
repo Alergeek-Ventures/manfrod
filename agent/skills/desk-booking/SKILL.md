@@ -30,7 +30,12 @@ the desk label and date. Only their own reservations can be cancelled.
 
 ## Looking up who's where
 User asks who's sitting where, what's free, or wants a written list → call
-`list-desk-reservations` (plain text). If they explicitly want to *see* the
+`list-desk-reservations` (plain text).
+Also call `list-desks` for the same date and count the desks whose status
+is `wolne` (it lists only active desks; reserved and permanently assigned
+ones show other statuses). Below the reservation list add exactly one line
+`wolne: N` with that count (e.g. `wolne: 4`) — never guess the number.
+If they explicitly want to *see* the
 office/map → call `show-desk-map` instead, which posts an image to the
 current channel by default. If they name a different channel (by name or
 Slack channel ID, e.g. "wyślij na kanał biuro" / "na kanał C087QF130R3"),

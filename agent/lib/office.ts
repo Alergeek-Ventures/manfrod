@@ -26,10 +26,11 @@ export function splitEquipment(equipment: string | undefined): string[] | undefi
     .filter((tag) => tag !== "");
 }
 
-export function deskLine(desk: Desk, reservedBy: string | null): string {
+export function deskLine(desk: Desk, reservation: { user: { name: string | null } } | undefined): string {
   const equipment = desk.equipment.length === 0 ? "brak sprzętu" : desk.equipment.join(", ");
   const location = desk.locationNote ? ` (${desk.locationNote})` : "";
-  const status = desk.permanentOwner ? `na stałe: ${desk.permanentOwner}` : reservedBy ? `zajęte: ${reservedBy}` : "wolne";
+  const status =
+    desk.permanentOwner !== null ? `na stałe: ${desk.permanentOwner}` : reservation ? `zajęte: ${reservation.user.name ?? "?"}` : "wolne";
   return `- ${desk.label}${location} [${equipment}] — ${status}`;
 }
 

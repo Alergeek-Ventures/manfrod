@@ -11,6 +11,6 @@ export default defineManfrodTool({
       const desks = await listDesks();
       if (desks.length === 0) return "No desks configured yet.";
       const byDesk = new Map((await listReservationsForDate(day)).map((reservation) => [reservation.deskId, reservation]));
-      return `Desks (${day}):\n${desks.map((desk) => deskLine(desk, byDesk.get(desk.id)?.user.name ?? null)).join("\n")}`;
+      return `Desks (${day}):\n${desks.map((desk) => deskLine(desk, byDesk.get(desk.id))).join("\n")}`;
     }),
 });
