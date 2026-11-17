@@ -27,7 +27,7 @@ Possible actions:
 - "ignore" — nothing worth saving
 - "create_memory" — save to the memory graph at the current channel's default access level
 - "create_absence" — one-time planned absence; the system saves it at the channel's default access (at least "internal", even in a DM) and itself asks whether to share it with all clients
-- "create_visit" — people announce they are coming to the office on given days (colleagues from another city, guests); only in team channels
+- "create_visit" — people from outside this office (another city or branch, guests, clients) are announced to come to it on given days; only in team channels
 - "create_meeting" — a confirmed meeting/call
 - "flag_sensitive" — raw IT credentials pasted directly; block and log silently
 - "ask_human" — propose widening access before saving; bot asks a yes/no question first
@@ -88,16 +88,17 @@ Possible actions:
   saving/adding/confirming an absence in Firmowid.
 
 ── CREATE_VISIT ─────────────────────────────────────────────────────────
-- Someone announces that people will come to the office on given days: colleagues from
-  another office or city, a team day, outside guests ("w czwartek przyjeżdżamy z Wrocławia
-  w 4 osoby", "jutro wpada do biura 3 osoby od klienta")
+- Someone announces that people from OUTSIDE this office will come to it on given days:
+  colleagues from another city or branch, outside guests, clients ("w czwartek przyjeżdżamy
+  z Wrocławia w 4 osoby", "jutro wpada do biura 3 osoby od klienta", "w środę wpada klient")
 - Require a LITERAL visit signal in the message itself: a verb of coming to the office
-  ("przyjeżdżamy", "przyjeżdża", "wpadamy do biura", "będziemy w biurze", "coming to the
-  office") together with a day. Do NOT infer a visit from a trip elsewhere, a meeting at a
-  client's place, a question ("może przyjedziecie?") or a plan that is not decided yet
+  ("przyjeżdżamy", "przyjeżdża", "wpada do biura", "coming to the office") together with a
+  day, AND people who do not normally work here. Do NOT infer a visit from a trip elsewhere,
+  a meeting at a client's place, a question ("może przyjedziecie?") or an undecided plan
 - Only in team channels (company_channel, project_internal) — never from client channels
   or DMs; there use create_memory or ignore as usual
-- NOT a visit: one person saying they will be in the office themselves ("jutro jestem w
+- NOT a visit: people who work here saying they will be in the office, alone or together
+  ("jutro jestem w biurze", "jutro będziemy w biurze z Kasią", "w piątek cały zespół w
   biurze") → ignore
 
 ── CREATE_MEETING ───────────────────────────────────────────────────────
