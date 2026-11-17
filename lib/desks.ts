@@ -68,10 +68,6 @@ export async function reserveDesk(
   try {
     const reservation = await db.transaction(async (tx) => {
       if (userId) await tx.delete(deskReservations).where(and(eq(deskReservations.userId, userId), eq(deskReservations.date, date)));
-      if ((options.source ?? "manual") === "manual")
-        await tx
-          .delete(deskReservations)
-          .where(and(eq(deskReservations.deskId, desk.id), eq(deskReservations.date, date), eq(deskReservations.source, "plan")));
       const [created] = await tx
         .insert(deskReservations)
         .values({
