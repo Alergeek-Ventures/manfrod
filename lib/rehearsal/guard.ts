@@ -24,6 +24,7 @@ export const READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
   "list-desks",
   "list-facts",
   "list-office-access-log",
+  "list-office-presence",
   "list-projects",
   "list-recent-notes",
   "list-recurring-reminders",
