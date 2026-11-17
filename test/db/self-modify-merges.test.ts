@@ -62,6 +62,22 @@ describe.skipIf(!enabled)("self-modify auto-merge store", () => {
     expect(second!.retryAt!.getTime() - Date.now()).toBeGreaterThan(15 * 60_000);
   });
 
+  it("leaves a merge in flight alone unless settling replaces it", async () => {
+    await store.startMerging(pullNumber, "head4", []);
+    expect(await store.recordRetry(pullNumber, "head4", "timeout", [])).toBeNull();
+    expect((await store.decisionFor(pullNumber, "head4"))?.decision).toBe("merging");
+    expect(await store.recordRetry(pullNumber, "head4", "no answer", [], true)).toBe(1);
+    expect((await store.decisionFor(pullNumber, "head4"))?.decision).toBe("retry");
+  });
+
+  it("releases a live claim so the next run can retry", async () => {
+    await store.recordDecision({ pullNumber, headSha: "head5", decision: "merged", reason: null, targets: [], mergeSha: "squash5" });
+    const row = (await store.awaitingDeploy()).find((candidate) => candidate.headSha === "head5" && candidate.pullNumber === pullNumber)!;
+    expect(await store.claimLive(row.id)).toBe(true);
+    await store.releaseLive(row.id);
+    expect(await store.claimLive(row.id)).toBe(true);
+  });
+
   it("counts skill loads and routine runs with their negative ratings", async () => {
     const now = Date.now();
     const at = (minutesAgo: number) => new Date(now - minutesAgo * 60_000);

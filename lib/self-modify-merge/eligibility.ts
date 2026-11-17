@@ -4,6 +4,7 @@ import { matches as secretRule } from "../security/gitleaks.ts";
 export const MAX_CHANGED_LINES = 400;
 export const MAX_BYTES = 100_000;
 export const MAX_FILES = 10;
+export const MAX_LINE_CHARS = 2000;
 export const DAILY_LIMIT = 5;
 export const REQUIRED_CHECKS = ["test"];
 export const ACTIONS_APP = "github-actions";
@@ -59,12 +60,34 @@ export function frontmatter(content: string): string | null {
 }
 
 const PATTERNS: { label: string; pattern: RegExp; caseless: boolean }[] = [
-  { label: "links to", pattern: /\b[a-z][a-z0-9+.-]*:\/\/([^/\s)>\]|"'`]+)/gi, caseless: true },
-  { label: "Slack mentions or IDs", pattern: /(<[@#!][^>\s]*>)/g, caseless: false },
-  { label: "Slack mentions or IDs", pattern: /\b([CUGW][A-Z0-9]{8,})\b/g, caseless: false },
-  { label: "email addresses", pattern: /([a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,})/gi, caseless: true },
-  { label: "domains", pattern: new RegExp(`\\b((?:[a-z0-9-]+\\.)+(?:${TLDS}))\\b`, "gi"), caseless: true },
+  { label: "links to", pattern: /\b[a-z][a-z0-9+.-]{0,30}:\/\/([^/\s)>\]|"'`]{1,253})/gi, caseless: true },
+  { label: "Slack mentions or IDs", pattern: /(<[@#!][^>\s]{0,100}>)/g, caseless: false },
+  { label: "Slack mentions or IDs", pattern: /\b([CUGW](?=[A-Z0-9]{0,20}[0-9])[A-Z0-9]{8,20})\b/g, caseless: false },
+  { label: "email addresses", pattern: /([a-z0-9._%+-]{1,64}@[a-z0-9-]{1,63}(?:\.[a-z0-9-]{1,63}){1,8})/gi, caseless: true },
+  { label: "domains", pattern: new RegExp(`\\b((?:[a-z0-9-]{1,63}\\.){1,8}(?:${TLDS}))\\b`, "gi"), caseless: true },
 ];
+
+export function longestLine(text: string): number {
+  let longest = 0;
+  let start = 0;
+  while (start <= text.length) {
+    const end = text.indexOf("\n", start);
+    const stop = end === -1 ? text.length : end;
+    longest = Math.max(longest, stop - start);
+    if (end === -1) break;
+    start = end + 1;
+  }
+  return longest;
+}
+
+export function scanLimit(text: string | null): string | null {
+  if (text === null) return null;
+  const bytes = Buffer.byteLength(text);
+  if (bytes > MAX_BYTES) return `${bytes} bytes; the limit is ${MAX_BYTES}`;
+  const line = longestLine(text);
+  if (line > MAX_LINE_CHARS) return `a line of ${line} characters; the limit is ${MAX_LINE_CHARS}`;
+  return null;
+}
 
 export function tokens(text: string | null, pattern: RegExp, caseless: boolean): Set<string> {
   return new Set([...(text ?? "").matchAll(pattern)].map((match) => (caseless ? match[1].toLowerCase() : match[1])));
@@ -124,6 +147,11 @@ export function eligibility(files: ComparedFile[], versions: Map<string, FileVer
     const version = versions.get(file.path);
     if (!version || version.head === null) {
       reasons.push(`${file.path}: could not read the new version`);
+      continue;
+    }
+    const tooBig = scanLimit(version.head) ?? scanLimit(version.main);
+    if (tooBig) {
+      reasons.push(`${file.path}: too large to check (${tooBig})`);
       continue;
     }
     bytes += Buffer.byteLength(version.head);

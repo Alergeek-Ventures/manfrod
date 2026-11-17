@@ -32,6 +32,7 @@ import {
 import { JUDGES, securityReview, type Evidence, type ReviewedFile } from "./review.ts";
 import { autoMergeEnabled } from "./settings.ts";
 import {
+  attachThread,
   attachVerification,
   awaitingDeploy,
   claimLive,
@@ -42,6 +43,7 @@ import {
   mergingRows,
   recordDecision,
   recordRetry,
+  releaseLive,
   settled,
   startMerging,
   type NewDecision,
@@ -112,8 +114,12 @@ async function block(pull: FoundPull, targets: string[], reasons: string[]): Pro
   return "blocked";
 }
 
-async function retry(pull: FoundPull, targets: string[], reason: string): Promise<Outcome> {
-  const attempts = await recordRetry(pull.number, pull.headSha, reason, targets);
+async function retry(pull: FoundPull, targets: string[], reason: string, replaceMerging = false): Promise<Outcome> {
+  const attempts = await recordRetry(pull.number, pull.headSha, reason, targets, replaceMerging);
+  if (attempts === null) {
+    log.warn(`SelfModify.Merge: #${pull.number} has a merge in flight; leaving it to be settled: ${reason}`);
+    return "waiting";
+  }
   if (attempts < MAX_ATTEMPTS) {
     log.warn(`SelfModify.Merge: #${pull.number} attempt ${attempts} failed, retrying later: ${reason}`);
     return "retrying";
@@ -225,11 +231,15 @@ async function evaluate(pull: FoundPull): Promise<Outcome> {
   return "merged";
 }
 
-async function announceMerged(pull: FoundPull, targets: string[], mergeSha: string, note: string): Promise<void> {
+async function announceMerged(pull: FoundPull, targets: string[], mergeSha: string | null, note: string): Promise<void> {
+  const commit = mergeSha ? `squash commit ${mergeSha.slice(0, 7)}` : "GitHub did not say which squash commit";
+  const followUp = mergeSha
+    ? "Once it is live I'll check whether conversations that use it go better."
+    : "Without the commit I can't tell when it is live, so it won't be checked after the deploy.";
   await decide(
     pull,
     { decision: "merged", reason: null, targets, mergeSha },
-    `:rocket: Merged ${link(pull)} automatically (${targets.join(", ")}; squash commit ${mergeSha.slice(0, 7)})${note}. CI is green and the security review passed. Once it is live I'll check whether conversations that use it go better.`,
+    `:rocket: Merged ${link(pull)} automatically (${targets.join(", ")}; ${commit})${note}. CI is green and the security review passed. ${followUp}`,
   );
   log.info(`SelfModify.Merge: merged #${pull.number} as ${mergeSha}`);
 }
@@ -252,12 +262,11 @@ export async function settleMerging(now = new Date()): Promise<number> {
       const pull = await getPull(row.pullNumber);
       if (!pull) continue;
       const atHead = { ...pull, headSha: row.headSha };
-      if (pull.merged && pull.mergeCommitSha) {
+      if (pull.merged) {
         await announceMerged(atHead, row.targets, pull.mergeCommitSha, ", confirmed after the merge call did not answer");
         settledCount += 1;
       } else if (!row.mergedAt || now.getTime() - row.mergedAt.getTime() > MERGE_TIMEOUT_MINUTES * 60_000) {
-        if (pull.merged) await block(atHead, row.targets, ["the pull request was merged, but GitHub did not say with which commit"]);
-        else await retry(atHead, row.targets, "the merge call did not answer and the pull request is still open");
+        await retry(atHead, row.targets, "the merge call did not answer and the pull request is still open", true);
         settledCount += 1;
       }
     } catch (error) {
@@ -284,29 +293,41 @@ export async function detectLive(): Promise<number> {
       const channelId = row.channelId ?? config.selfReviewChannelId;
       if (!channelId || !(await claimLive(row.id))) continue;
       const text = `:white_check_mark: #${row.pullNumber} is live in production (${appCommit.slice(0, 7)}). I'll compare conversations that use ${row.targets.join(", ")} before and after it every ${CHECK_EVERY_MINUTES} minutes on workdays, for up to ${VERIFY_DAYS} days.`;
-      const posted = await post("chat.postMessage", { channel: channelId, text, ...(row.threadTs ? { thread_ts: row.threadTs } : {}) });
-      const threadTs = row.threadTs ?? (posted.ok ? (posted.body.ts as string) : null);
+      let threadTs = row.threadTs;
       if (!threadTs) {
-        log.error(`SelfModify.Merge: #${row.pullNumber} is live but there is no thread to verify it in`);
-        continue;
+        const root = await post("chat.postMessage", { channel: channelId, text });
+        if (!root.ok) {
+          await releaseLive(row.id);
+          log.error(`SelfModify.Merge: #${row.pullNumber} is live but the thread could not be started: ${root.error}`);
+          continue;
+        }
+        threadTs = root.body.ts as string;
+        await attachThread(row.id, channelId, threadTs);
       }
       const pull = await getPull(row.pullNumber);
       const ownerUserId = await selfReviewUserId();
       const now = new Date();
-      const task = await createTask({
-        ownerUserId,
-        title: `Check the effect of #${row.pullNumber}`,
-        goal: verificationGoal(row.pullNumber, pull?.url ?? null, row.targets, now),
-        successCriteria: `A verdict on #${row.pullNumber} was posted in this thread with self-modify-impact.`,
-        plan: null,
-        channelId,
-        threadTs,
-        ...(await resolveAccess(ownerUserId, channelId)),
-        checkEveryMinutes: CHECK_EVERY_MINUTES,
-        firstCheckAt: null,
-        deadline: new Date(now.getTime() + VERIFY_DAYS * 86_400_000),
-      });
+      let task;
+      try {
+        task = await createTask({
+          ownerUserId,
+          title: `Check the effect of #${row.pullNumber}`,
+          goal: verificationGoal(row.pullNumber, pull?.url ?? null, row.targets, now),
+          successCriteria: `A verdict on #${row.pullNumber} was posted in this thread with self-modify-impact.`,
+          plan: null,
+          channelId,
+          threadTs,
+          ...(await resolveAccess(ownerUserId, channelId)),
+          checkEveryMinutes: CHECK_EVERY_MINUTES,
+          firstCheckAt: null,
+          deadline: new Date(now.getTime() + VERIFY_DAYS * 86_400_000),
+        });
+      } catch (error) {
+        await releaseLive(row.id);
+        throw error;
+      }
       await attachVerification(row.id, task.id, channelId, threadTs);
+      if (row.threadTs) await post("chat.postMessage", { channel: channelId, thread_ts: threadTs, text });
       live += 1;
     } catch (error) {
       log.error(`SelfModify.Merge: live check failed for #${row.pullNumber}: ${(error as Error).message}`);

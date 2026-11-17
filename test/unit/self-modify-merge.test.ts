@@ -10,6 +10,7 @@ import {
   isCandidate,
   MAX_CHANGED_LINES,
   MAX_FILES,
+  MAX_LINE_CHARS,
   newReferences,
   underDailyLimit,
   type FileVersions,
@@ -108,6 +109,26 @@ describe("auto-merge eligibility", () => {
     expect(eligibility([file(path)], new Map([[path, same(known, `${known}And https://manfrod.d.alergeek.me/b\n`)]])).ok).toBe(true);
   });
 
+  it("rejects a huge single-line file quickly without scanning it", () => {
+    const path = "agent/skills/desk-booking/SKILL.md";
+    const huge = `${SKILL}${"a@b.".repeat(250_000)}`;
+    const started = performance.now();
+    const result = eligibility([file(path)], new Map([[path, same(SKILL, huge)]]));
+    expect(performance.now() - started).toBeLessThan(200);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reasons[0]).toMatch(/too large to check/);
+  });
+
+  it("rejects a line longer than the limit even in a small file", () => {
+    const path = "agent/skills/desk-booking/SKILL.md";
+    const long = `${SKILL}${"x".repeat(MAX_LINE_CHARS + 1)}\n`;
+    const result = eligibility([file(path)], new Map([[path, same(SKILL, long)]]));
+    expect(result).toEqual({
+      ok: false,
+      reasons: [`${path}: too large to check (a line of ${MAX_LINE_CHARS + 1} characters; the limit is ${MAX_LINE_CHARS})`],
+    });
+  });
+
   it("rejects a pull request without files", () => {
     expect(eligibility([], new Map()).ok).toBe(false);
   });
@@ -185,6 +206,18 @@ describe("new references", () => {
       "adds domains corp.example.com",
     ]);
     expect(newReferences("", "Upload it to drop.example.io")).toEqual(["adds domains drop.example.io"]);
+  });
+
+  it("needs a digit in a bare Slack ID", () => {
+    expect(newReferences("", "Check the CONFIGURATION and the GUIDELINES first.")).toEqual([]);
+    expect(newReferences("", "Post in C0CONFIGUR")).toEqual(["adds Slack mentions or IDs C0CONFIGUR"]);
+  });
+
+  it("stays fast on long lines built to make the patterns backtrack", () => {
+    const line = (unit: string) => unit.repeat(Math.floor((MAX_LINE_CHARS - 1) / unit.length));
+    const started = performance.now();
+    for (const unit of ["a", "a.", "a@", "a-", "<@", "x://", "C1", "a.a@"]) newReferences("", line(unit));
+    expect(performance.now() - started).toBeLessThan(200);
   });
 
   it("allows references already present and ordinary text", () => {

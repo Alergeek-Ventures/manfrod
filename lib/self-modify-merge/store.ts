@@ -1,4 +1,4 @@
-import { and, desc, eq, gt, inArray, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import { db, tables } from "../db/index.ts";
 import type { SelfModifyMerge } from "../db/schema.ts";
 
@@ -63,7 +63,13 @@ export async function startMerging(pullNumber: number, headSha: string, targets:
     .onConflictDoUpdate({ target: [selfModifyMerges.pullNumber, selfModifyMerges.headSha], set: values });
 }
 
-export async function recordRetry(pullNumber: number, headSha: string, reason: string, targets: string[]): Promise<number> {
+export async function recordRetry(
+  pullNumber: number,
+  headSha: string,
+  reason: string,
+  targets: string[],
+  replaceMerging = false,
+): Promise<number | null> {
   const [row] = await db
     .insert(selfModifyMerges)
     .values({ pullNumber, headSha, decision: "retry", reason, targets, attempts: 1, retryAt: retryAt(1) })
@@ -77,9 +83,10 @@ export async function recordRetry(pullNumber: number, headSha: string, reason: s
         attempts: sql`${selfModifyMerges.attempts} + 1`,
         retryAt: sql`timezone('UTC'::text, now()) + make_interval(mins => ${RETRY_BASE_MINUTES} * power(2, ${selfModifyMerges.attempts})::int)`,
       },
+      setWhere: replaceMerging ? undefined : ne(selfModifyMerges.decision, "merging"),
     })
     .returning({ attempts: selfModifyMerges.attempts });
-  return row.attempts;
+  return row?.attempts ?? null;
 }
 
 function retryAt(attempts: number): Date {
@@ -122,6 +129,14 @@ export async function claimLive(id: string): Promise<boolean> {
     .where(and(eq(selfModifyMerges.id, id), isNull(selfModifyMerges.liveAt)))
     .returning({ id: selfModifyMerges.id });
   return rows.length > 0;
+}
+
+export async function releaseLive(id: string): Promise<void> {
+  await db.update(selfModifyMerges).set({ liveAt: null }).where(eq(selfModifyMerges.id, id));
+}
+
+export async function attachThread(id: string, channelId: string, threadTs: string): Promise<void> {
+  await db.update(selfModifyMerges).set({ channelId, threadTs }).where(eq(selfModifyMerges.id, id));
 }
 
 export async function attachVerification(id: string, taskId: string, channelId: string, threadTs: string): Promise<void> {

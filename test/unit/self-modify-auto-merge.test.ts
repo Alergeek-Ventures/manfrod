@@ -23,7 +23,36 @@ const state = vi.hoisted(() => ({
   enabled: [] as boolean[],
   ready: [] as string[],
   merging: [] as { pullNumber: number; headSha: string; targets: string[]; mergedAt: Date }[],
+  appCommit: undefined as string | undefined,
+  deploys: [] as {
+    id: string;
+    pullNumber: number;
+    mergeSha: string;
+    targets: string[];
+    channelId: string | null;
+    threadTs: string | null;
+  }[],
+  live: new Set<string>(),
+  taskError: null as Error | null,
+  tasks: [] as string[],
 }));
+
+vi.mock("../../lib/config.ts", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../../lib/config.ts")>();
+  const descriptors = Object.getOwnPropertyDescriptors(original.config);
+  return {
+    ...original,
+    config: Object.defineProperties({}, { ...descriptors, appCommit: { get: () => state.appCommit } }),
+  };
+});
+vi.mock("../../lib/tasks/index.ts", () => ({
+  createTask: async (input: { threadTs: string }) => {
+    if (state.taskError) throw state.taskError;
+    state.tasks.push(input.threadTs);
+    return { id: `task-${state.tasks.length}` };
+  },
+}));
+vi.mock("../../lib/memory/access.ts", () => ({ resolveAccess: async () => ({ readableLevels: [], writeAccess: [] }) }));
 
 vi.mock("../../lib/github.ts", () => ({
   getPull: async (number: number) => ({
@@ -70,7 +99,8 @@ vi.mock("../../lib/self-modify-merge/store.ts", async (importOriginal) => {
     startMerging: async (pullNumber: number, headSha: string) => {
       state.rows.set(key(pullNumber, headSha), { decision: "merging", headSha, reason: null });
     },
-    recordRetry: async (pullNumber: number, headSha: string, reason: string) => {
+    recordRetry: async (pullNumber: number, headSha: string, reason: string, _targets: string[], replaceMerging = false) => {
+      if (state.rows.get(key(pullNumber, headSha))?.decision === "merging" && !replaceMerging) return null;
       const attempts = (state.rows.get(key(pullNumber, headSha))?.attempts ?? 0) + 1;
       state.rows.set(key(pullNumber, headSha), { decision: "retry", headSha, reason, attempts, retryAt: new Date(Date.now() + 60_000) });
       return attempts;
@@ -78,7 +108,17 @@ vi.mock("../../lib/self-modify-merge/store.ts", async (importOriginal) => {
     mergingRows: async () => state.merging,
     mergedSince: async () => [],
     lastThread: async () => null,
-    awaitingDeploy: async () => [],
+    awaitingDeploy: async () => state.deploys.filter((row) => !state.live.has(row.id)),
+    claimLive: async (id: string) => {
+      if (state.live.has(id)) return false;
+      state.live.add(id);
+      return true;
+    },
+    releaseLive: async (id: string) => {
+      state.live.delete(id);
+    },
+    attachThread: async () => undefined,
+    attachVerification: async () => undefined,
   };
 });
 
@@ -101,7 +141,7 @@ vi.mock("../../lib/slack/api.ts", () => ({
   },
 }));
 
-const { processPull, runAutoMerge, settleMerging } = await import("../../lib/self-modify-merge/index.ts");
+const { detectLive, processPull, runAutoMerge, settleMerging } = await import("../../lib/self-modify-merge/index.ts");
 
 const row = () => state.rows.get("42:head1");
 
@@ -120,6 +160,11 @@ beforeEach(() => {
   state.review = { pass: true, transient: false, reasons: [] };
   state.enabled = [];
   state.merging = [];
+  state.appCommit = undefined;
+  state.deploys = [];
+  state.live = new Set();
+  state.taskError = null;
+  state.tasks = [];
 });
 
 describe("auto-merge", () => {
@@ -224,9 +269,10 @@ describe("auto-merge", () => {
     expect(state.merges).toHaveLength(1);
   });
 
-  it("retries a GitHub 5xx but keeps a merge refusal final", async () => {
+  it("leaves a GitHub 5xx on merge to be settled but keeps a merge refusal final", async () => {
     state.mergeResult = { ok: false, status: 502, message: "Bad gateway" };
-    expect(await processPull(42)).toBe("retrying");
+    expect(await processPull(42)).toBe("waiting");
+    expect(row()).toMatchObject({ decision: "merging" });
     expect(state.posts).toEqual([]);
     state.rows.clear();
     state.mergeResult = { ok: false, status: 405, message: "Repository rule violations found" };
@@ -257,5 +303,43 @@ describe("auto-merge", () => {
     state.merging = [{ pullNumber: 42, headSha: "head1", targets: [], mergedAt: new Date() }];
     state.rows.clear();
     expect(await settleMerging()).toBe(0);
+  });
+
+  it("records a merged pull request without a squash commit as merged, never blocked", async () => {
+    state.merging = [{ pullNumber: 42, headSha: "head1", targets: [], mergedAt: new Date(Date.now() - 60 * 60_000) }];
+    state.pull = { state: "closed", merged: true, mergeCommitSha: null };
+    expect(await settleMerging()).toBe(1);
+    expect(row()).toMatchObject({ decision: "merged", mergeSha: null });
+    expect(state.posts[0].text).toContain("GitHub did not say which squash commit");
+  });
+
+  it("does not turn an in-flight merge into a retry", async () => {
+    state.rows.set("42:head1", { decision: "merging", headSha: "head1", reason: null });
+    state.review = { pass: false, transient: true, reasons: ["Jev failed: timeout"] };
+    const { recordRetry } = await import("../../lib/self-modify-merge/store.ts");
+    expect(await recordRetry(42, "head1", "timeout", [])).toBeNull();
+    expect(row()).toMatchObject({ decision: "merging" });
+  });
+
+  it("releases the live claim when the verification task can't be created, then retries", async () => {
+    state.appCommit = "a".repeat(40);
+    state.deploys = [{ id: "m1", pullNumber: 42, mergeSha: "squash", targets: ["skill:x"], channelId: "C_SELF_REVIEW", threadTs: "1.0" }];
+    state.taskError = new Error("database down");
+    expect(await detectLive()).toBe(0);
+    expect(state.live.has("m1")).toBe(false);
+    expect(state.posts).toEqual([]);
+    state.taskError = null;
+    expect(await detectLive()).toBe(1);
+    expect(state.tasks).toEqual(["1.0"]);
+    expect(state.posts).toHaveLength(1);
+    expect(await detectLive()).toBe(0);
+  });
+
+  it("starts a thread when the merged pull request has none", async () => {
+    state.appCommit = "a".repeat(40);
+    state.deploys = [{ id: "m2", pullNumber: 42, mergeSha: "squash", targets: ["skill:x"], channelId: null, threadTs: null }];
+    expect(await detectLive()).toBe(1);
+    expect(state.posts[0]).toMatchObject({ channel: "C_SELF_REVIEW" });
+    expect(state.tasks).toEqual(["1.0"]);
   });
 });
