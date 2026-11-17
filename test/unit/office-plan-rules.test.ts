@@ -31,11 +31,16 @@ describe("crowding", () => {
   });
 
   it("is crowded when a visit is recorded", () => {
-    expect(crowding({ ...base, visitNotes: ["zespół z Wrocławia"] })).toEqual({ crowded: true, reasons: ["przyjeżdża: zespół z Wrocławia"] });
+    expect(crowding({ ...base, visitNotes: ["zespół z Wrocławia"] })).toEqual({
+      crowded: true,
+      reasons: ["przyjeżdża: zespół z Wrocławia"],
+    });
   });
 
   it("is crowded when owners' desks are needed", () => {
-    expect(crowding({ ...base, demand: 6, supply: 5 }).reasons).toEqual(["6 osób bez własnego biurka, a wolnych biurek bez właściciela jest 5"]);
+    expect(crowding({ ...base, demand: 6, supply: 5 }).reasons).toEqual([
+      "6 osób bez własnego biurka, a wolnych biurek bez właściciela jest 5",
+    ]);
     expect(crowding({ ...base, demand: 5, supply: 5 }).crowded).toBe(false);
   });
 
@@ -45,7 +50,15 @@ describe("crowding", () => {
   });
 
   it("declines Polish plurals", () => {
-    expect([1, 2, 4, 5, 12, 22, 25].map(peopleCount)).toEqual(["1 osoba", "2 osoby", "4 osoby", "5 osób", "12 osób", "22 osoby", "25 osób"]);
+    expect([1, 2, 4, 5, 12, 22, 25].map(peopleCount)).toEqual([
+      "1 osoba",
+      "2 osoby",
+      "4 osoby",
+      "5 osób",
+      "12 osób",
+      "22 osoby",
+      "25 osób",
+    ]);
   });
 });
 
