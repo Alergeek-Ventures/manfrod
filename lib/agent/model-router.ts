@@ -1,10 +1,10 @@
-import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { experimental_decide as decide, wrapLanguageModel, type ModelMessage } from "ai";
 import { config } from "../config.ts";
 import { AGENT_MODEL, BRAIN_MODEL, openrouterProvider } from "../llm/index.ts";
 import { singleToolResultBreakpoint } from "../llm/cache-breakpoints.ts";
 import { logger } from "../log.ts";
 import { TIME_NOTE_HEADER } from "./prompts.ts";
+import { jevEnabled, jevModel } from "../llm/jev.ts";
 
 const log = logger("ModelRouter");
 
@@ -62,10 +62,10 @@ function transcript(messages: readonly ModelMessage[]): string {
 }
 
 export async function chooseRoute(messages: readonly ModelMessage[]): Promise<Route> {
-  if (!config.typesafeApiKey) return DEFAULT_ROUTE;
+  if (!jevEnabled()) return DEFAULT_ROUTE;
   try {
     const result = await decide({
-      model: typeSafeAi.decisionModel(config.decisionModel),
+      model: jevModel(),
       state: { conversation: transcript(messages) },
       questions: {
         model: {

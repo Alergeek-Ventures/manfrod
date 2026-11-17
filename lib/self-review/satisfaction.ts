@@ -1,4 +1,3 @@
-import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { experimental_decide as decide } from "ai";
 import { and, eq, gte, sql } from "drizzle-orm";
 import { getUser, isSystemUser } from "../accounts.ts";
@@ -9,6 +8,7 @@ import { logger } from "../log.ts";
 import { getRecentSessionMessages } from "../memory/messages.ts";
 import { getPermalink } from "../slack/api.ts";
 import { BAD_RATING, INFERRED_RATING } from "./rules.ts";
+import { jevEnabled, jevModel } from "../llm/jev.ts";
 
 const { messages, messageFeedback, selfReviewSessions } = tables;
 const log = logger("SelfReview.Satisfaction");
@@ -66,7 +66,7 @@ export function judgeInput(history: Message[]): JudgeInput {
 
 async function judge(input: JudgeInput): Promise<{ verdict: Exclude<Verdict, "skipped">; reply: string }> {
   const result = await decide({
-    model: typeSafeAi.decisionModel(config.decisionModel),
+    model: jevModel(),
     state: { conversation: input.transcript },
     questions: {
       verdict: { type: "choice", instructions: INSTRUCTIONS, criteria: VERDICT_CRITERIA },
@@ -154,7 +154,7 @@ export async function markJudged(sessionKey: string, judgedUntil: Date, verdict:
 }
 
 export async function reviewSatisfaction(excludeChannelId: string | null): Promise<{ judged: number; unsatisfied: number }> {
-  if (!config.typesafeApiKey) return { judged: 0, unsatisfied: 0 };
+  if (!jevEnabled()) return { judged: 0, unsatisfied: 0 };
   let judged = 0;
   let unsatisfied = 0;
   for (const { sessionKey, last } of await sessionsToJudge(Date.now(), excludeChannelId)) {

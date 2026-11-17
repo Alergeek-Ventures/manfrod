@@ -1,8 +1,8 @@
-import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { experimental_decide as jevDecide } from "ai";
 import { config } from "../config.ts";
 import { PRIMARY_MODEL, generateSimple, system, user } from "../llm/index.ts";
 import { logger } from "../log.ts";
+import { jevEnabled, jevModel } from "../llm/jev.ts";
 
 const log = logger("ResponseGate");
 
@@ -124,7 +124,7 @@ const EMOJI_CRITERIA = {
 
 async function decideWithJev(history: string, incoming: string): Promise<GateDecision> {
   const result = await jevDecide({
-    model: typeSafeAi.decisionModel(config.decisionModel),
+    model: jevModel(),
     state: { recent_conversation: history, new_messages: incoming },
     questions: {
       action: { type: "choice", instructions: SYSTEM_MESSAGE, criteria: ACTION_CRITERIA },
@@ -156,7 +156,7 @@ async function decideWithLlm(history: string, incoming: string): Promise<GateDec
 export async function decide(recentTranscript: string[], newMessages: string[]): Promise<GateDecision> {
   const history = recentTranscript.length === 0 ? "(none)" : recentTranscript.map(tail).join("\n");
   const incoming = newMessages.map(tail).join("\n");
-  if (config.typesafeApiKey) {
+  if (jevEnabled()) {
     try {
       return await decideWithJev(history, incoming);
     } catch (error) {
