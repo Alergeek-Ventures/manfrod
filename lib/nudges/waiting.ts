@@ -8,6 +8,7 @@ import { localToday } from "../time.ts";
 import { run } from "./compose.ts";
 import { firmowidSessionActive, isAbsent, nudgeablePeople, SlackWorkspace, wroteToday, type SlackThread } from "./signals.ts";
 import { handled, isEnabled, recordDelivery } from "./store.ts";
+import { routineText } from "../routines.ts";
 
 const LOOKBACK_HOURS = 72;
 const MIN_AGE_MINUTES = 45;
@@ -20,10 +21,6 @@ const TAIL_CHARS = 200;
 const OWN_MESSAGES = 15;
 
 const log = logger("Nudges.Waiting");
-
-const GUIDANCE = `This person just started their workday. Tell them, briefly, about Slack threads where someone is still waiting for their answer or action, and about things they promised to do that are still open and due around now. Skip FYIs, thank-yous, questions this person or someone else already answered (also in a separate channel message right after), anything their own later messages elsewhere show they already answered, did or handled, matters that look closed, and anything older that has clearly gone stale. If nothing genuinely needs them, do not send.`;
-
-const FOLLOW_UP = `Gdy odpowie: jeśli chce coś odpisać albo zobaczyć, przeczytaj wątek przez read-slack-thread i pomóż. Jeśli coś jest już załatwione, przyjmij to i nie wracaj do tego.`;
 
 export interface WaitingThread {
   channelId: string;
@@ -180,7 +177,17 @@ export async function runWorkStartNudges(today = localToday()): Promise<number> 
       ]
         .filter(Boolean)
         .join("\n\n");
-      if (await run({ kind: "waiting", period: today, person, guidance: GUIDANCE, context, followUp: FOLLOW_UP })) sent += 1;
+      if (
+        await run({
+          kind: "waiting",
+          period: today,
+          person,
+          guidance: routineText("work-start", "Message"),
+          context,
+          followUp: routineText("work-start", "When they reply"),
+        })
+      )
+        sent += 1;
     } catch (error) {
       log.error(`Nudges.Waiting: failed for ${person.id}: ${(error as Error).message}`);
     }

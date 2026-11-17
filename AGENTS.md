@@ -26,7 +26,7 @@ Manfrod is a Slack AI agent with a memory graph, written in TypeScript on eve (a
 - `lib/` holds all domain code, shared by the agent and the web app. Keep it free of `next/*` imports
 - The languages Manfrod writes in (internal vs. client channels) are admin settings in `agent_settings`, edited in the panel's Agent tab; `lib/agent-settings.ts` adds them to every system prompt, so never hardcode a reply language in prompts
 - `agent/instructions.md` is the system prompt every run gets, background runs included; `agent/instructions/context.ts` adds the rest per turn (thread rules, soul, context, languages, secrets and tasks in conversations, a short preamble in background runs) from `lib/agent/system-prompt.ts`
-- `agent/skills/<name>/SKILL.md` are native eve skills the model loads with `eve__skill`. Prompts run in the background by Inngest (cron skills, Firmowid check-ins) live in `agent/routines/<name>.md`, loaded by `lib/routines.ts`; cron routines declare `cron:` in the frontmatter
+- `agent/skills/<name>/SKILL.md` are native eve skills the model loads with `eve__skill`. Everything Manfrod does on its own is described in `agent/routines/<name>/ROUTINE.md`, loaded by `lib/routines.ts`: cron skills and Firmowid check-ins (the whole file is the prompt; cron routines declare `cron:` in the frontmatter), and the instructions for every nudge, holiday check and weekly project summary, whose code reads one `## Section` by heading with `routineText()` and fills `{{placeholders}}`. Change what these messages say there, not in TypeScript; keep the headings and placeholders the code reads
 - `app/` is the Next.js App Router. Prefer server components and server actions; client components only where interactivity needs them, and never import values from a `"use client"` module into a server component
 
 ## Writing tools
@@ -54,7 +54,7 @@ Manfrod is a Slack AI agent with a memory graph, written in TypeScript on eve (a
 
 - All background work runs as Inngest functions in `lib/inngest/functions.ts`; crons are evaluated in `Europe/Warsaw`
 - User-visible scheduled work (reminders, follow-ups, skill triggers) goes through `lib/jobs/index.ts` so it stays listable and cancellable
-- Messages Manfrod sends on its own (`lib/nudges/`) gather data in code, let `decide()` in `lib/nudges/compose.ts` choose whether to send and draft it, and respect the per-person `nudge_preferences` (`set-proactive-preferences`) and per-channel `channel_nudges` (`set-channel-summaries`)
+- Messages Manfrod sends on its own (`lib/nudges/`) gather data in code, let `decide()` in `lib/nudges/compose.ts` choose whether to send and draft it (its instructions are the `proactive-style` routine plus the nudge's routine), and respect the per-person `nudge_preferences` (`set-proactive-preferences`) and per-channel `channel_nudges` (`set-channel-summaries`)
 
 ## Tests
 

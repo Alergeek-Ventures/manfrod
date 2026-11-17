@@ -5,7 +5,7 @@ describe("pathViolation", () => {
   it("allows skills, routines, tools, prompts and unit tests", () => {
     for (const path of [
       "agent/skills/desk-booking/SKILL.md",
-      "agent/routines/leave-digest.md",
+      "agent/routines/leave-digest/ROUTINE.md",
       "agent/tools/reserve-desk.ts",
       "agent/lib/office.ts",
       "agent/channels/slack.ts",
