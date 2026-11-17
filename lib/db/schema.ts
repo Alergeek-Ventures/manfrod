@@ -10,6 +10,7 @@ import {
   channelNudges,
   conversations,
   deskReservations,
+  deskPlans,
   desks,
   facts,
   githubAccounts,
@@ -29,6 +30,10 @@ import {
   nodes,
   nudgeDeliveries,
   nudgePreferences,
+  officeLayouts,
+  officeMembers,
+  officePresence,
+  officeVisits,
   projectLinearConnections,
   projects,
   recurringReminders,
@@ -62,6 +67,11 @@ export type ChannelMapping = typeof channelMappings.$inferSelect;
 export type RecurringReminder = typeof recurringReminders.$inferSelect;
 export type Desk = typeof desks.$inferSelect;
 export type DeskReservation = typeof deskReservations.$inferSelect;
+export type DeskPlan = typeof deskPlans.$inferSelect;
+export type OfficeLayout = typeof officeLayouts.$inferSelect;
+export type OfficeMember = typeof officeMembers.$inferSelect;
+export type OfficePresence = typeof officePresence.$inferSelect;
+export type OfficeVisit = typeof officeVisits.$inferSelect;
 export type McpConnection = typeof mcpConnections.$inferSelect;
 export type McpCustomProvider = typeof mcpCustomProviders.$inferSelect;
 export type McpOauthClient = typeof mcpOauthClients.$inferSelect;

@@ -1,4 +1,4 @@
-import { pgTable, type AnyPgColumn, index, foreignKey, uuid, text, vector, timestamp, varchar, uniqueIndex, boolean, jsonb, date, integer, bigint, numeric, bigserial, check, primaryKey, pgSequence, pgEnum } from "drizzle-orm/pg-core"
+import { pgTable, type AnyPgColumn, index, foreignKey, uuid, text, vector, timestamp, varchar, uniqueIndex, boolean, jsonb, date, integer, bigint, numeric, bigserial, check, unique, primaryKey, pgSequence, pgEnum } from "drizzle-orm/pg-core"
 import { sql } from "drizzle-orm"
 import { bytea } from "../../lib/db/types.ts"
 
@@ -108,14 +108,88 @@ export const conversations = pgTable("conversations", {
 export const deskReservations = pgTable("desk_reservations", {
 	id: uuid().defaultRandom().primaryKey().notNull(),
 	deskId: uuid("desk_id").notNull(),
-	userId: uuid("user_id").notNull(),
+	userId: uuid("user_id"),
 	date: date().notNull(),
 	note: varchar({ length: 255 }),
 	insertedAt: timestamp("inserted_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
 	updatedAt: timestamp("updated_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
+	guestName: text("guest_name"),
+	source: text().default('manual').notNull(),
 }, (table) => [
 	uniqueIndex().using("btree", table.deskId.asc().nullsLast().op("date_ops"), table.date.asc().nullsLast().op("uuid_ops")),
 	index().using("btree", table.userId.asc().nullsLast().op("date_ops"), table.date.asc().nullsLast().op("date_ops")),
+	check("desk_reservations_person", sql`(user_id IS NOT NULL) OR (guest_name IS NOT NULL)`),
+	check("desk_reservations_source", sql`source = ANY (ARRAY['manual'::text, 'plan'::text])`),
+]);
+
+export const officeLayouts = pgTable("office_layouts", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	name: text().notNull(),
+	width: integer().default(60).notNull(),
+	height: integer().default(40).notNull(),
+	elements: jsonb().default([]).notNull(),
+	planChannelId: text("plan_channel_id"),
+	crowdedThreshold: integer("crowded_threshold").default(6).notNull(),
+	updatedAt: timestamp("updated_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
+}, (table) => [
+	check("office_layouts_crowded_threshold", sql`crowded_threshold > 0`),
+	check("office_layouts_height", sql`(height >= 10) AND (height <= 400)`),
+	check("office_layouts_width", sql`(width >= 10) AND (width <= 400)`),
+]);
+
+export const officeMembers = pgTable("office_members", {
+	userId: uuid("user_id").primaryKey().notNull(),
+	layoutId: uuid("layout_id").notNull(),
+	insertedAt: timestamp("inserted_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
+}, (table) => [
+]);
+
+export const officePresence = pgTable("office_presence", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	userId: uuid("user_id").notNull(),
+	date: date().notNull(),
+	status: text().notNull(),
+	source: text().notNull(),
+	note: text(),
+	updatedAt: timestamp("updated_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
+}, (table) => [
+	index().using("btree", table.date.asc().nullsLast().op("date_ops")),
+	unique("office_presence_user_date").on(table.date, table.userId),
+	check("office_presence_source", sql`source = ANY (ARRAY['chat'::text, 'button'::text])`),
+	check("office_presence_status", sql`status = ANY (ARRAY['office'::text, 'remote'::text, 'leave'::text])`),
+]);
+
+export const officeVisits = pgTable("office_visits", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	layoutId: uuid("layout_id").notNull(),
+	startsOn: date("starts_on").notNull(),
+	endsOn: date("ends_on").notNull(),
+	userIds: uuid("user_ids").array().default(sql`ARRAY[]::uuid[]`).notNull(),
+	guests: integer().default(0).notNull(),
+	note: text().notNull(),
+	createdBy: uuid("created_by"),
+	cancelledAt: timestamp("cancelled_at", { mode: 'date' }),
+	insertedAt: timestamp("inserted_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
+}, (table) => [
+	index("office_visits_dates_index").using("btree", table.startsOn.asc().nullsLast().op("date_ops"), table.endsOn.asc().nullsLast().op("date_ops")),
+	check("office_visits_guests", sql`guests >= 0`),
+	check("office_visits_people", sql`(guests > 0) OR (cardinality(user_ids) > 0)`),
+	check("office_visits_range", sql`ends_on >= starts_on`),
+]);
+
+export const deskPlans = pgTable("desk_plans", {
+	layoutId: uuid("layout_id").notNull(),
+	date: date().notNull(),
+	status: text().notNull(),
+	reason: text(),
+	channelId: text("channel_id"),
+	messageTs: text("message_ts"),
+	headsUpTs: text("heads_up_ts"),
+	version: integer().default(1).notNull(),
+	updatedAt: timestamp("updated_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
+}, (table) => [
+	primaryKey({ columns: [table.date, table.layoutId], name: "desk_plans_pkey"}),
+	check("desk_plans_status", sql`status = ANY (ARRAY['heads_up'::text, 'declined'::text, 'posted'::text])`),
 ]);
 
 export const projects = pgTable("projects", {
@@ -232,15 +306,21 @@ export const desks = pgTable("desks", {
 	label: varchar({ length: 255 }).notNull(),
 	locationNote: varchar("location_note", { length: 255 }),
 	equipment: varchar({ length: 255 }).array().default(sql`ARRAY[]::varchar[]`).notNull(),
-	mapX: integer("map_x"),
-	mapY: integer("map_y"),
-	permanentOwner: varchar("permanent_owner", { length: 255 }),
 	active: boolean().default(true).notNull(),
 	insertedAt: timestamp("inserted_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
 	updatedAt: timestamp("updated_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
+	layoutId: uuid("layout_id").notNull(),
+	x: integer(),
+	y: integer(),
+	width: integer().default(6).notNull(),
+	height: integer().default(4).notNull(),
+	rotation: integer().default(0).notNull(),
+	ownerUserId: uuid("owner_user_id"),
 }, (table) => [
 	index().using("btree", table.active.asc().nullsLast().op("bool_ops")),
 	uniqueIndex().using("btree", table.label.asc().nullsLast().op("text_ops")),
+	index().using("btree", table.ownerUserId.asc().nullsLast().op("uuid_ops")),
+	check("desks_rotation", sql`rotation = ANY (ARRAY[0, 90, 180, 270])`),
 ]);
 
 export const mcpConnections = pgTable("mcp_connections", {

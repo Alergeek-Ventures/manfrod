@@ -1,5 +1,5 @@
 import { relations } from "drizzle-orm/relations";
-import { conversations, nodes, projects, users, recurringReminders, links, auditEvents, messages, desks, deskReservations, projectMemberships, facts, mcpCustomProviders, googleIdentities, userTokens, channelMappings, mcpConnections, usageDailyRollups, activityDailyRollups, threadKicks, messageFeedback, kalafiorniaConnections, projectLinearConnections, linearInstallations, agentSecrets, session, account, selfReviewCases, selfReviewFindings, nudgeDeliveries, nudgePreferences } from "./schema";
+import { conversations, nodes, projects, users, recurringReminders, links, auditEvents, messages, desks, deskReservations, officeLayouts, officeMembers, officePresence, officeVisits, deskPlans, projectMemberships, facts, mcpCustomProviders, googleIdentities, userTokens, channelMappings, mcpConnections, usageDailyRollups, activityDailyRollups, threadKicks, messageFeedback, kalafiorniaConnections, projectLinearConnections, linearInstallations, agentSecrets, session, account, selfReviewCases, selfReviewFindings, nudgeDeliveries, nudgePreferences } from "./schema";
 
 export const nodesRelations = relations(nodes, ({one, many}) => ({
 	conversation: one(conversations, {
@@ -53,6 +53,10 @@ export const usersRelations = relations(users, ({one, many}) => ({
 	messages: many(messages),
 	conversations: many(conversations),
 	deskReservations: many(deskReservations),
+	desks: many(desks),
+	officeMembers: many(officeMembers),
+	officePresences: many(officePresence),
+	officeVisits: many(officeVisits),
 	projectMemberships: many(projectMemberships),
 	facts: many(facts),
 	mcpCustomProviders: many(mcpCustomProviders),
@@ -126,7 +130,58 @@ export const deskReservationsRelations = relations(deskReservations, ({one}) => 
 	}),
 }));
 
-export const desksRelations = relations(desks, ({many}) => ({
+export const officeLayoutsRelations = relations(officeLayouts, ({many}) => ({
+	desks: many(desks),
+	officeMembers: many(officeMembers),
+	officeVisits: many(officeVisits),
+	deskPlans: many(deskPlans),
+}));
+
+export const officeMembersRelations = relations(officeMembers, ({one}) => ({
+	officeLayout: one(officeLayouts, {
+		fields: [officeMembers.layoutId],
+		references: [officeLayouts.id]
+	}),
+	user: one(users, {
+		fields: [officeMembers.userId],
+		references: [users.id]
+	}),
+}));
+
+export const officePresenceRelations = relations(officePresence, ({one}) => ({
+	user: one(users, {
+		fields: [officePresence.userId],
+		references: [users.id]
+	}),
+}));
+
+export const officeVisitsRelations = relations(officeVisits, ({one}) => ({
+	user: one(users, {
+		fields: [officeVisits.createdBy],
+		references: [users.id]
+	}),
+	officeLayout: one(officeLayouts, {
+		fields: [officeVisits.layoutId],
+		references: [officeLayouts.id]
+	}),
+}));
+
+export const deskPlansRelations = relations(deskPlans, ({one}) => ({
+	officeLayout: one(officeLayouts, {
+		fields: [deskPlans.layoutId],
+		references: [officeLayouts.id]
+	}),
+}));
+
+export const desksRelations = relations(desks, ({one, many}) => ({
+	officeLayout: one(officeLayouts, {
+		fields: [desks.layoutId],
+		references: [officeLayouts.id]
+	}),
+	user: one(users, {
+		fields: [desks.ownerUserId],
+		references: [users.id]
+	}),
 	deskReservations: many(deskReservations),
 }));
 

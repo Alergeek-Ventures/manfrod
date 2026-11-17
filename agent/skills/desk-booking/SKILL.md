@@ -1,6 +1,6 @@
 ---
 name: desk-booking
-description: Reserve or look up office desk bookings for a specific date, or show the desk map. Use when someone asks to book/reserve a desk, cancel a booking, asks who's sitting where or what's free on a given day, or asks to add/edit a desk (equipment, location, map position).
+description: Reserve or look up office desk bookings for a specific date, or show the desk map. Use when someone asks to book/reserve a desk, cancel a booking, asks who's sitting where or what's free on a given day, or asks to add/edit a desk (equipment, location, owner).
 ---
 
 # Desk booking
@@ -15,9 +15,11 @@ biurko z monitorem", "coś z mac mini") → call `list-desks` first, pick a
 free desk matching the requirement, call `reserve-desk` for it, and tell the
 user which desk you picked.
 
-If `reserve-desk` reports the desk is already booked or permanently assigned
-to someone, say so plainly and suggest checking `list-desks` for
-alternatives — don't retry with the same desk.
+Some desks belong to someone. Others can book an owned desk only on a day
+its owner is away; `list-desks` shows such a desk as free with the owner
+away. If `reserve-desk` reports the desk is already booked or that it belongs
+to someone who hasn't said they're away, say so plainly and suggest a free
+desk from `list-desks` — don't retry with the same desk.
 
 A user can only hold one desk per date. If someone already has a desk booked
 on a date and asks to change it (a different desk, same day), just call
@@ -38,8 +40,12 @@ pass that channel's ID as `channel_id` — don't tell them you can't, and
 don't ask them to repeat the request in that other channel.
 
 ## Managing desks (admin only)
-User asks to add/edit/remove a desk, change its equipment, location, or map
-position → call `add-desk`, `update-desk`, or `deactivate-desk` directly.
+User asks to add/edit/remove a desk, change its equipment, location or owner
+→ call `add-desk`, `update-desk`, or `deactivate-desk` directly. Pass the
+owner as their Slack ID when you have it. Where a desk stands on the map, its
+size and rotation, and the rooms and walls are edited by dragging in the
+panel at /admin/office — point admins there instead of trying to move desks
+from chat.
 Don't pre-filter based on who's asking — the tool itself checks admin
 status and returns a refusal message if the caller isn't allowed to; just
 relay whatever it says.

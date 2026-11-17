@@ -12,21 +12,23 @@ export default defineManfrodTool({
   }),
   execute: ({ desk_label, date, note }, ctx) =>
     withDate(date, async (day) => {
-      const result = await reserveDesk(desk_label, ctx.userId, day, note ?? null);
+      const result = await reserveDesk(desk_label, { userId: ctx.userId }, day, { note: note ?? null });
       if (result.ok) return `Reserved desk ${result.reservation.desk.label} for ${day}.`;
       switch (result.error) {
         case "not_found":
           return `No desk found with label '${desk_label}'.`;
         case "inactive":
           return `Desk '${desk_label}' is no longer available.`;
-        case "permanent_owner":
-          return `Desk '${desk_label}' is permanently assigned to ${result.owner} and can't be booked.`;
+        case "owned":
+          return `Desk '${desk_label}' belongs to ${result.owner}, who hasn't said they're away on ${day}, so it can't be booked. Pick another desk, or ask ${result.owner} to say they won't be in that day.`;
         case "past_date":
           return "Can't reserve a desk in the past. Provide today or a future date.";
         default: {
-          const existing = (await listReservationsForDate(day)).find((reservation) => reservation.desk.label === desk_label);
+          const existing = (await listReservationsForDate(day)).find(
+            (reservation) => reservation.desk.label.toLowerCase() === desk_label.trim().toLowerCase(),
+          );
           return existing
-            ? `Desk '${desk_label}' is already booked by ${existing.user.name} on ${day}.`
+            ? `Desk '${desk_label}' is already booked by ${existing.name} on ${day}.`
             : `Could not reserve desk '${desk_label}' — invalid request.`;
         }
       }
