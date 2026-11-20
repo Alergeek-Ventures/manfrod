@@ -10,6 +10,7 @@ const sources = vi.hoisted(() => ({
   loadAbsences: vi.fn(),
   loadReservationDates: vi.fn(),
   loadStatedOffice: vi.fn(async () => [] as unknown[]),
+  loadManualSeats: vi.fn(async () => [] as unknown[]),
 }));
 const store = vi.hoisted(() => ({
   defaultLayoutId: vi.fn(async () => "layout-1"),
@@ -261,6 +262,7 @@ describe("predictOfficeDay", () => {
       layoutId: null,
       people: [],
       visits: [],
+      roster: [],
       guestList: [],
       guests: 0,
       expectedInOffice: 0,
@@ -274,13 +276,14 @@ describe("predictOfficeDay", () => {
       { id: "p2", userId: "mariusz", date: THURSDAY, status: "office", source: "chat", note: null, updatedAt: new Date() },
     ]);
     store.listVisits.mockResolvedValueOnce([
-      { ...visit, userIds: ["staszek"], createdBy: "staszek", guests: 2, note: "Odul i Mariusz będą w biurze przez dwa tygodnie próbne" },
+      { ...visit, userIds: ["staszek"], createdBy: "staszek", guests: 2, guestNames: ["Odul", "Mariusz"], note: "okres próbny" },
     ]);
     sources.loadPeople.mockImplementationOnce(async (ids: string[]) => ids.map((id) => person(id, "Staszek")));
     const prediction = await predictOfficeDay(THURSDAY, { today: TODAY });
     expect(prediction.people.filter((entry) => entry.userId === "cezary")).toHaveLength(1);
     expect(prediction.people.find((entry) => entry.userId === "mariusz")).toMatchObject({ status: "office", sources: ["explicit_chat"] });
-    expect(prediction.guestList.map((guest) => guest.name)).toEqual(["Gość 1"]);
+    expect(prediction.guestList.map((guest) => guest.name)).toEqual(["Odul (gość)"]);
     expect(prediction.guests).toBe(1);
+    expect(prediction.expectedInOffice).toBe(prediction.roster.length);
   });
 });

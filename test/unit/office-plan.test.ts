@@ -189,22 +189,13 @@ describe("summarizeDay", () => {
   });
 
   it("seats a named guest who says they are coming once, not as a guest too", () => {
-    const trial = {
-      id: "v1",
-      note: "Odul i Mariusz będą w biurze od 2026-11-19 przez dwa tygodnie próbne, pracując przy Firmowidzie.",
-      guests: 2,
-      userIds: ["staszek"],
-      createdBy: "staszek",
-    };
+    const trial = { id: "v1", note: "okres próbny", guests: 2, guestNames: ["Odul", "Mariusz"], userIds: ["staszek"] };
     const people = [person("staszek", "office", "visit"), { ...person("mariusz", "office"), name: "Mariusz Ciastoń" }];
-    const legacy = day(prediction(people, [trial]));
-    expect(legacy.people.map((p) => p.name)).toEqual(["staszek", "Mariusz Ciastoń", "Gość 1"]);
-    expect(legacy.expectedInOffice).toBe(3);
-    expect(legacy.reasons.join(" ")).not.toContain("2026-11-19");
-
-    const named = day(prediction(people, [{ ...trial, userIds: [], guestNames: ["Odul", "Mariusz"] }]));
-    expect(named.people.map((p) => p.name)).toEqual(["staszek", "Mariusz Ciastoń", "Odul (gość)"]);
-    expect(named.visits[0].summary).toBe("Odul i Mariusz");
+    const result = day(prediction(people, [trial]), [], 6, ["staszek"]);
+    expect(result.people.map((p) => p.name)).toEqual(["staszek", "Mariusz Ciastoń", "Odul (gość)"]);
+    expect(result.expectedInOffice).toBe(3);
+    expect(result.visits[0].summary).toBe("staszek, Odul i Mariusz");
+    expect(result.people.at(-1)?.key).toBe("guest:v1:odul (gość)");
   });
 
   it("does not seat a guest twice when that person booked a desk by name", () => {
@@ -212,7 +203,8 @@ describe("summarizeDay", () => {
       prediction([person("ala", "office")], [{ id: "v1", note: "goście", guests: 1, guestNames: ["Odul"], userIds: [] }]),
       [{ deskId: "a", userId: null, guestName: "Odul", name: "Odul", source: "manual" }],
     );
-    expect(result.people.map((p) => p.name)).toEqual(["ala"]);
+    expect(result.people.map((p) => p.name)).toEqual(["ala", "Odul"]);
+    expect(result.expectedInOffice).toBe(2);
   });
 
   it("treats a long stay as people in the office, not a visit, and suggests membership", () => {

@@ -5,6 +5,7 @@ import { habitWindowStart, resolvePresence, type PresenceResolution, type Stated
 import {
   loadAbsences,
   loadExplicit,
+  loadManualSeats,
   loadMembers,
   loadPeople,
   loadReservationDates,
@@ -12,7 +13,8 @@ import {
   type PersonRef,
 } from "./presence-sources.ts";
 import { defaultLayoutId, listVisits } from "./presence-store.ts";
-import { visitGuests, type VisitGuest } from "./visit-guests.ts";
+import { dayRoster, type RosterPerson } from "./roster.ts";
+import type { VisitGuest } from "./visit-guests.ts";
 
 export { resolvePresence } from "./presence-resolve.ts";
 export type { PresenceResolution, PresenceSignals, PresenceStatus, StatedStatus } from "./presence-resolve.ts";
@@ -36,6 +38,7 @@ export interface OfficeDayPrediction {
   layoutId: string | null;
   people: PersonPresence[];
   visits: OfficeVisit[];
+  roster: RosterPerson[];
   guestList: VisitGuest[];
   guests: number;
   expectedInOffice: number;
@@ -54,23 +57,18 @@ async function mapLimited<T, R>(items: T[], limit: number, run: (item: T) => Pro
   return results;
 }
 
-export const presentPerson = (person: Pick<PersonRef, "userId" | "name">) => ({
-  key: `user:${person.userId}`,
-  userId: person.userId,
-  name: person.name,
-});
-
 const STATUS_ORDER = { office: 0, remote: 1, leave: 2, unknown: 3 };
 
 export async function predictOfficeDay(date: string, opts: { layoutId?: string; today?: string } = {}): Promise<OfficeDayPrediction> {
   const today = opts.today ?? localToday();
   const layoutId = opts.layoutId ?? (await defaultLayoutId());
-  if (!layoutId) return { date, layoutId: null, people: [], visits: [], guestList: [], guests: 0, expectedInOffice: 0 };
+  if (!layoutId) return { date, layoutId: null, people: [], visits: [], roster: [], guestList: [], guests: 0, expectedInOffice: 0 };
 
-  const [members, visits, stated] = await Promise.all([
+  const [members, visits, stated, manual] = await Promise.all([
     loadMembers(layoutId),
     listVisits(date, date, { layoutId }),
     loadStatedOffice(date),
+    loadManualSeats(layoutId, date),
   ]);
   const memberIds = new Set(members.map((member) => member.userId));
   const visitByUser = new Map<string, OfficeVisit>();
@@ -110,15 +108,15 @@ export async function predictOfficeDay(date: string, opts: { layoutId?: string; 
     (a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || b.confidence - a.confidence || (a.name ?? "").localeCompare(b.name ?? ""),
   );
 
-  const inOffice = predicted.filter((person) => person.status === "office");
-  const guestList = visitGuests(visits, inOffice.map(presentPerson));
+  const roster = dayRoster({ people: predicted, visits, manual, memberIds });
   return {
     date,
     layoutId,
     people: predicted,
     visits,
-    guestList,
-    guests: guestList.length,
-    expectedInOffice: inOffice.length + guestList.length,
+    roster: roster.people,
+    guestList: roster.guestList,
+    guests: roster.guestList.length,
+    expectedInOffice: roster.people.length,
   };
 }

@@ -6,7 +6,7 @@ import { logger } from "../log.ts";
 import { decide } from "../nudges/compose.ts";
 import { getPermalink, post, type SlackBody } from "../slack/api.ts";
 import { addDays } from "../time.ts";
-import { assignDesks, personKey, seatingSignature, type AssignPerson, type AssignResult } from "./assign.ts";
+import { assignDesks, personKey, seatingSignature, type AssignResult } from "./assign.ts";
 import { isConfirmedAway } from "./away.ts";
 import { loadOffice, type Office } from "./layout.ts";
 import { planMessage, type PlanSeat } from "./plan-message.ts";
@@ -25,14 +25,15 @@ import {
 import { predictOfficeDay, type OfficeDayPrediction } from "./presence.ts";
 import { loadMembers } from "./presence-sources.ts";
 import { deskMapUrl } from "./url.ts";
-import { visitGuests, visitPlace, type PresentPerson } from "./visit-guests.ts";
+import { dayRoster, type RosterPerson } from "./roster.ts";
+import { visitPlace } from "./visit-guests.ts";
 
 const { deskReservations, projectMemberships } = tables;
 const log = logger("Office.Plan");
 
 export const HISTORY_DAYS = 60;
 
-export type PlannedPerson = AssignPerson & { slackId: string | null };
+export type PlannedPerson = RosterPerson;
 
 export type VisitLine = { id: string; summary: string; long: boolean };
 
@@ -71,38 +72,22 @@ function visitLine(visit: OfficeVisit, names: ReadonlyMap<string, string>): Visi
 }
 
 export function summarizeDay({ date, office, prediction, reservations: all, memberIds }: DayInput): DayEvaluation {
-  const visitGroups = new Map<string, string[]>();
-  for (const visit of prediction.visits)
-    for (const userId of visit.userIds) visitGroups.set(userId, [...(visitGroups.get(userId) ?? []), `visit:${visit.id}`]);
-
-  const present = prediction.people
-    .filter((person) => person.status === "office")
-    .map((person): PlannedPerson => ({
-      key: personKey({ userId: person.userId, guestName: null }),
-      userId: person.userId,
-      guestName: null,
-      name: person.name ?? person.slackId,
-      groups: visitGroups.get(person.userId) ?? [],
-      slackId: person.slackId,
-    }));
-
-  const deskIds = new Set(office.desks.map((desk) => desk.id));
-  const reservations = all.filter((reservation) => deskIds.has(reservation.deskId));
+  const activeDesks = new Set(office.desks.filter((desk) => desk.active).map((desk) => desk.id));
+  const reservations = all.filter((reservation) => activeDesks.has(reservation.deskId));
   const manual = reservations.filter((reservation) => reservation.source === "manual");
-  const seatedByName: PresentPerson[] = [
-    ...present.map((person) => ({ key: person.key, userId: person.userId, name: person.name })),
-    ...manual.map((reservation) => ({ key: personKey(reservation), userId: reservation.userId, name: reservation.name })),
-  ];
-  const guestList = visitGuests(prediction.visits, seatedByName);
-  const guests = guestList.map((guest): PlannedPerson => ({
-    key: personKey({ userId: null, guestName: guest.name }),
-    userId: null,
-    guestName: guest.name,
-    name: guest.name,
-    groups: [`visit:${guest.visitId}`],
-    slackId: null,
-  }));
-  const people = [...present, ...guests];
+  const roster = dayRoster({
+    people: prediction.people,
+    visits: prediction.visits,
+    manual: manual.map((reservation) => ({
+      userId: reservation.userId,
+      guestName: reservation.guestName,
+      name: reservation.name,
+      slackId: reservation.user?.slackId ?? null,
+    })),
+    memberIds,
+  });
+  const people = roster.people;
+  const guestList = roster.guestList;
   const away = new Set(prediction.people.filter(isConfirmedAway).map((person) => person.userId));
 
   const manualKeys = new Set(manual.map(personKey));
@@ -217,6 +202,11 @@ async function prepareLocked(tx: Executor, date: string, opts: { today?: string;
     getPlan(office.layout.id, date, tx),
   ]);
   const planned = reservations.filter((reservation) => reservation.source === "plan");
+  const guestKeys = new Map(
+    people.flatMap((person) => (person.userId ? [] : [[(person.guestName ?? "").toLowerCase(), person.key] as const])),
+  );
+  const rosterKey = (reservation: ReservationWithDesk) =>
+    (!reservation.userId && guestKeys.get((reservation.guestName ?? "").toLowerCase())) || personKey(reservation);
   const result = assignDesks({
     desks: office.desks,
     people: people.map((person) => ({ ...person, groups: [...person.groups, ...((person.userId && groups.get(person.userId)) || [])] })),
@@ -229,7 +219,7 @@ async function prepareLocked(tx: Executor, date: string, opts: { today?: string;
         guestName: reservation.guestName,
         name: reservation.name,
       })),
-    previous: new Map(planned.map((reservation) => [personKey(reservation), reservation.deskId])),
+    previous: new Map(planned.map((reservation) => [rosterKey(reservation), reservation.deskId])),
     recentDesk,
   });
   const seating = seatingSignature(result);

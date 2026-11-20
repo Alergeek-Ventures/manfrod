@@ -33,6 +33,23 @@ export async function loadStatedOffice(date: string): Promise<PersonRef[]> {
     .where(and(eq(officePresence.date, date), eq(officePresence.status, "office")));
 }
 
+export async function loadManualSeats(layoutId: string, date: string) {
+  const rows = await db
+    .select({ userId: deskReservations.userId, guestName: deskReservations.guestName, name: users.name, slackId: users.slackId })
+    .from(deskReservations)
+    .innerJoin(desks, eq(desks.id, deskReservations.deskId))
+    .leftJoin(users, eq(users.id, deskReservations.userId))
+    .where(
+      and(eq(desks.layoutId, layoutId), eq(desks.active, true), eq(deskReservations.date, date), eq(deskReservations.source, "manual")),
+    );
+  return rows.map((row) => ({
+    userId: row.userId,
+    guestName: row.guestName,
+    name: row.name ?? row.guestName ?? row.slackId ?? "?",
+    slackId: row.slackId,
+  }));
+}
+
 export async function loadExplicit(userIds: string[], date: string): Promise<OfficePresence[]> {
   if (userIds.length === 0) return [];
   return db

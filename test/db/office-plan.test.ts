@@ -32,7 +32,7 @@ vi.mock("../../lib/nudges/compose.ts", () => ({ decide: async () => null }));
 
 const { db, tables } = await import("../../lib/db/index.ts");
 const layout = await import("../../lib/office/layout.ts");
-const { postPlan, preparePlan, refreshPlan } = await import("../../lib/office/plan.ts");
+const { planSummary, postPlan, preparePlan, refreshPlan } = await import("../../lib/office/plan.ts");
 const { getPlan, planAwayUserIds, updatePlan } = await import("../../lib/office/plan-store.ts");
 const { recordVisit } = await import("../../lib/office/presence-store.ts");
 const desksLib = await import("../../lib/desks.ts");
@@ -240,5 +240,27 @@ describe.skipIf(!enabled)("posting and refreshing a plan", () => {
     const image = last.blocks.find((block: any) => block.type === "image");
     expect(image.image_url).toContain(`v=${plan!.version}&`);
     expect(new Set((await planSeats()).map((row) => row.userId)).size).toBe((await planSeats()).length);
+  });
+
+  it("leaves Slack and the version alone when nothing changed", async () => {
+    await refreshPlan(postDate);
+    const before = await getPlan(layoutId, postDate);
+    const updates = slack.updates.length;
+    const result = await refreshPlan(postDate);
+    expect(result).toMatchObject({ ok: true, updated: false });
+    expect(slack.updates.length).toBe(updates);
+    expect((await getPlan(layoutId, postDate))?.version).toBe(before?.version);
+  });
+
+  it("puts the same headcount in the evaluation, the headline and the seats on the map", async () => {
+    const prepared = await preparePlan(postDate);
+    const seated = prepared.result.assignments.length + prepared.result.overflow.length;
+    expect(prepared.evaluation.expectedInOffice).toBe(seated);
+    expect(prepared.evaluation.prediction.expectedInOffice).toBe(seated);
+    expect(planSummary(prepared).headline).toContain(`: ${seated} os`);
+    const { loadMapState } = await import("../../lib/office/map.ts");
+    const map = await loadMapState(postDate, { awayUserIds: new Set(prepared.plan.awayUserIds) });
+    const occupied = map.desks.filter((desk) => desk.status === "taken" || desk.status === "owner_present");
+    expect(occupied.length).toBe(prepared.result.assignments.length);
   });
 });
