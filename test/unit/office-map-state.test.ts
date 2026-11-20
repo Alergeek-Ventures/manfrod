@@ -48,6 +48,20 @@ describe("buildMapState", () => {
     expect(byLabel.OwnerOut).toMatchObject({ status: "owner_away", name: "Piotr" });
   });
 
+  it("shows a desk booked by someone confirmed away as free", () => {
+    const state = buildMapState({
+      date: "2026-11-17",
+      layout,
+      desks: [desk("B1"), desk("O1", { ownerUserId: "booker", ownerName: "Staszek" })],
+      reservations: [booking("B1"), booking("O1")],
+      awayUserIds: new Set(["booker"]),
+    });
+    expect(state.desks.map((item) => [item.label, item.status, item.reservation])).toEqual([
+      ["B1", "free", null],
+      ["O1", "owner_away", null],
+    ]);
+  });
+
   it("shows who booked an owner's desk while the owner is away", () => {
     const state = buildMapState({
       date: "2026-11-17",

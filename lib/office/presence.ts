@@ -1,13 +1,34 @@
 import type { OfficeVisit } from "../db/schema.ts";
 import { localToday } from "../time.ts";
+import { isConfirmedAway } from "./away.ts";
 import { fetchFirmowidSignals } from "./presence-firmowid.ts";
 import { habitWindowStart, resolvePresence, type PresenceResolution, type StatedStatus } from "./presence-resolve.ts";
-import { loadAbsences, loadExplicit, loadMembers, loadPeople, loadReservationDates, type PersonRef } from "./presence-sources.ts";
+import {
+  loadAbsences,
+  loadExplicit,
+  loadManualSeats,
+  loadMembers,
+  loadPeople,
+  loadReservationDates,
+  loadStatedOffice,
+  type PersonRef,
+} from "./presence-sources.ts";
 import { defaultLayoutId, listVisits } from "./presence-store.ts";
+import { dayRoster, type RosterPerson } from "./roster.ts";
+import type { VisitGuest } from "./visit-guests.ts";
 
 export { resolvePresence } from "./presence-resolve.ts";
 export type { PresenceResolution, PresenceSignals, PresenceStatus, StatedStatus } from "./presence-resolve.ts";
-export { cancelVisit, clearPresence, defaultLayoutId, getVisit, listVisits, recordVisit, setPresence } from "./presence-store.ts";
+export {
+  cancelVisit,
+  clearPresence,
+  defaultLayoutId,
+  getVisit,
+  listVisits,
+  recordVisit,
+  setPresence,
+  updateVisit,
+} from "./presence-store.ts";
 
 export const FIRMOWID_CONCURRENCY = 4;
 
@@ -18,6 +39,8 @@ export interface OfficeDayPrediction {
   layoutId: string | null;
   people: PersonPresence[];
   visits: OfficeVisit[];
+  roster: RosterPerson[];
+  guestList: VisitGuest[];
   guests: number;
   expectedInOffice: number;
 }
@@ -40,14 +63,20 @@ const STATUS_ORDER = { office: 0, remote: 1, leave: 2, unknown: 3 };
 export async function predictOfficeDay(date: string, opts: { layoutId?: string; today?: string } = {}): Promise<OfficeDayPrediction> {
   const today = opts.today ?? localToday();
   const layoutId = opts.layoutId ?? (await defaultLayoutId());
-  if (!layoutId) return { date, layoutId: null, people: [], visits: [], guests: 0, expectedInOffice: 0 };
+  if (!layoutId) return { date, layoutId: null, people: [], visits: [], roster: [], guestList: [], guests: 0, expectedInOffice: 0 };
 
-  const [members, visits] = await Promise.all([loadMembers(layoutId), listVisits(date, date, { layoutId })]);
+  const [members, visits, stated, manual] = await Promise.all([
+    loadMembers(layoutId),
+    listVisits(date, date, { layoutId }),
+    loadStatedOffice(date),
+    loadManualSeats(layoutId, date),
+  ]);
   const memberIds = new Set(members.map((member) => member.userId));
   const visitByUser = new Map<string, OfficeVisit>();
   for (const visit of visits) for (const userId of visit.userIds) if (!visitByUser.has(userId)) visitByUser.set(userId, visit);
   const visitors = await loadPeople([...visitByUser.keys()].filter((userId) => !memberIds.has(userId)));
-  const people = [...members, ...visitors];
+  const known = new Set([...memberIds, ...visitors.map((person) => person.userId)]);
+  const people = [...members, ...visitors, ...stated.filter((person) => !known.has(person.userId))];
   const ids = people.map((person) => person.userId);
   const from = habitWindowStart(date, today);
 
@@ -80,7 +109,16 @@ export async function predictOfficeDay(date: string, opts: { layoutId?: string; 
     (a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || b.confidence - a.confidence || (a.name ?? "").localeCompare(b.name ?? ""),
   );
 
-  const guests = visits.reduce((sum, visit) => sum + visit.guests, 0);
-  const inOffice = predicted.filter((person) => person.status === "office").length;
-  return { date, layoutId, people: predicted, visits, guests, expectedInOffice: inOffice + guests };
+  const away = new Set(predicted.filter(isConfirmedAway).map((person) => person.userId));
+  const roster = dayRoster({ people: predicted, visits, manual, memberIds, away });
+  return {
+    date,
+    layoutId,
+    people: predicted,
+    visits,
+    roster: roster.people,
+    guestList: roster.guestList,
+    guests: roster.guestList.length,
+    expectedInOffice: roster.people.length,
+  };
 }

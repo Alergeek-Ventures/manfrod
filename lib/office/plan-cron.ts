@@ -53,7 +53,9 @@ export async function runDeskPlanHeadsUp(today = localToday()) {
     const dates = await claimHeadsUp(office.layout.id, group.dates, channel);
     if (dates.length === 0) continue;
     const expected = Math.max(...evaluations.map((evaluation) => evaluation.expectedInOffice));
-    const result = await post("chat.postMessage", { channel, ...headsUpMessage(dates, headsUpText(dates, expected, group.notes)) });
+    const lines = new Map(evaluations.flatMap((evaluation) => evaluation.visits).map((visit) => [visit.id, visit.summary]));
+    const summaries = group.visitIds.flatMap((id) => lines.get(id) ?? []);
+    const result = await post("chat.postMessage", { channel, ...headsUpMessage(dates, headsUpText(dates, expected, summaries)) });
     if (!result.ok) {
       log.warn(`Office.PlanCron: heads-up for ${dates.join(", ")} failed: ${result.error}`);
       await releaseHeadsUp(office.layout.id, dates);

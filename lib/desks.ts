@@ -57,8 +57,8 @@ export async function reserveDesk(
   if (date < localToday()) return { ok: false, error: "past_date" };
 
   const userId = "userId" in person ? person.userId : null;
+  const away = options.awayUserIds ?? (await recordedAwayUserIds(date));
   if (desk.ownerUserId && desk.ownerUserId !== userId) {
-    const away = options.awayUserIds ?? (await recordedAwayUserIds(date));
     if (!away.has(desk.ownerUserId)) {
       const [owner] = await db.select().from(users).where(eq(users.id, desk.ownerUserId)).limit(1);
       return { ok: false, error: "owned", owner: owner?.name ?? owner?.email ?? "?" };
@@ -68,6 +68,12 @@ export async function reserveDesk(
   try {
     const reservation = await db.transaction(async (tx) => {
       if (userId) await tx.delete(deskReservations).where(and(eq(deskReservations.userId, userId), eq(deskReservations.date, date)));
+      const [holder] = await tx
+        .select({ id: deskReservations.id, userId: deskReservations.userId })
+        .from(deskReservations)
+        .where(and(eq(deskReservations.deskId, desk.id), eq(deskReservations.date, date)));
+      if (holder?.userId && holder.userId !== userId && away.has(holder.userId))
+        await tx.delete(deskReservations).where(eq(deskReservations.id, holder.id));
       const [created] = await tx
         .insert(deskReservations)
         .values({

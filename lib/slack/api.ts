@@ -87,6 +87,7 @@ async function cached<T>(key: string, fetcher: () => Promise<T | null>): Promise
 
 export function clearLookupCache() {
   lookupCache.clear();
+  Object.assign(members, { value: null, at: 0, failedAt: 0, pending: null });
 }
 
 async function userInfo(slackUserId: string): Promise<SlackBody | null> {
@@ -118,19 +119,81 @@ export async function isBotUser(slackUserId: string): Promise<boolean> {
   return user?.is_bot === true || user?.id === "USLACKBOT";
 }
 
+export type WorkspaceMember = {
+  id: string;
+  handle: string | null;
+  realName: string | null;
+  displayName: string | null;
+  email: string | null;
+  deleted: boolean;
+  bot: boolean;
+  restricted: boolean;
+  ultraRestricted: boolean;
+  stranger: boolean;
+  teamId: string | null;
+};
+
+export function workspaceMember(member: SlackBody): WorkspaceMember {
+  return {
+    id: member.id,
+    handle: member.name || null,
+    realName: member.real_name || member.profile?.real_name || null,
+    displayName: member.profile?.display_name || null,
+    email: member.profile?.email ?? null,
+    deleted: member.deleted === true,
+    bot: member.is_bot === true || member.id === "USLACKBOT",
+    restricted: member.is_restricted === true,
+    ultraRestricted: member.is_ultra_restricted === true,
+    stranger: member.is_stranger === true,
+    teamId: member.team_id ?? null,
+  };
+}
+
+export const MEMBERS_FAILURE_TTL_MS = 60_000;
+
+const members: { value: WorkspaceMember[] | null; at: number; failedAt: number; pending: Promise<WorkspaceMember[] | null> | null } = {
+  value: null,
+  at: 0,
+  failedAt: 0,
+  pending: null,
+};
+
+async function sweepMembers(): Promise<WorkspaceMember[] | null> {
+  const found: WorkspaceMember[] = [];
+  let cursor = "";
+  do {
+    const result = await get("users.list", { limit: 200, ...(cursor ? { cursor } : {}) });
+    if (!result.ok) return null;
+    for (const member of (result.body.members ?? []) as SlackBody[]) found.push(workspaceMember(member));
+    cursor = result.body.response_metadata?.next_cursor ?? "";
+  } while (cursor);
+  return found;
+}
+
+export async function workspaceMembers(): Promise<WorkspaceMember[] | null> {
+  const now = Date.now();
+  if (members.value && now - members.at < LOOKUP_TTL_MS) return members.value;
+  if (now - members.failedAt < MEMBERS_FAILURE_TTL_MS) return null;
+  members.pending ??= sweepMembers()
+    .catch(() => null)
+    .then((value) => {
+      if (value) Object.assign(members, { value, at: Date.now() });
+      else members.failedAt = Date.now();
+      return value;
+    })
+    .finally(() => {
+      members.pending = null;
+    });
+  return members.pending;
+}
+
+export async function fetchWorkspaceMember(slackUserId: string): Promise<WorkspaceMember | null> {
+  const user = await userInfo(slackUserId);
+  return user ? workspaceMember(user) : null;
+}
+
 export async function deactivatedSlackIds(): Promise<Set<string>> {
-  const ids = await cached("users:deactivated", async () => {
-    const deleted: string[] = [];
-    let cursor = "";
-    do {
-      const result = await get("users.list", { limit: 200, ...(cursor ? { cursor } : {}) });
-      if (!result.ok) return null;
-      for (const member of (result.body.members ?? []) as SlackBody[]) if (member.deleted) deleted.push(member.id);
-      cursor = result.body.response_metadata?.next_cursor ?? "";
-    } while (cursor);
-    return deleted;
-  });
-  return new Set(ids ?? []);
+  return new Set(((await workspaceMembers()) ?? []).filter((member) => member.deleted).map((member) => member.id));
 }
 
 export async function getChannelInfo(channel: string): Promise<SlackBody | null> {

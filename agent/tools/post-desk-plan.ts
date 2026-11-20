@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { getUser } from "../../lib/accounts.ts";
 import { publicHolidayDates } from "../../lib/holidays.ts";
 import { evaluateDay, postPlan } from "../../lib/office/plan.ts";
 import { nextWorkday } from "../../lib/office/plan-rules.ts";
@@ -19,7 +20,8 @@ export default defineManfrodTool({
     if (!isValidIsoDate(day)) return `Invalid date '${date}'. Use YYYY-MM-DD.`;
     if (day < today) return "Can't plan desks for a past day.";
     const evaluation = await evaluateDay(day, { today });
-    const posted = await postPlan(day, { today });
+    const requestedBy = ctx.msgCtx.slackUserId ?? (await getUser(ctx.userId))?.slackId ?? null;
+    const posted = await postPlan(day, { today, requestedBy });
     if (!posted.ok)
       return posted.error === "no_plan_channel"
         ? "No office channel for desk plans is set; an admin can set it in the office editor."

@@ -32,7 +32,7 @@ vi.mock("../../lib/nudges/compose.ts", () => ({ decide: async () => null }));
 
 const { db, tables } = await import("../../lib/db/index.ts");
 const layout = await import("../../lib/office/layout.ts");
-const { postPlan, preparePlan, refreshPlan } = await import("../../lib/office/plan.ts");
+const { planSummary, postPlan, preparePlan, refreshPlan } = await import("../../lib/office/plan.ts");
 const { getPlan, planAwayUserIds, updatePlan } = await import("../../lib/office/plan-store.ts");
 const { recordVisit } = await import("../../lib/office/presence-store.ts");
 const desksLib = await import("../../lib/desks.ts");
@@ -118,7 +118,7 @@ describe.skipIf(!enabled)("preparePlan", () => {
     const prepared = await preparePlan(date);
     const seat = (key: string) => prepared.result.assignments.find((assignment) => assignment.key === key);
     expect(prepared.evaluation.crowded).toBe(true);
-    expect(prepared.evaluation.reasons).toContain("przyjeżdża: zespół z Wrocławia");
+    expect(prepared.evaluation.reasons).toContain("przyjeżdża: 2 osoby z Wrocławia");
     expect(seat(`user:${returning.id}`)).toMatchObject({ deskId: ownedBack.id, reason: "owner" });
     expect(seat(`user:${ala.id}`)).toMatchObject({ deskId: recent.id, reason: "recent" });
     expect(prepared.result.displaced.map((person) => person.key)).toEqual([`user:${cyd.id}`]);
@@ -225,7 +225,9 @@ describe.skipIf(!enabled)("posting and refreshing a plan", () => {
     expect(results.filter((result) => result.ok && result.posted)).toHaveLength(1);
     const plan = await getPlan(layoutId, postDate);
     expect(plan).toMatchObject({ status: "posted", messageTs: `${1000 + slack.posted}.1`, claimedAt: null });
-    expect(plan?.reason).toMatch(/^W .+ \d+\.\d{2} ~/);
+    expect(plan?.reason).toBe("");
+    const seated = (plan?.message as { blocks: { text?: { text: string } }[] }).blocks[0].text!.text;
+    expect(seated).toMatch(/^\*W .+ \d+\.\d{2}: \d+ os(oba|oby|ób) w biurze/);
     expect((await planSeats()).some((row) => row.userId === planner!.id)).toBe(true);
   });
 
@@ -238,5 +240,99 @@ describe.skipIf(!enabled)("posting and refreshing a plan", () => {
     const image = last.blocks.find((block: any) => block.type === "image");
     expect(image.image_url).toContain(`v=${plan!.version}&`);
     expect(new Set((await planSeats()).map((row) => row.userId)).size).toBe((await planSeats()).length);
+  });
+
+  it("leaves Slack and the version alone when nothing changed", async () => {
+    await refreshPlan(postDate);
+    const before = await getPlan(layoutId, postDate);
+    const updates = slack.updates.length;
+    const result = await refreshPlan(postDate);
+    expect(result).toMatchObject({ ok: true, updated: false });
+    expect(slack.updates.length).toBe(updates);
+    expect((await getPlan(layoutId, postDate))?.version).toBe(before?.version);
+  });
+
+  it("puts the same headcount in the evaluation, the headline and the seats on the map", async () => {
+    const prepared = await preparePlan(postDate);
+    const seated = prepared.result.assignments.length + prepared.result.overflow.length;
+    expect(prepared.evaluation.expectedInOffice).toBe(seated);
+    expect(prepared.evaluation.prediction.expectedInOffice).toBe(seated);
+    expect(planSummary(prepared).headline).toContain(`: ${seated} os`);
+    const { loadMapState } = await import("../../lib/office/map.ts");
+    const map = await loadMapState(postDate, { awayUserIds: new Set(prepared.plan.awayUserIds) });
+    const occupied = map.desks.filter((desk) => desk.status === "taken" || desk.status === "owner_present");
+    expect(occupied.length).toBe(prepared.result.assignments.length);
+  });
+});
+
+describe.skipIf(!enabled)("a booking of someone confirmed away", () => {
+  const day = weekdayAhead(59);
+  const ids: string[] = [];
+  const desksMade: string[] = [];
+  let holder: { id: string };
+  let other: { id: string };
+  let booked: { id: string; label: string };
+
+  const make = async (name: string) => {
+    const [created] = await db
+      .insert(tables.users)
+      .values({ slackId: `UDORM${suffix}${ids.length}`, slackDmChannelId: `DDORM${suffix}${ids.length}`, name: `${name} ${suffix}` })
+      .returning();
+    ids.push(created.id);
+    await db.insert(tables.officeMembers).values({ userId: created.id, layoutId: (await layout.getLayout()).id });
+    return created;
+  };
+
+  beforeAll(async () => {
+    holder = await make("Hania");
+    other = await make("Igor");
+    booked = await layout.createDesk({ label: `TD-${suffix}`, x: 40, y: 30 });
+    desksMade.push(booked.id);
+    await db.insert(tables.deskReservations).values({ deskId: booked.id, userId: holder.id, date: day, source: "manual" });
+  });
+
+  afterAll(async () => {
+    await db.delete(tables.deskPlans).where(eq(tables.deskPlans.date, day));
+    await db.delete(tables.deskReservations).where(eq(tables.deskReservations.date, day));
+    await db.delete(tables.officePresence).where(inArray(tables.officePresence.userId, ids));
+    await db.delete(tables.officeMembers).where(inArray(tables.officeMembers.userId, ids));
+    await db.delete(tables.desks).where(inArray(tables.desks.id, desksMade));
+    await db.delete(tables.users).where(inArray(tables.users.id, ids));
+  });
+
+  const rows = async () => db.select().from(tables.deskReservations).where(eq(tables.deskReservations.date, day));
+
+  it("is not counted or seated, its desk shows free, and the booking comes back when they come after all", async () => {
+    await db.insert(tables.officePresence).values({ userId: holder.id, date: day, status: "remote", source: "chat" });
+    const away = await preparePlan(day);
+    expect(away.evaluation.dormantDeskIds.has(booked.id)).toBe(true);
+    expect(away.evaluation.people.some((person) => person.userId === holder.id)).toBe(false);
+    expect(away.evaluation.prediction.roster.some((person) => person.userId === holder.id)).toBe(false);
+    expect(away.result.assignments.some((assignment) => assignment.userId === holder.id || assignment.deskId === booked.id)).toBe(false);
+    expect((await rows()).find((row) => row.deskId === booked.id)).toMatchObject({ userId: holder.id, source: "manual" });
+    const { loadMapState } = await import("../../lib/office/map.ts");
+    const map = await loadMapState(day, { awayUserIds: away.evaluation.away });
+    expect(map.desks.find((item) => item.id === booked.id)?.status).toBe("free");
+
+    await db
+      .update(tables.officePresence)
+      .set({ status: "office" })
+      .where(and(eq(tables.officePresence.userId, holder.id), eq(tables.officePresence.date, day)));
+    const back = await preparePlan(day);
+    expect(back.result.assignments.find((assignment) => assignment.userId === holder.id)).toMatchObject({
+      deskId: booked.id,
+      reason: "manual",
+    });
+  });
+
+  it("lets someone else book that desk while they are away", async () => {
+    await db
+      .update(tables.officePresence)
+      .set({ status: "leave" })
+      .where(and(eq(tables.officePresence.userId, holder.id), eq(tables.officePresence.date, day)));
+    const result = await desksLib.reserveDesk(booked.label, { userId: other.id }, day);
+    expect(result).toMatchObject({ ok: true });
+    const desk = (await rows()).filter((row) => row.deskId === booked.id);
+    expect(desk.map((row) => row.userId)).toEqual([other.id]);
   });
 });

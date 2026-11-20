@@ -6,11 +6,11 @@ import { logger } from "../log.ts";
 import { decide } from "../nudges/compose.ts";
 import { getPermalink, post, type SlackBody } from "../slack/api.ts";
 import { addDays } from "../time.ts";
-import { assignDesks, guestNames, personKey, seatingSignature, type AssignPerson, type AssignResult } from "./assign.ts";
+import { assignDesks, personKey, seatingSignature, type AssignResult } from "./assign.ts";
 import { isConfirmedAway } from "./away.ts";
 import { loadOffice, type Office } from "./layout.ts";
 import { planMessage, type PlanSeat } from "./plan-message.ts";
-import { crowding, fallbackIntro, planTitle } from "./plan-rules.ts";
+import { crowding, dayLabel, isLongStay, longStayNote, planHeadline, planReasonLine, planTitle, visitSummary } from "./plan-rules.ts";
 import {
   CLAIM_TIMEOUT_MS,
   deletePlan,
@@ -25,13 +25,17 @@ import {
 import { predictOfficeDay, type OfficeDayPrediction } from "./presence.ts";
 import { loadMembers } from "./presence-sources.ts";
 import { deskMapUrl } from "./url.ts";
+import { dayRoster, isDormant, type RosterPerson } from "./roster.ts";
+import { visitPlace } from "./visit-guests.ts";
 
-const { deskReservations, officePresence, projectMemberships, users } = tables;
+const { deskReservations, projectMemberships } = tables;
 const log = logger("Office.Plan");
 
 export const HISTORY_DAYS = 60;
 
-export type PlannedPerson = AssignPerson & { slackId: string | null };
+export type PlannedPerson = RosterPerson;
+
+export type VisitLine = { id: string; summary: string; long: boolean };
 
 export type DayEvaluation = {
   date: string;
@@ -40,81 +44,79 @@ export type DayEvaluation = {
   people: PlannedPerson[];
   reservations: ReservationWithDesk[];
   away: Set<string>;
+  dormantDeskIds: Set<string>;
   demand: number;
   supply: number;
   expectedInOffice: number;
-  visitNotes: string[];
+  visits: VisitLine[];
+  longStays: string[];
   visitExtraPeople: number;
   crowded: boolean;
   crowdedWithoutVisits: boolean;
   reasons: string[];
+  visitReasons: string[];
+  deskReasons: string[];
 };
-
-function visitGuests(visits: OfficeVisit[]): PlannedPerson[] {
-  const guests: PlannedPerson[] = [];
-  visits.forEach((visit, index) => {
-    const before = guestNames(visits.slice(0, index)).length;
-    for (const name of guestNames(visits.slice(0, index + 1)).slice(before))
-      guests.push({
-        key: personKey({ userId: null, guestName: name }),
-        userId: null,
-        guestName: name,
-        name,
-        groups: [`visit:${visit.id}`],
-        slackId: null,
-      });
-  });
-  return guests;
-}
-
-async function statedVisitors(date: string, known: Set<string>) {
-  const rows = await db
-    .select({ userId: users.id, name: users.name, slackId: users.slackId })
-    .from(officePresence)
-    .innerJoin(users, eq(users.id, officePresence.userId))
-    .where(and(eq(officePresence.date, date), eq(officePresence.status, "office")));
-  return rows.filter((row) => !known.has(row.userId));
-}
 
 export type DayInput = {
   date: string;
   office: Office;
   prediction: OfficeDayPrediction;
   reservations: ReservationWithDesk[];
-  stated: { userId: string; name: string | null; slackId: string }[];
   memberIds: ReadonlySet<string>;
 };
 
-export function summarizeDay({ date, office, prediction, reservations: all, stated, memberIds }: DayInput): DayEvaluation {
-  const visitGroups = new Map<string, string[]>();
-  for (const visit of prediction.visits)
-    for (const userId of visit.userIds) visitGroups.set(userId, [...(visitGroups.get(userId) ?? []), `visit:${visit.id}`]);
+function visitLine(visit: OfficeVisit, names: ReadonlyMap<string, string>): VisitLine {
+  const people = [...visit.userIds.flatMap((userId) => names.get(userId) ?? []), ...visit.guestNames];
+  const anonymous = Math.max(visit.guests - visit.guestNames.length, 0);
+  return { id: visit.id, summary: visitSummary(people, anonymous, visitPlace(visit.note)), long: isLongStay(visit) };
+}
 
-  const present = [...prediction.people.filter((person) => person.status === "office"), ...stated].map((person): PlannedPerson => ({
-    key: personKey({ userId: person.userId, guestName: null }),
-    userId: person.userId,
-    guestName: null,
-    name: person.name ?? person.slackId,
-    groups: visitGroups.get(person.userId) ?? [],
-    slackId: person.slackId,
-  }));
-  const people = [...present, ...visitGuests(prediction.visits)];
+export function summarizeDay({ date, office, prediction, reservations: all, memberIds }: DayInput): DayEvaluation {
+  const activeDesks = new Set(office.desks.filter((desk) => desk.active).map((desk) => desk.id));
   const away = new Set(prediction.people.filter(isConfirmedAway).map((person) => person.userId));
-
-  const deskIds = new Set(office.desks.map((desk) => desk.id));
-  const reservations = all.filter((reservation) => deskIds.has(reservation.deskId));
-  const manual = reservations.filter((reservation) => reservation.source === "manual");
+  const reservations = all.filter((reservation) => activeDesks.has(reservation.deskId));
+  const booked = reservations.filter((reservation) => reservation.source === "manual");
+  const dormantDeskIds = new Set(booked.filter((reservation) => isDormant(reservation, away)).map((reservation) => reservation.deskId));
+  const manual = booked.filter((reservation) => !isDormant(reservation, away));
+  const roster = dayRoster({
+    people: prediction.people,
+    visits: prediction.visits,
+    manual: manual.map((reservation) => ({
+      userId: reservation.userId,
+      guestName: reservation.guestName,
+      name: reservation.name,
+      slackId: reservation.user?.slackId ?? null,
+    })),
+    memberIds,
+    away,
+  });
+  const people = roster.people;
+  const guestList = roster.guestList;
   const manualKeys = new Set(manual.map(personKey));
   const manualDesks = new Set(manual.map((reservation) => reservation.deskId));
   const owners = new Set(office.desks.flatMap((desk) => (desk.ownerUserId ? [desk.ownerUserId] : [])));
   const demand = people.filter((person) => !manualKeys.has(person.key) && !(person.userId && owners.has(person.userId))).length;
-  const supply = office.desks.filter((desk) => !desk.ownerUserId && !manualDesks.has(desk.id)).length;
-  const expectedInOffice = prediction.expectedInOffice + stated.length;
-  const visitNotes = prediction.visits.map((visit) => visit.note);
-  const visitors = new Set(prediction.visits.flatMap((visit) => visit.userIds.filter((userId) => !memberIds.has(userId))));
-  const visitExtraPeople = prediction.guests + visitors.size;
-  const { crowded, crowdedWithoutVisits, reasons } = crowding({
-    visitNotes,
+  const supply = office.desks.filter((desk) => !desk.ownerUserId && !manualDesks.has(desk.id) && !dormantDeskIds.has(desk.id)).length;
+  const expectedInOffice = people.length;
+
+  const names = new Map(prediction.people.map((person) => [person.userId, person.name ?? person.slackId]));
+  const visits = prediction.visits.map((visit) => visitLine(visit, names));
+  const shortVisits = new Set(visits.filter((visit) => !visit.long).map((visit) => visit.id));
+  const visitors = new Set(
+    prediction.visits
+      .filter((visit) => shortVisits.has(visit.id))
+      .flatMap((visit) => visit.userIds.filter((userId) => !memberIds.has(userId))),
+  );
+  const visitExtraPeople = guestList.filter((guest) => shortVisits.has(guest.visitId)).length + visitors.size;
+  const longStays = prediction.visits
+    .filter((visit) => !shortVisits.has(visit.id))
+    .flatMap((visit) => {
+      const newcomers = visit.userIds.filter((userId) => !memberIds.has(userId)).flatMap((userId) => names.get(userId) ?? []);
+      return newcomers.length > 0 ? [longStayNote(newcomers, visit.endsOn)] : [];
+    });
+  const { crowded, crowdedWithoutVisits, reasons, visitReasons, deskReasons } = crowding({
+    visitSummaries: visits.filter((visit) => !visit.long).map((visit) => visit.summary),
     visitExtraPeople,
     demand,
     supply,
@@ -128,14 +130,18 @@ export function summarizeDay({ date, office, prediction, reservations: all, stat
     people,
     reservations,
     away,
+    dormantDeskIds,
     demand,
     supply,
     expectedInOffice,
-    visitNotes,
+    visits,
+    longStays,
     visitExtraPeople,
     crowded,
     crowdedWithoutVisits,
     reasons,
+    visitReasons,
+    deskReasons,
   };
 }
 
@@ -146,9 +152,8 @@ export async function evaluateDay(date: string, opts: { today?: string } = {}): 
     listReservationsForDate(date),
     loadMembers(office.layout.id),
   ]);
-  const stated = await statedVisitors(date, new Set(prediction.people.map((person) => person.userId)));
   const memberIds = new Set(members.map((member) => member.userId));
-  return summarizeDay({ date, office, prediction, reservations, stated, memberIds });
+  return summarizeDay({ date, office, prediction, reservations, memberIds });
 }
 
 async function recentDesks(layoutDeskIds: string[], userIds: string[], date: string): Promise<Map<string, string>> {
@@ -201,19 +206,24 @@ async function prepareLocked(tx: Executor, date: string, opts: { today?: string;
     getPlan(office.layout.id, date, tx),
   ]);
   const planned = reservations.filter((reservation) => reservation.source === "plan");
+  const guestKeys = new Map(
+    people.flatMap((person) => (person.userId ? [] : [[(person.guestName ?? "").toLowerCase(), person.key] as const])),
+  );
+  const rosterKey = (reservation: ReservationWithDesk) =>
+    (!reservation.userId && guestKeys.get((reservation.guestName ?? "").toLowerCase())) || personKey(reservation);
   const result = assignDesks({
-    desks: office.desks,
+    desks: office.desks.filter((desk) => !evaluation.dormantDeskIds.has(desk.id)),
     people: people.map((person) => ({ ...person, groups: [...person.groups, ...((person.userId && groups.get(person.userId)) || [])] })),
     awayUserIds: evaluation.away,
     manual: reservations
-      .filter((reservation) => reservation.source === "manual")
+      .filter((reservation) => reservation.source === "manual" && !isDormant(reservation, evaluation.away))
       .map((reservation) => ({
         deskId: reservation.deskId,
         userId: reservation.userId,
         guestName: reservation.guestName,
         name: reservation.name,
       })),
-    previous: new Map(planned.map((reservation) => [personKey(reservation), reservation.deskId])),
+    previous: new Map(planned.map((reservation) => [rosterKey(reservation), reservation.deskId])),
     recentDesk,
   });
   const seating = seatingSignature(result);
@@ -266,39 +276,65 @@ export function displacedNotes(prepared: Pick<PreparedPlan, "evaluation" | "resu
   });
 }
 
+export function planSummary(prepared: Pick<PreparedPlan, "evaluation" | "result" | "plan">): { headline: string; reason: string } {
+  const seated = [...prepared.result.assignments, ...prepared.result.overflow];
+  const guests = seated.filter((person) => person.userId === null).length;
+  const { evaluation } = prepared;
+  return {
+    headline: planHeadline(prepared.plan.date, seated.length, guests),
+    reason: planReasonLine({
+      requestedBy: prepared.plan.requestedBy,
+      crowded: evaluation.crowded,
+      visitReasons: evaluation.visitReasons,
+      deskReasons: evaluation.deskReasons,
+      seated: seated.length,
+      threshold: evaluation.office.layout.crowdedThreshold,
+    }),
+  };
+}
+
 export function renderPlanMessage(prepared: Pick<PreparedPlan, "evaluation" | "result" | "plan">, intro: string, notes: string[] = []) {
+  const { headline, reason } = planSummary(prepared);
   return planMessage({
     date: prepared.plan.date,
     title: planTitle(prepared.plan.date),
-    intro,
+    headline,
+    intro: [reason, intro.trim()].filter(Boolean).join(" "),
     imageUrl: deskMapUrl(prepared.plan.date, prepared.plan.version),
     seats: planSeats(prepared.result),
     overflow: prepared.result.overflow.map((person) => person.name),
-    notes: [...displacedNotes(prepared), ...notes],
+    notes: [...displacedNotes(prepared), ...notes, ...prepared.evaluation.longStays],
     version: prepared.plan.version,
   });
 }
 
-async function draftIntro(evaluation: DayEvaluation): Promise<string> {
-  const fallback = fallbackIntro(evaluation.date, evaluation.expectedInOffice, evaluation.visitNotes);
+async function draftIntro(evaluation: DayEvaluation, requested: boolean): Promise<string> {
   try {
     const decision = await decide({
       kind: "desk plan intro",
       audience: "the office channel, where the desk plan for an office day is posted",
       guidance:
-        "Write one short sentence that introduces the desk plan below it and says why it is needed (how many people are expected, who is visiting). Name the day by weekday and date as in the example, never 'jutro' or 'dziś': the message stays up and is edited later. Always send. No greeting, no list, no emoji, no names of desks.",
+        "Write one short sentence that introduces the desk plan below it, e.g. who is visiting or why a plan helps that day. Never state a headcount or any number of people: the message shows the current count above your sentence and it changes later. Name the day by weekday and date if you name it, never 'jutro' or 'dziś': the message stays up and is edited later. Send nothing when there is nothing to add beyond the count. No greeting, no list, no emoji, no names of desks, no ISO dates.",
       context: [
-        `Date: ${evaluation.date}`,
-        `Expected in the office: ~${evaluation.expectedInOffice}`,
-        ...evaluation.reasons.map((reason) => `Reason: ${reason}`),
-        `Example: ${fallback}`,
+        `Day: ${dayLabel(evaluation.date)}`,
+        ...(requested ? ["Someone asked for this plan; the day is not necessarily crowded."] : []),
+        ...evaluation.visits.filter((visit) => !visit.long).map((visit) => `Visiting: ${visit.summary}`),
+        ...evaluation.deskReasons.map((reason) => `Reason: ${reason}`),
       ].join("\n"),
     });
-    return decision?.send ? decision.message : fallback;
+    return decision?.send ? decision.message : "";
   } catch (error) {
     log.warn(`Office.Plan: intro draft failed: ${(error as Error).message}`);
-    return fallback;
+    return "";
   }
+}
+
+export function stableJson(value: unknown): string {
+  return JSON.stringify(value, (_key, item: unknown) =>
+    item && typeof item === "object" && !Array.isArray(item)
+      ? Object.fromEntries(Object.entries(item as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+      : item,
+  );
 }
 
 export const SYNC_ATTEMPTS = 3;
@@ -319,7 +355,7 @@ export type PostResult = { ok: true; plan: DeskPlan; permalink: string | null; p
 
 type Claim = { kind: "refresh" } | { kind: "busy" } | { kind: "claimed"; prior: DeskPlan | null; prepared: PreparedPlan };
 
-export async function postPlan(date: string, opts: { today?: string } = {}): Promise<PostResult> {
+export async function postPlan(date: string, opts: { today?: string; requestedBy?: string | null } = {}): Promise<PostResult> {
   const office = await loadOffice();
   const layoutId = office.layout.id;
   const channel = office.layout.planChannelId;
@@ -329,7 +365,16 @@ export async function postPlan(date: string, opts: { today?: string } = {}): Pro
     if (existing?.status === "posted" && existing.messageTs) return { kind: "refresh" };
     if (existing?.status === "posting" && existing.claimedAt && Date.now() - existing.claimedAt.getTime() < CLAIM_TIMEOUT_MS)
       return { kind: "busy" };
-    await savePlan(layoutId, date, { status: "posting", claimedAt: new Date() }, tx);
+    await savePlan(
+      layoutId,
+      date,
+      {
+        status: "posting",
+        claimedAt: new Date(),
+        ...(opts.requestedBy && !existing?.requestedBy ? { requestedBy: opts.requestedBy } : {}),
+      },
+      tx,
+    );
     return { kind: "claimed", prior: existing, prepared: await prepareLocked(tx, date, { today: opts.today, status: "posting" }) };
   });
   if (claim.kind === "busy") return { ok: false, error: "already_posting" };
@@ -345,14 +390,20 @@ export async function postPlan(date: string, opts: { today?: string } = {}): Pro
     };
   }
 
-  const intro = await draftIntro(claim.prepared.evaluation);
+  const intro = await draftIntro(claim.prepared.evaluation, Boolean(claim.prepared.plan.requestedBy));
   const message = renderPlanMessage(claim.prepared, intro);
   const sent = await post("chat.postMessage", { channel, unfurl_links: false, ...message });
   if (!sent.ok) {
     await withPlanLock(layoutId, date, async (tx) => {
       await deletePlanSeats(layoutId, date, tx);
       if (!claim.prior) await deletePlan(layoutId, date, tx);
-      else await updatePlan(layoutId, date, { status: claim.prior.status, seating: claim.prior.seating, claimedAt: null }, tx);
+      else
+        await updatePlan(
+          layoutId,
+          date,
+          { status: claim.prior.status, seating: claim.prior.seating, requestedBy: claim.prior.requestedBy, claimedAt: null },
+          tx,
+        );
     });
     return { ok: false, error: sent.error };
   }
@@ -382,10 +433,11 @@ export async function refreshPlan(date: string, opts: { force?: boolean; notes?:
     const plan = await getPlan(layoutId, date, tx);
     if (!plan || plan.status !== "posted") return null;
     const prepared = await prepareLocked(tx, date, { today: opts.today, status: "posted" });
-    if (!prepared.changed && !opts.force) return { prepared, updated: false };
+    const intro = plan.reason ?? "";
+    const unchanged = stableJson(renderPlanMessage(prepared, intro, opts.notes)) === stableJson(plan.message);
+    if (!prepared.changed && !opts.force && unchanged) return { prepared, updated: false };
     const bumped = (await updatePlan(layoutId, date, { bumpVersion: true }, tx)) ?? prepared.plan;
     const next = { ...prepared, plan: bumped };
-    const intro = plan.reason ?? fallbackIntro(date, prepared.evaluation.expectedInOffice, prepared.evaluation.visitNotes);
     const saved = await updatePlan(layoutId, date, { message: renderPlanMessage(next, intro, opts.notes) }, tx);
     return { prepared: { ...next, plan: saved ?? bumped }, updated: true };
   });

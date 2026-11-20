@@ -35,7 +35,10 @@ export async function listPlans(layoutId: string, dates: string[], exec: Executo
 }
 
 export type PlanPatch = Partial<
-  Pick<DeskPlan, "status" | "reason" | "channelId" | "messageTs" | "headsUpTs" | "awayUserIds" | "seating" | "claimedAt" | "message">
+  Pick<
+    DeskPlan,
+    "status" | "reason" | "channelId" | "messageTs" | "headsUpTs" | "awayUserIds" | "seating" | "claimedAt" | "message" | "requestedBy"
+  >
 > & {
   bumpVersion?: boolean;
 };
@@ -95,11 +98,16 @@ export async function releaseHeadsUp(layoutId: string, dates: string[]): Promise
   await db.delete(deskPlans).where(and(eq(deskPlans.layoutId, layoutId), inArray(deskPlans.date, dates), eq(deskPlans.status, "heads_up")));
 }
 
-export async function setUnpostedStatus(layoutId: string, dates: string[], status: "requested" | "declined"): Promise<string[]> {
+export async function setUnpostedStatus(
+  layoutId: string,
+  dates: string[],
+  status: "requested" | "declined",
+  requestedBy: string | null = null,
+): Promise<string[]> {
   if (dates.length === 0) return [];
   const rows = await db
     .update(deskPlans)
-    .set({ status, updatedAt: new Date() })
+    .set({ status, requestedBy: status === "requested" ? requestedBy : null, updatedAt: new Date() })
     .where(
       and(
         eq(deskPlans.layoutId, layoutId),

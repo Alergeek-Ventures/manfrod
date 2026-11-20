@@ -5,6 +5,10 @@ description: Reserve or look up office desk bookings for a specific date, or sho
 
 # Desk booking
 
+Say that something was booked, cancelled, swapped or fixed only when a tool
+result in this turn confirms it. Otherwise say what you would do or ask, never
+"poprawiłem" or "zrobione".
+
 ## Reserving a desk
 User asks to reserve/book a desk on a date (including relative dates like
 "jutro", "w piątek" — resolve them against `[Current Context]`) → call

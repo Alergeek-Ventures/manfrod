@@ -58,6 +58,7 @@ const INTENT_TOOLS = new Set([
   "unlink-notes",
   "update-calendar-event",
   "update-desk",
+  "update-office-visit",
   "update-recurring-reminder",
   "update-soul",
   "linear-list-issues",

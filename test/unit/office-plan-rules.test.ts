@@ -15,38 +15,45 @@ import {
   crowding,
   dayLabel,
   daysLabel,
-  fallbackIntro,
   headsUpGroups,
   headsUpText,
+  isLongStay,
+  longStayNote,
   nextWorkday,
   peopleCount,
   planCronAction,
+  planHeadline,
+  planReasonLine,
+  visitSummary,
+  workdayCount,
   workdaysAfter,
 } from "../../lib/office/plan-rules.ts";
 
 const TUESDAY = "2026-11-17";
-const base = { visitNotes: [], visitExtraPeople: 0, demand: 2, supply: 5, expectedInOffice: 3, threshold: 6 };
+const base = { visitSummaries: [], visitExtraPeople: 0, demand: 2, supply: 5, expectedInOffice: 3, threshold: 6 };
 
 describe("crowding", () => {
   it("stays quiet with a few people and enough free desks", () => {
-    expect(crowding(base)).toEqual({ crowded: false, crowdedWithoutVisits: false, reasons: [] });
+    expect(crowding(base)).toEqual({ crowded: false, crowdedWithoutVisits: false, reasons: [], visitReasons: [], deskReasons: [] });
   });
 
   it("is crowded when a visit brings at least two extra people", () => {
-    expect(crowding({ ...base, visitNotes: ["zespół z Wrocławia"], visitExtraPeople: 2 })).toEqual({
+    expect(crowding({ ...base, visitSummaries: ["Odul i Mariusz"], visitExtraPeople: 2 })).toEqual({
       crowded: true,
       crowdedWithoutVisits: false,
-      reasons: ["przyjeżdża: zespół z Wrocławia"],
+      reasons: ["przyjeżdża: Odul i Mariusz"],
+      visitReasons: ["przyjeżdża: Odul i Mariusz"],
+      deskReasons: [],
     });
   });
 
   it("ignores a visit of one extra person", () => {
-    expect(crowding({ ...base, visitNotes: ["klient"], visitExtraPeople: 1 })).toEqual({
+    expect(crowding({ ...base, visitSummaries: ["1 osoba"], visitExtraPeople: 1 })).toMatchObject({
       crowded: false,
       crowdedWithoutVisits: false,
       reasons: [],
     });
-    expect(crowding({ ...base, visitNotes: ["klient"], visitExtraPeople: 1, expectedInOffice: 6 }).reasons).toEqual([
+    expect(crowding({ ...base, visitSummaries: ["1 osoba"], visitExtraPeople: 1, expectedInOffice: 6 }).reasons).toEqual([
       "~6 osób w biurze (próg: 6)",
     ]);
   });
@@ -86,19 +93,19 @@ describe("workdays", () => {
 
   it("groups each visit's dates 2–5 workdays ahead into one heads-up", () => {
     const visits = [
-      { startsOn: "2026-11-18", endsOn: "2026-11-18", note: "jutro" },
-      { startsOn: "2026-11-19", endsOn: "2026-11-27", note: "Wrocław" },
-      { startsOn: "2026-11-20", endsOn: "2026-11-20", note: "klient" },
+      { id: "jutro", startsOn: "2026-11-18", endsOn: "2026-11-18" },
+      { id: "wroclaw", startsOn: "2026-11-19", endsOn: "2026-11-24" },
+      { id: "klient", startsOn: "2026-11-20", endsOn: "2026-11-20" },
     ];
     expect(headsUpGroups(TUESDAY, visits, new Set(), new Set())).toEqual([
-      { dates: ["2026-11-19", "2026-11-20", "2026-11-23", "2026-11-24"], notes: ["Wrocław", "klient"] },
+      { dates: ["2026-11-19", "2026-11-20", "2026-11-23", "2026-11-24"], visitIds: ["wroclaw", "klient"] },
     ]);
   });
 
   it("never asks again about a visit that already had a heads-up", () => {
     const visits = [
-      { startsOn: "2026-11-19", endsOn: "2026-11-27", note: "Wrocław" },
-      { startsOn: "2026-11-24", endsOn: "2026-11-24", note: "klient" },
+      { id: "wroclaw", startsOn: "2026-11-19", endsOn: "2026-11-24" },
+      { id: "klient", startsOn: "2026-11-24", endsOn: "2026-11-24" },
     ];
     const asked = new Set(["2026-11-19", "2026-11-20", "2026-11-23", "2026-11-24"]);
     expect(headsUpGroups(TUESDAY, visits, asked, new Set())).toEqual([]);
@@ -128,10 +135,39 @@ describe("texts", () => {
     expect(dayLabel("2026-11-18")).toBe("w środę 18.11");
     expect(dayLabel("2026-12-01")).toBe("we wtorek 1.12");
     expect(daysLabel(["2026-11-19", "2026-11-20"])).toBe("w czwartek 19.11 – piątek 20.11");
-    expect(headsUpText(["2026-11-19"], 9, ["zespół z Wrocławia"])).toBe(
-      "W czwartek 19.11 ~9 osób (przyjeżdża: zespół z Wrocławia). Przygotować plan biurek?",
+    expect(headsUpText(["2026-11-19"], 9, ["Odul i Mariusz", "3 osoby z Wrocławia"])).toBe(
+      "W czwartek 19.11 ~9 osób (przyjeżdża: Odul i Mariusz; 3 osoby z Wrocławia). Przygotować plan biurek?",
     );
-    expect(fallbackIntro("2026-11-18", 3, [])).toBe("W środę 18.11 ~3 osoby w biurze. Plan biurek poniżej.");
+  });
+
+  it("describes a visit from its people, never its note", () => {
+    expect(visitSummary(["Odul", "Mariusz"], 0, null)).toBe("Odul i Mariusz");
+    expect(visitSummary([], 3, "Wrocławia")).toBe("3 osoby z Wrocławia");
+    expect(visitSummary(["Ala", "Ola"], 1, null)).toBe("Ala, Ola i 1 osoba");
+  });
+
+  it("puts the seated headcount in the headline and says why the plan exists", () => {
+    expect(planHeadline("2026-11-19", 7, 2)).toBe("*W czwartek 19.11: 7 osób w biurze (w tym 2 gości).*");
+    expect(planHeadline("2026-11-19", 3, 0)).toBe("*W czwartek 19.11: 3 osoby w biurze.*");
+    const calm = { requestedBy: "UNAT", crowded: false, visitReasons: [], deskReasons: [], seated: 3, threshold: 6 };
+    expect(planReasonLine(calm)).toBe("Plan na prośbę <@UNAT>.");
+    expect(planReasonLine({ ...calm, requestedBy: null })).toBe("");
+    expect(planReasonLine({ ...calm, crowded: true, visitReasons: ["przyjeżdża: Odul i Mariusz"], seated: 7 })).toBe(
+      "Przyjeżdża: Odul i Mariusz; próg tłoku to 6 osób.",
+    );
+  });
+
+  it("treats a stay of five workdays or more as a long stay", () => {
+    expect(workdayCount("2026-11-19", "2026-11-25")).toBe(5);
+    expect(isLongStay({ startsOn: "2026-11-19", endsOn: "2026-11-25" })).toBe(true);
+    expect(isLongStay({ startsOn: "2026-11-19", endsOn: "2026-11-24" })).toBe(false);
+    expect(longStayNote(["Odul", "Mariusz"], "2026-12-04")).toBe(
+      "Odul i Mariusz są w biurze do 4.12. Jeśli to na dłużej, admin może dodać te osoby do osób biura w edytorze biura.",
+    );
+  });
+
+  it("never asks ahead about a long stay", () => {
+    expect(headsUpGroups(TUESDAY, [{ id: "trial", startsOn: "2026-11-19", endsOn: "2026-12-04" }], new Set(), new Set())).toEqual([]);
   });
 });
 
@@ -139,7 +175,8 @@ describe("plan message", () => {
   const input = {
     date: "2026-11-19",
     title: "Plan biurek — czwartek 19.11",
-    intro: "Jutro ~9 osób, przyjeżdża Wrocław.",
+    headline: "*W czwartek 19.11: 3 osoby w biurze (w tym 2 gości).*",
+    intro: "Przyjeżdża zespół z Wrocławia.",
     imageUrl: "https://example.test/desk-map/2026-11-19.png?v=3&sig=x",
     seats: [
       { label: "A1", name: "Kamil" },
@@ -152,7 +189,8 @@ describe("plan message", () => {
 
   it("has the image with the versioned URL, the seat list, overflow and the four buttons", () => {
     const { text, blocks } = planMessage(input);
-    expect(text).toContain("Plan biurek");
+    expect(text).toBe("Plan biurek — czwartek 19.11: W czwartek 19.11: 3 osoby w biurze (w tym 2 gości).");
+    expect(blocks[0].text.text).toBe("*W czwartek 19.11: 3 osoby w biurze (w tym 2 gości).*\nPrzyjeżdża zespół z Wrocławia.");
     const image = blocks.find((block) => block.type === "image")!;
     expect(image.image_url).toBe(input.imageUrl);
     expect(image.alt_text).toBe("Mapa biurek na 2026-11-19 — A1: Kamil, B2: Gość z Wrocławia 1");

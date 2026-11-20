@@ -2,7 +2,7 @@ import { z } from "zod";
 import { getUser } from "../../lib/accounts.ts";
 import { requestSwap } from "../../lib/office/plan-actions.ts";
 import { isValidIsoDate } from "../../lib/time.ts";
-import { resolvePerson } from "../lib/people.ts";
+import { resolvePerson } from "../../lib/people.ts";
 import { defineManfrodTool } from "../lib/define-tool.ts";
 
 export default defineManfrodTool({

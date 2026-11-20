@@ -227,7 +227,7 @@ export async function prepareFromHeadsUp(payload: Payload, user: User, dates: st
     return;
   }
   const layout = await getLayout();
-  await setUnpostedStatus(layout.id, upcoming, "requested");
+  await setUnpostedStatus(layout.id, upcoming, "requested", user.slackId);
   const posted = await postPlan(upcoming[0], { today });
   if (!posted.ok) {
     await tell(user.slackId, placeOf(payload), `Nie udało się przygotować planu: ${posted.error}`);

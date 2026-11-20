@@ -32,6 +32,7 @@ export type PlanSeat = { label: string; name: string };
 export type PlanMessageInput = {
   date: string;
   title: string;
+  headline: string;
   intro: string;
   imageUrl: string;
   seats: PlanSeat[];
@@ -63,7 +64,7 @@ export function altText(date: string, seats: PlanSeat[]): string {
 
 export function planMessage(input: PlanMessageInput): { text: string; blocks: SlackBody[] } {
   const blocks: SlackBody[] = [
-    section(input.intro),
+    section([input.headline, input.intro].filter(Boolean).join("\n")),
     {
       type: "image",
       image_url: input.imageUrl,
@@ -86,7 +87,7 @@ export function planMessage(input: PlanMessageInput): { text: string; blocks: Sl
       ],
     },
   ];
-  return { text: `${input.title}: ${input.intro}`, blocks };
+  return { text: `${input.title}: ${input.headline.replaceAll("*", "")}`, blocks };
 }
 
 export function headsUpMessage(dates: string[], text: string): { text: string; blocks: SlackBody[] } {

@@ -4,7 +4,7 @@ import { cancelReservationsForDate } from "../../lib/desks.ts";
 import { clearPresence, setPresence } from "../../lib/office/presence.ts";
 import { isValidIsoDate, withWeekday } from "../../lib/time.ts";
 import { refreshNote } from "../lib/desk-plan.ts";
-import { resolvePerson } from "../lib/people.ts";
+import { resolvePerson } from "../../lib/people.ts";
 import { defineManfrodTool } from "../lib/define-tool.ts";
 
 const STATUS_LABEL = { office: "w biurze", remote: "zdalnie", leave: "nieobecny/a" };
@@ -27,12 +27,13 @@ export default defineManfrodTool({
     if (!caller) return "I don't know who you are, nothing saved.";
     let target = caller;
     if (person) {
-      const match = await resolvePerson(person);
+      const admin = isAdmin(caller);
+      const match = await resolvePerson(person, { adopt: admin });
+      if (!admin && (!match.ok || match.user.id !== caller.id))
+        return "Only admins can set office presence for someone else; ask that person to tell me themselves.";
       if (!match.ok) return `Nothing saved: ${match.message}.`;
       target = match.user;
     }
-    if (target.id !== caller.id && !isAdmin(caller))
-      return "Only admins can set office presence for someone else; ask that person to tell me themselves.";
     const days = [...new Set(dates)].sort();
     const who = target.name ?? target.slackId;
     if (status === "clear") {

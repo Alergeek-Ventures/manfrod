@@ -6,8 +6,10 @@ if (enabled) process.env.DATABASE_URL = process.env.TEST_DATABASE_URL;
 
 const { db, tables } = await import("../../lib/db/index.ts");
 const { findOrCreateBySlackId } = await import("../../lib/accounts.ts");
-const { cancelVisit, clearPresence, defaultLayoutId, listVisits, recordVisit, setPresence } =
+const { cancelVisit, clearPresence, defaultLayoutId, listVisits, recordVisit, setChatPresence, setPresence, updateVisit } =
   await import("../../lib/office/presence-store.ts");
+const { loadStatedOffice } = await import("../../lib/office/presence-sources.ts");
+const { eq, inArray } = await import("drizzle-orm");
 const { loadAbsences, loadExplicit, loadMembers, loadReservationDates } = await import("../../lib/office/presence-sources.ts");
 
 const person = () => findOrCreateBySlackId(`U${randomUUID().slice(0, 10)}`, `D${randomUUID().slice(0, 10)}`);
@@ -55,6 +57,92 @@ describe.skipIf(!enabled)("office presence store", () => {
     expect((await cancelVisit(recorded.visit.id))?.cancelledAt).toBeInstanceOf(Date);
     expect(await cancelVisit(recorded.visit.id)).toBeNull();
     expect((await listVisits("2031-03-06", "2031-03-06")).map((visit) => visit.id)).not.toContain(recorded.visit.id);
+  });
+
+  it("keeps named guests, merges them into a duplicate and lets the visit be fixed", async () => {
+    const [author, odul] = await Promise.all([person(), person()]);
+    const visitIds: string[] = [];
+    try {
+      expect(
+        await recordVisit({
+          startsOn: "2031-05-06",
+          endsOn: "2031-05-06",
+          userIds: [],
+          guests: 1,
+          guestNames: ["A", "B"],
+          note: "x",
+          createdBy: null,
+        }),
+      ).toEqual({ ok: false, error: "invalid_guests" });
+      const first = await recordVisit({
+        startsOn: "2031-05-06",
+        endsOn: "2031-05-07",
+        userIds: [],
+        guests: 2,
+        guestNames: [" Odul ", "odul"],
+        note: "Odul i Mariusz",
+        createdBy: author.id,
+      });
+      if (!first.ok) throw new Error(first.error);
+      visitIds.push(first.visit.id);
+      expect(first.visit).toMatchObject({ guests: 2, guestNames: ["Odul"] });
+      const merged = await recordVisit({
+        startsOn: "2031-05-07",
+        endsOn: "2031-05-08",
+        userIds: [],
+        guests: 2,
+        guestNames: ["Mariusz", "Zenek"],
+        note: "x",
+        createdBy: author.id,
+      });
+      if (!merged.ok) throw new Error(merged.error);
+      expect(merged).toMatchObject({ duplicate: true, visit: { id: first.visit.id, endsOn: "2031-05-08", guests: 3 } });
+      expect(merged.visit.guestNames).toEqual(["Odul", "Mariusz", "Zenek"]);
+
+      const fixed = await updateVisit(first.visit.id, { userIds: [odul.id], guestNames: [], guests: 0, startsOn: "2031-05-05" });
+      expect(fixed).toMatchObject({
+        ok: true,
+        previous: { startsOn: "2031-05-06", guests: 3 },
+        visit: { startsOn: "2031-05-05", endsOn: "2031-05-08", userIds: [odul.id], guests: 0, guestNames: [], note: "Odul i Mariusz" },
+      });
+      expect(await updateVisit(first.visit.id, { userIds: [] })).toEqual({ ok: false, error: "nobody" });
+      expect(await updateVisit(first.visit.id, { endsOn: "2031-05-01" })).toEqual({ ok: false, error: "invalid_dates" });
+      await cancelVisit(first.visit.id);
+      expect(await updateVisit(first.visit.id, { guests: 1 })).toEqual({ ok: false, error: "not_found" });
+    } finally {
+      if (visitIds.length > 0) await db.delete(tables.officeVisits).where(inArray(tables.officeVisits.id, visitIds));
+      await db.delete(tables.users).where(inArray(tables.users.id, [author.id, odul.id]));
+    }
+  });
+
+  it("lets chat statements overwrite only chat statements and keeps the note", async () => {
+    const user = await person();
+    try {
+      await setPresence(user.id, "2031-05-14", "office", "button", "od 10");
+      expect(await setChatPresence(user.id, "2031-05-14", "remote")).toBe(false);
+      expect(await loadExplicit([user.id], "2031-05-14")).toMatchObject([{ status: "office", source: "button", note: "od 10" }]);
+      await setPresence(user.id, "2031-05-15", "office", "chat", "u klienta");
+      expect(await setChatPresence(user.id, "2031-05-15", "remote")).toBe(true);
+      expect(await loadExplicit([user.id], "2031-05-15")).toMatchObject([{ status: "remote", source: "chat", note: "u klienta" }]);
+      expect(await setChatPresence(user.id, "2031-05-16", "leave")).toBe(true);
+      expect(await loadExplicit([user.id], "2031-05-16")).toMatchObject([{ status: "leave", source: "chat", note: null }]);
+    } finally {
+      await db.delete(tables.officePresence).where(eq(tables.officePresence.userId, user.id));
+      await db.delete(tables.users).where(eq(tables.users.id, user.id));
+    }
+  });
+
+  it("loads everyone who said they will be in the office", async () => {
+    const user = await person();
+    try {
+      await setPresence(user.id, "2031-05-12", "office", "chat");
+      await setPresence(user.id, "2031-05-13", "remote", "chat");
+      expect((await loadStatedOffice("2031-05-12")).map((row) => row.userId)).toContain(user.id);
+      expect((await loadStatedOffice("2031-05-13")).map((row) => row.userId)).not.toContain(user.id);
+    } finally {
+      await db.delete(tables.officePresence).where(eq(tables.officePresence.userId, user.id));
+      await db.delete(tables.users).where(eq(tables.users.id, user.id));
+    }
   });
 
   it("loads members, absences and manual reservations in batches", async () => {

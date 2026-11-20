@@ -56,7 +56,7 @@ vi.mock("../../lib/db/index.ts", async (importOriginal) => ({
 const { runDeskPlan, runDeskPlanHeadsUp } = await import("../../lib/office/plan-cron.ts");
 const actions = await import("../../lib/office/plan-actions.ts");
 const { PLAN_ACTION, PLAN_CALLBACK, encodeSwap } = await import("../../lib/office/plan-message.ts");
-const { summarizeDay } = await vi.importActual<typeof import("../../lib/office/plan.ts")>("../../lib/office/plan.ts");
+const { renderPlanMessage, summarizeDay } = await vi.importActual<typeof import("../../lib/office/plan.ts")>("../../lib/office/plan.ts");
 
 const TODAY = "2026-11-17";
 const DATE = "2026-11-18";
@@ -108,14 +108,12 @@ describe("summarizeDay", () => {
     sources: [source],
     reason: "",
   });
-  const prediction = (people: ReturnType<typeof person>[], visits: Record<string, unknown>[] = [], guests = 0) =>
+  const prediction = (people: ReturnType<typeof person>[], visits: Record<string, unknown>[] = []) =>
     ({
       date: DATE,
       layoutId: "layout-1",
       people,
-      visits,
-      guests,
-      expectedInOffice: people.filter((p) => p.status === "office").length + guests,
+      visits: visits.map((visit) => ({ startsOn: DATE, endsOn: DATE, guestNames: [], createdBy: null, ...visit })),
     }) as unknown as OfficeDayPrediction;
   const day = (
     pred: OfficeDayPrediction,
@@ -128,7 +126,6 @@ describe("summarizeDay", () => {
       office: { layout: { crowdedThreshold: threshold }, desks: [desk("a"), desk("b"), desk("c"), desk("o1", "olga")] } as never,
       prediction: pred,
       reservations: reservations as never,
-      stated: [],
       memberIds: new Set(members),
     });
 
@@ -165,9 +162,9 @@ describe("summarizeDay", () => {
   });
 
   it("is crowded with a visit of two guests and names them", () => {
-    const result = day(prediction([person("ala", "office")], [{ id: "v1", note: "zespół z Wrocławia", guests: 2, userIds: ["ala"] }], 2));
-    expect(result).toMatchObject({ crowded: true, visitExtraPeople: 2, crowdedWithoutVisits: false });
-    expect(result.reasons).toContain("przyjeżdża: zespół z Wrocławia");
+    const result = day(prediction([person("ala", "office")], [{ id: "v1", note: "zespół z Wrocławia", guests: 2, userIds: ["ala"] }]));
+    expect(result).toMatchObject({ crowded: true, visitExtraPeople: 2, crowdedWithoutVisits: false, expectedInOffice: 3 });
+    expect(result.reasons).toContain("przyjeżdża: ala i 2 osoby z Wrocławia");
     expect(result.people.map((p) => [p.name, p.groups])).toEqual([
       ["ala", ["visit:v1"]],
       ["Gość z Wrocławia 1", ["visit:v1"]],
@@ -180,7 +177,7 @@ describe("summarizeDay", () => {
       prediction([person("ala", "office"), person("bob", "office")], [{ id: "v1", note: "my", guests: 0, userIds: ["ala", "bob"] }]),
     );
     expect(locals).toMatchObject({ visitExtraPeople: 0, crowded: false });
-    const client = day(prediction([person("ala", "office")], [{ id: "v2", note: "klient", guests: 1, userIds: [] }], 1));
+    const client = day(prediction([person("ala", "office")], [{ id: "v2", note: "klient", guests: 1, userIds: [] }]));
     expect(client).toMatchObject({ visitExtraPeople: 1, crowded: false });
     const wroclaw = day(
       prediction(
@@ -189,6 +186,82 @@ describe("summarizeDay", () => {
       ),
     );
     expect(wroclaw).toMatchObject({ visitExtraPeople: 2, crowded: true });
+  });
+
+  it("seats a named guest who says they are coming once, not as a guest too", () => {
+    const trial = { id: "v1", note: "okres próbny", guests: 2, guestNames: ["Odul", "Mariusz"], userIds: ["staszek"] };
+    const people = [person("staszek", "office", "visit"), { ...person("mariusz", "office"), name: "Mariusz Ciastoń" }];
+    const result = day(prediction(people, [trial]), [], 6, ["staszek"]);
+    expect(result.people.map((p) => p.name)).toEqual(["staszek", "Mariusz Ciastoń", "Odul (gość)"]);
+    expect(result.expectedInOffice).toBe(3);
+    expect(result.visits[0].summary).toBe("staszek, Odul i Mariusz");
+    expect(result.people.at(-1)?.key).toBe("guest:v1:odul (gość)");
+  });
+
+  it("frees the desk of someone who booked it but said they work remotely, and keeps it for a habit", () => {
+    const booked = [{ deskId: "a", userId: "ala", guestName: null, name: "ala", source: "manual" }];
+    const remote = day(prediction([person("ala", "remote"), person("bob", "office")]), booked);
+    expect(remote.people.map((p) => p.name)).toEqual(["bob"]);
+    expect([...remote.dormantDeskIds]).toEqual(["a"]);
+    expect(remote).toMatchObject({ expectedInOffice: 1, demand: 1, supply: 2 });
+    const habit = day(prediction([person("ala", "remote", "firmowid_habit"), person("bob", "office")]), booked);
+    expect(habit.people.map((p) => p.name)).toEqual(["bob", "ala"]);
+    expect(habit.dormantDeskIds.size).toBe(0);
+  });
+
+  it("does not seat a guest twice when that person booked a desk by name", () => {
+    const result = day(
+      prediction([person("ala", "office")], [{ id: "v1", note: "goście", guests: 1, guestNames: ["Odul"], userIds: [] }]),
+      [{ deskId: "a", userId: null, guestName: "Odul", name: "Odul", source: "manual" }],
+    );
+    expect(result.people.map((p) => p.name)).toEqual(["ala", "Odul"]);
+    expect(result.expectedInOffice).toBe(2);
+  });
+
+  it("treats a long stay as people in the office, not a visit, and suggests membership", () => {
+    const result = day(
+      prediction(
+        [person("ala", "office"), person("odul", "office", "visit"), person("mariusz", "office", "visit")],
+        [{ id: "v1", note: "okres próbny", guests: 0, userIds: ["odul", "mariusz"], startsOn: DATE, endsOn: "2026-12-01" }],
+      ),
+    );
+    expect(result).toMatchObject({ crowded: false, visitExtraPeople: 0, expectedInOffice: 3 });
+    expect(result.longStays).toEqual([
+      "odul i mariusz są w biurze do 1.12. Jeśli to na dłużej, admin może dodać te osoby do osób biura w edytorze biura.",
+    ]);
+  });
+
+  it("puts the seated headcount and a computed reason above the stable intro", () => {
+    const evaluation = day(
+      prediction([person("ala", "office"), person("bob", "office")], [{ id: "v1", note: "goście", guests: 2, userIds: [] }]),
+    );
+    const seat = (key: string, name: string, userId: string | null) => ({
+      deskId: key,
+      label: key,
+      key,
+      userId,
+      guestName: null,
+      name,
+      reason: "cluster",
+    });
+    const result = {
+      assignments: [seat("A", "ala", "ala"), seat("B", "bob", "bob"), seat("C", "Gość 1", null)],
+      overflow: [{ key: "g2", userId: null, guestName: "Gość 2", name: "Gość 2", groups: [] }],
+      displaced: [],
+      freeDeskIds: [],
+    };
+    const plan = { date: DATE, version: 2, requestedBy: "UNAT" };
+    const message = renderPlanMessage({ evaluation, result, plan } as never, "Przyjeżdżają goście.");
+    expect(message.blocks[0].text.text).toBe(
+      "*W środę 18.11: 4 osoby w biurze (w tym 2 gości).*\nPrzyjeżdża: 2 osoby; 4 osoby bez własnego biurka, a wolnych biurek bez właściciela jest 3. Przyjeżdżają goście.",
+    );
+
+    const calm = day(prediction([person("ala", "office")]));
+    const requested = renderPlanMessage(
+      { evaluation: calm, result: { ...result, assignments: [seat("A", "ala", "ala")], overflow: [] }, plan } as never,
+      "",
+    );
+    expect(requested.blocks[0].text.text).toBe("*W środę 18.11: 1 osoba w biurze.*\nPlan na prośbę <@UNAT>.");
   });
 
   it("is crowded at the threshold", () => {
@@ -260,20 +333,26 @@ describe("desk-plan cron", () => {
   });
 
   it("sends one heads-up for a multi-day visit, claimed before posting", async () => {
-    presence.listVisits.mockResolvedValue([{ startsOn: "2026-11-19", endsOn: "2026-11-20", note: "zespół z Wrocławia" }]);
-    plan.evaluateDay.mockResolvedValue({ crowded: true, expectedInOffice: 9 });
+    presence.listVisits.mockResolvedValue([
+      { id: "v1", startsOn: "2026-11-19", endsOn: "2026-11-20", note: "Odul i Mariusz będą w biurze od 2026-11-19" },
+    ]);
+    plan.evaluateDay.mockResolvedValue({
+      crowded: true,
+      expectedInOffice: 9,
+      visits: [{ id: "v1", summary: "Odul i Mariusz", long: false }],
+    });
     expect(await runDeskPlanHeadsUp(TODAY)).toMatchObject({ sent: [["2026-11-19", "2026-11-20"]] });
     expect(calls("chat.postMessage")).toHaveLength(1);
     const [message] = calls("chat.postMessage");
-    expect(message.text).toBe("W czwartek 19.11 – piątek 20.11 ~9 osób (przyjeżdża: zespół z Wrocławia). Przygotować plan biurek?");
+    expect(message.text).toBe("W czwartek 19.11 – piątek 20.11 ~9 osób (przyjeżdża: Odul i Mariusz). Przygotować plan biurek?");
     expect(message.blocks[1].elements[0].value).toBe("2026-11-19,2026-11-20");
     expect(store.claimHeadsUp.mock.invocationCallOrder[0]).toBeLessThan(slack.post.mock.invocationCallOrder[0]);
     expect(store.setHeadsUpTs).toHaveBeenCalledWith("layout-1", ["2026-11-19", "2026-11-20"], "111.222");
   });
 
   it("does not post when another run already claimed the dates, and releases a failed claim", async () => {
-    presence.listVisits.mockResolvedValue([{ startsOn: "2026-11-19", endsOn: "2026-11-19", note: "Wrocław" }]);
-    plan.evaluateDay.mockResolvedValue({ crowded: true, expectedInOffice: 9 });
+    presence.listVisits.mockResolvedValue([{ id: "v1", startsOn: "2026-11-19", endsOn: "2026-11-19", note: "Wrocław" }]);
+    plan.evaluateDay.mockResolvedValue({ crowded: true, expectedInOffice: 9, visits: [] });
     store.claimHeadsUp.mockResolvedValueOnce([]);
     expect(await runDeskPlanHeadsUp(TODAY)).toMatchObject({ sent: [] });
     expect(calls("chat.postMessage")).toHaveLength(0);
@@ -283,7 +362,7 @@ describe("desk-plan cron", () => {
   });
 
   it("skips a heads-up for a visit that does not make the office crowded", async () => {
-    presence.listVisits.mockResolvedValue([{ startsOn: "2026-11-19", endsOn: "2026-11-19", note: "klient" }]);
+    presence.listVisits.mockResolvedValue([{ id: "v1", startsOn: "2026-11-19", endsOn: "2026-11-19", note: "klient" }]);
     plan.evaluateDay.mockResolvedValue({ crowded: false, expectedInOffice: 4 });
     expect(await runDeskPlanHeadsUp(TODAY)).toMatchObject({ sent: [] });
     expect(store.claimHeadsUp).not.toHaveBeenCalled();
@@ -408,7 +487,7 @@ describe("plan interactions", () => {
   it("Przygotuj requests all the heads-up dates and posts the nearest one", async () => {
     plan.postPlan.mockResolvedValueOnce({ ok: true, permalink: "https://slack.test/p1", posted: true });
     await actions.handlePlanAction(payload(PLAN_ACTION.prepare, "2026-11-16,2026-11-19,2026-11-20"));
-    expect(store.setUnpostedStatus).toHaveBeenCalledWith("layout-1", ["2026-11-19", "2026-11-20"], "requested");
+    expect(store.setUnpostedStatus).toHaveBeenCalledWith("layout-1", ["2026-11-19", "2026-11-20"], "requested", "Uala");
     expect(plan.postPlan).toHaveBeenCalledWith("2026-11-19", { today: TODAY });
     const closed = calls("chat.update")[0];
     expect(closed.blocks.some((block: any) => block.type === "actions")).toBe(false);
