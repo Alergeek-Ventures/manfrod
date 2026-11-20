@@ -2,7 +2,7 @@ import { cancelReservationsForDate } from "../desks.ts";
 import { localToday } from "../time.ts";
 import { refreshPlans } from "./plan.ts";
 import type { StatedStatus } from "./presence-resolve.ts";
-import { setPresence } from "./presence-store.ts";
+import { setChatPresence } from "./presence-store.ts";
 
 export async function releaseAwayDays(userId: string, dates: string[], today = localToday()): Promise<string[]> {
   const upcoming = dates.filter((date) => date >= today);
@@ -11,8 +11,7 @@ export async function releaseAwayDays(userId: string, dates: string[], today = l
 }
 
 export async function recordChatPresence(userId: string, dates: string[], status: StatedStatus, today = localToday()): Promise<string[]> {
-  const upcoming = dates.filter((date) => date >= today);
-  for (const date of upcoming) await setPresence(userId, date, status, "chat");
-  if (status !== "office") return releaseAwayDays(userId, upcoming, today);
-  return refreshPlans(upcoming);
+  const recorded: string[] = [];
+  for (const date of dates.filter((day) => day >= today)) if (await setChatPresence(userId, date, status)) recorded.push(date);
+  return recorded.length > 0 ? refreshPlans(recorded) : [];
 }

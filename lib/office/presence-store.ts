@@ -29,6 +29,19 @@ export async function setPresence(
   return row;
 }
 
+export async function setChatPresence(userId: string, date: string, status: StatedStatus): Promise<boolean> {
+  const rows = await db
+    .insert(officePresence)
+    .values({ userId, date, status, source: "chat", updatedAt: new Date() })
+    .onConflictDoUpdate({
+      target: [officePresence.userId, officePresence.date],
+      set: { status, updatedAt: new Date() },
+      setWhere: eq(officePresence.source, "chat"),
+    })
+    .returning({ id: officePresence.id });
+  return rows.length > 0;
+}
+
 export async function clearPresence(userId: string, date: string): Promise<boolean> {
   const deleted = await db
     .delete(officePresence)

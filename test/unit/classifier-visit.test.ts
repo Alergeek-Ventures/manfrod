@@ -21,6 +21,7 @@ vi.mock("../../lib/office/chat-presence.ts", () => chat);
 const { classifierRules, MEMORY_ACTIONS } = await import("../../lib/memory/action-decider.ts");
 const {
   parseBulkResponse,
+  absenceFreesDesks,
   PRESENCE_REACTIONS,
   presenceFromResult,
   recordAnnouncedVisit,
@@ -170,9 +171,15 @@ describe("set_presence", () => {
     expect(MEMORY_ACTIONS).toContain("set_presence");
     const rules = classifierRules().criteria;
     const presence = rules.set_presence.replace(/\s+/g, " ");
-    for (const phrase of ["LITERAL presence signal", "hej, dzisiaj będę zdalnie", "ja chory, chyba do końca tygodnia z domu"])
+    for (const phrase of ["LITERAL presence signal", "hej, dzisiaj będę zdalnie", "ja chory, do końca tygodnia z domu"])
       expect(presence).toContain(phrase);
-    for (const negative of ["zdalnie to jest przyszłość", "Kasia jest dziś zdalnie", "wczoraj byłem zdalnie", "kto jutro w biurze?"])
+    for (const negative of [
+      "zdalnie to jest przyszłość",
+      "Kasia jest dziś zdalnie",
+      "wczoraj byłem zdalnie",
+      "kto jutro w biurze?",
+      "chyba jutro zdalnie",
+    ])
       expect(presence).toContain(negative);
     expect(rules.ignore).not.toContain("does not affect working hours");
     expect(readFileSync("lib/prompts/classifier.md", "utf8")).toContain('"do końca tygodnia" ends on the Friday');
@@ -212,6 +219,14 @@ describe("set_presence", () => {
     expect(await recordStatedPresence({ presence: "office", start_date: "2026-11-10" }, source, TODAY)).toBe(false);
     expect(chat.recordChatPresence).not.toHaveBeenCalled();
     expect(slack.addReaction).not.toHaveBeenCalled();
+  });
+});
+
+describe("create_absence and desks", () => {
+  it("frees desks only when the person is not working", () => {
+    expect(absenceFreesDesks({ working: false })).toBe(true);
+    expect(absenceFreesDesks({})).toBe(true);
+    expect(absenceFreesDesks({ working: true })).toBe(false);
   });
 });
 

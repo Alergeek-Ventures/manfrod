@@ -6,7 +6,7 @@ if (enabled) process.env.DATABASE_URL = process.env.TEST_DATABASE_URL;
 
 const { db, tables } = await import("../../lib/db/index.ts");
 const { findOrCreateBySlackId } = await import("../../lib/accounts.ts");
-const { cancelVisit, clearPresence, defaultLayoutId, listVisits, recordVisit, setPresence, updateVisit } =
+const { cancelVisit, clearPresence, defaultLayoutId, listVisits, recordVisit, setChatPresence, setPresence, updateVisit } =
   await import("../../lib/office/presence-store.ts");
 const { loadStatedOffice } = await import("../../lib/office/presence-sources.ts");
 const { eq, inArray } = await import("drizzle-orm");
@@ -112,6 +112,23 @@ describe.skipIf(!enabled)("office presence store", () => {
     } finally {
       if (visitIds.length > 0) await db.delete(tables.officeVisits).where(inArray(tables.officeVisits.id, visitIds));
       await db.delete(tables.users).where(inArray(tables.users.id, [author.id, odul.id]));
+    }
+  });
+
+  it("lets chat statements overwrite only chat statements and keeps the note", async () => {
+    const user = await person();
+    try {
+      await setPresence(user.id, "2031-05-14", "office", "button", "od 10");
+      expect(await setChatPresence(user.id, "2031-05-14", "remote")).toBe(false);
+      expect(await loadExplicit([user.id], "2031-05-14")).toMatchObject([{ status: "office", source: "button", note: "od 10" }]);
+      await setPresence(user.id, "2031-05-15", "office", "chat", "u klienta");
+      expect(await setChatPresence(user.id, "2031-05-15", "remote")).toBe(true);
+      expect(await loadExplicit([user.id], "2031-05-15")).toMatchObject([{ status: "remote", source: "chat", note: "u klienta" }]);
+      expect(await setChatPresence(user.id, "2031-05-16", "leave")).toBe(true);
+      expect(await loadExplicit([user.id], "2031-05-16")).toMatchObject([{ status: "leave", source: "chat", note: null }]);
+    } finally {
+      await db.delete(tables.officePresence).where(eq(tables.officePresence.userId, user.id));
+      await db.delete(tables.users).where(eq(tables.users.id, user.id));
     }
   });
 

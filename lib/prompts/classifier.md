@@ -106,7 +106,7 @@ Possible actions:
 ── SET_PRESENCE ─────────────────────────────────────────────────────────
 - The author says where THEY will work on a given day or days, in a team channel
   (company_channel, project_internal): "hej, dzisiaj będę zdalnie", "jutro będę w biurze",
-  "w piątek pracuję z domu", "ja chory, chyba do końca tygodnia z domu", "jutro nie będzie
+  "w piątek pracuję z domu", "ja chory, do końca tygodnia z domu", "jutro nie będzie
   mnie w biurze, pracuję u klienta"
 - Require a LITERAL presence signal about the author's own day: office ("w biurze", "w
   biurze będę", "przyjdę do biura"), remote ("zdalnie", "z domu", "home office", "WFH", "u
@@ -116,7 +116,7 @@ Possible actions:
   dziś zdalnie"), questions ("kto jutro w biurze?", "będziesz jutro w biurze?"), opinions
   ("zdalnie to jest przyszłość", "wolę pracować z biura"), past days ("wczoraj byłem
   zdalnie"), habits ("w środy zawsze zdalnie"), conditionals or undecided plans ("może
-  jutro wpadnę") → ignore
+  jutro wpadnę", "chyba jutro zdalnie") → ignore
 - Time off (urlop, wolne, L4) with a literal absence signal is create_absence, which already
   marks the person away for the desk plan; don't pick set_presence for it. Sick but working
   from home ("chory, z domu") is set_presence "remote"; never mention health in the note

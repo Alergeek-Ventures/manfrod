@@ -267,7 +267,7 @@ async function createAbsence(result: Result, message: BufferedMessage, batch: Ba
   if (overlapping && (result.flagged === true || result.replaces === true)) {
     const { fact } = await putAbsence(userId!, startDate, endDate, note, writeAccess);
     await createAbsenceNode(userId!, fact.access, note, batch);
-    await releaseAbsenceDesks(userId!, startDate, endDate);
+    if (absenceFreesDesks(result)) await releaseAbsenceDesks(userId!, startDate, endDate);
     return;
   }
   if (overlapping) {
@@ -278,7 +278,7 @@ async function createAbsence(result: Result, message: BufferedMessage, batch: Ba
   const key = `absence:${userId ?? userName}:${startDate}`;
   await setFact(key, `${startDate}..${endDate} — ${fromDm ? note : absenceDescription(note, text)}`, writeAccess, userId);
   if (!userId) return;
-  await releaseAbsenceDesks(userId, startDate, endDate);
+  if (absenceFreesDesks(result)) await releaseAbsenceDesks(userId, startDate, endDate);
 
   const node = await createAbsenceNode(userId, writeAccess, note, batch);
   if (!node) return;
@@ -288,6 +288,8 @@ async function createAbsence(result: Result, message: BufferedMessage, batch: Ba
   const asked = proposal !== null && (await postEscalationQuestion(batch.channelId, message, node, proposal, writeAccess, key, absence));
   await sendEvent(asked ? EVENTS.absenceAsked : EVENTS.absenceRecorded, absence);
 }
+
+export const absenceFreesDesks = (result: Result) => result.working !== true;
 
 async function releaseAbsenceDesks(userId: string, startDate: string, endDate: string) {
   try {
