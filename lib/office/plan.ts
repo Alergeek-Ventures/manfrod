@@ -335,6 +335,14 @@ async function draftIntro(evaluation: DayEvaluation, requested: boolean): Promis
   }
 }
 
+export function stableJson(value: unknown): string {
+  return JSON.stringify(value, (_key, item: unknown) =>
+    item && typeof item === "object" && !Array.isArray(item)
+      ? Object.fromEntries(Object.entries(item as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+      : item,
+  );
+}
+
 export const SYNC_ATTEMPTS = 3;
 
 export async function syncPlanMessage(layoutId: string, date: string): Promise<{ ok: true } | { ok: false; error: string }> {
@@ -432,7 +440,7 @@ export async function refreshPlan(date: string, opts: { force?: boolean; notes?:
     if (!plan || plan.status !== "posted") return null;
     const prepared = await prepareLocked(tx, date, { today: opts.today, status: "posted" });
     const intro = plan.reason ?? "";
-    const unchanged = JSON.stringify(renderPlanMessage(prepared, intro, opts.notes)) === JSON.stringify(plan.message);
+    const unchanged = stableJson(renderPlanMessage(prepared, intro, opts.notes)) === stableJson(plan.message);
     if (!prepared.changed && !opts.force && unchanged) return { prepared, updated: false };
     const bumped = (await updatePlan(layoutId, date, { bumpVersion: true }, tx)) ?? prepared.plan;
     const next = { ...prepared, plan: bumped };
