@@ -4,7 +4,7 @@ import { cancelReservationsForDate } from "../../lib/desks.ts";
 import { clearPresence, setPresence } from "../../lib/office/presence.ts";
 import { isValidIsoDate, withWeekday } from "../../lib/time.ts";
 import { refreshNote } from "../lib/desk-plan.ts";
-import { resolvePerson } from "../lib/people.ts";
+import { resolvePerson } from "../../lib/people.ts";
 import { defineManfrodTool } from "../lib/define-tool.ts";
 
 const STATUS_LABEL = { office: "w biurze", remote: "zdalnie", leave: "nieobecny/a" };
