@@ -1,57 +1,55 @@
 import { z } from "zod";
-import { listUsers } from "../../lib/accounts.ts";
 import { listVisits, recordVisit } from "../../lib/office/presence.ts";
 import { describeVisit } from "../../lib/office/presence-format.ts";
 import { isValidIsoDate } from "../../lib/time.ts";
-import { datesBetween, refreshNote } from "../lib/desk-plan.ts";
-import { resolvePerson } from "../lib/people.ts";
+import { datesBetween, longStayHint, refreshNote } from "../lib/desk-plan.ts";
+import { canEditVisits, nameMap, resolveVisitors, VISIT_ERRORS, VISIT_REFUSAL } from "../lib/visits.ts";
 import { defineManfrodTool } from "../lib/define-tool.ts";
-
-const ERRORS = {
-  invalid_dates: "Invalid dates: use YYYY-MM-DD and end_date on or after start_date.",
-  invalid_guests: "guests must be a whole number, 0 or more.",
-  nobody: "Nothing saved: name at least one person or give a guest count.",
-  no_layout: "Nothing saved: no office is set up yet.",
-};
 
 export default defineManfrodTool({
   description:
-    "Record that people are coming to the office on given days: colleagues from another city (e.g. the team from Wrocław), a team day, or outside guests. Known teammates go in people, everyone else is counted in guests. Call list-office-presence for those days first and don't record a visit that is already there.",
+    "Record that people are coming to the office on given days: colleagues from another city (e.g. the team from Wrocław), newcomers, a team day, or outside guests. Everyone named goes in people (their Slack account is looked up even if they never talked to Manfrod); only named people without a Slack account go in guest_names, and guests counts the unnamed rest. Call list-office-presence for those days first; to change a visit that is already there use update-office-visit instead.",
   inputSchema: z.object({
     start_date: z.string().describe("First day, YYYY-MM-DD"),
     end_date: z.string().optional().describe("Last day, YYYY-MM-DD (default: start_date)"),
-    people: z.array(z.string()).max(40).optional().describe("Teammates coming: Slack IDs, <@mentions>, Manfrod user IDs or names"),
-    guests: z.number().int().min(0).max(100).optional().describe("How many other people come (not teammates listed in people)"),
+    people: z
+      .array(z.string())
+      .max(40)
+      .optional()
+      .describe("People coming who have Slack: Slack IDs, <@mentions>, Manfrod user IDs or names"),
+    guest_names: z.array(z.string().min(1).max(60)).max(40).optional().describe("Named guests without a Slack account"),
+    guests: z.number().int().min(0).max(100).optional().describe("How many more people come without a name"),
     note: z.string().min(1).max(300).describe("What it is, e.g. 'zespół z Wrocławia', 'warsztaty z klientem X'"),
   }),
   label: { start: ({ start_date }) => `Record office visit on ${start_date}` },
-  async execute({ start_date, end_date, people, guests, note }, ctx) {
-    if (!ctx.readableLevels.includes("internal")) return "Office visits are only available in team channels and DMs.";
+  async execute({ start_date, end_date, people, guest_names, guests, note }, ctx) {
+    if (!canEditVisits(ctx.readableLevels)) return VISIT_REFUSAL;
     const endsOn = end_date ?? start_date;
-    if (!isValidIsoDate(start_date) || !isValidIsoDate(endsOn)) return ERRORS.invalid_dates;
-    const everyone = await listUsers();
-    const matches = await Promise.all((people ?? []).map((person) => resolvePerson(person, everyone)));
-    const problems = matches.flatMap((match) => (match.ok ? [] : [match.message]));
-    if (problems.length > 0) return `Nothing saved: ${problems.join("; ")}. Fix the names, or count people who aren't teammates in guests.`;
-    const userIds = matches.flatMap((match) => (match.ok ? [match.user.id] : []));
+    if (!isValidIsoDate(start_date) || !isValidIsoDate(endsOn)) return VISIT_ERRORS.invalid_dates;
+    const resolved = await resolveVisitors(people ?? []);
+    if (!resolved.ok) return resolved.message;
     const existing = await listVisits(start_date, endsOn);
+    const named = guest_names ?? [];
     const recorded = await recordVisit({
       startsOn: start_date,
       endsOn,
-      userIds,
-      guests: guests ?? 0,
+      userIds: resolved.userIds,
+      guests: (guests ?? 0) + named.length,
+      guestNames: named,
       note: note.trim(),
       createdBy: ctx.userId || null,
     });
-    if (!recorded.ok) return ERRORS[recorded.error];
-    const names = new Map(everyone.map((user) => [user.id, user.name ?? user.slackId]));
+    if (!recorded.ok) return VISIT_ERRORS[recorded.error];
+    const names = nameMap(resolved.everyone);
     const verb = recorded.duplicate ? "Already recorded, merged into it" : "Recorded";
     const dates = datesBetween(recorded.visit.startsOn, recorded.visit.endsOn);
-    const lines = [`${verb}: ${describeVisit(recorded.visit, names)}${await refreshNote(dates)}`];
+    const lines = [
+      `${verb}: ${describeVisit(recorded.visit, names)}${await refreshNote(dates)}${await longStayHint(recorded.visit, names)}`,
+    ];
     const others = existing.filter((visit) => visit.id !== recorded.visit.id);
     if (others.length > 0)
       lines.push(
-        `Other visits already recorded on those days (cancel duplicates with cancel-office-visit):\n${others.map((visit) => `- ${describeVisit(visit, names)}`).join("\n")}`,
+        `Other visits already recorded on those days (fix them with update-office-visit, or cancel duplicates with cancel-office-visit):\n${others.map((visit) => `- ${describeVisit(visit, names)}`).join("\n")}`,
       );
     return lines.join("\n");
   },
