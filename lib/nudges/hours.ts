@@ -197,6 +197,22 @@ async function isPublicHoliday(today: string): Promise<boolean> {
   return holidays.ok && holidays.value.some((holiday) => holiday.date === today);
 }
 
+export function hasActivity(signals: {
+  entered: Date | null;
+  calendar: unknown[];
+  slack: unknown[];
+  issues: unknown[];
+  commits: unknown[];
+}): boolean {
+  return (
+    signals.entered !== null ||
+    signals.calendar.length > 0 ||
+    signals.slack.length > 0 ||
+    signals.issues.length > 0 ||
+    signals.commits.length > 0
+  );
+}
+
 export async function runEveningHours(today = localToday()): Promise<number> {
   if (await isPublicHoliday(today)) return 0;
   const dayStart = zonedToUtc(today, "00:00");
@@ -229,6 +245,10 @@ export async function runEveningHours(today = localToday()): Promise<number> {
       const slack = slackActivity(person.slackId, await workspace.all(), dayStart);
       const issues = await linear.issuesFor(person);
       const commits = await commitsBetween(person, dayStart, zonedToUtc(addDays(today, 1), "00:00"));
+      if (!hasActivity({ entered, calendar, slack, issues, commits })) {
+        await recordDelivery(person.id, "hours", today, false, "No activity today.");
+        continue;
+      }
       const projectNames = await firmowidProjects(access.mcpUrl, access.token);
       const pattern = weekdayPattern(records.value, today);
       const context = [
