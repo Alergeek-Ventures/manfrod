@@ -9,8 +9,11 @@ import { addAccess, overlappingAbsences, putAbsence, setFact, upcomingAbsences }
 import { generateText, system, user } from "../llm/index.ts";
 import { decideAction, type MemoryAction } from "./action-decider.ts";
 import { logger } from "../log.ts";
+import { recordChatPresence, releaseAwayDays } from "../office/chat-presence.ts";
 import { refreshPlans } from "../office/plan.ts";
+import type { StatedStatus } from "../office/presence-resolve.ts";
 import { recordVisit } from "../office/presence-store.ts";
+import { resolveVisitPeople } from "../office/visit-people.ts";
 import { addReaction, post } from "../slack/api.ts";
 import { addDays, isValidIsoDate, localToday, weekdayName, withWeekday } from "../time.ts";
 import { embedQuery } from "../voyage.ts";
@@ -215,6 +218,15 @@ async function dispatchAction(action: string, result: Result, message: BufferedM
       return createAbsence(result, message, batch, writeAccess);
     case "create_visit":
       return createVisit(result, message, batch, writeAccess);
+    case "set_presence":
+      await recordStatedPresence(result, {
+        channelId: batch.channelId,
+        writeAccess,
+        authorUserId: authorId(batch, message),
+        ts: message.ts ?? null,
+        text: message.text ?? "",
+      });
+      return;
     case "create_meeting":
       await setFact(`meeting:${channelId}:${message.ts || "0"}`, message.text ?? "", writeAccess, "system");
       return;
@@ -255,6 +267,7 @@ async function createAbsence(result: Result, message: BufferedMessage, batch: Ba
   if (overlapping && (result.flagged === true || result.replaces === true)) {
     const { fact } = await putAbsence(userId!, startDate, endDate, note, writeAccess);
     await createAbsenceNode(userId!, fact.access, note, batch);
+    await releaseAbsenceDesks(userId!, startDate, endDate);
     return;
   }
   if (overlapping) {
@@ -265,6 +278,7 @@ async function createAbsence(result: Result, message: BufferedMessage, batch: Ba
   const key = `absence:${userId ?? userName}:${startDate}`;
   await setFact(key, `${startDate}..${endDate} — ${fromDm ? note : absenceDescription(note, text)}`, writeAccess, userId);
   if (!userId) return;
+  await releaseAbsenceDesks(userId, startDate, endDate);
 
   const node = await createAbsenceNode(userId, writeAccess, note, batch);
   if (!node) return;
@@ -275,7 +289,17 @@ async function createAbsence(result: Result, message: BufferedMessage, batch: Ba
   await sendEvent(asked ? EVENTS.absenceAsked : EVENTS.absenceRecorded, absence);
 }
 
-export type VisitDraft = { startsOn: string; endsOn: string; userIds: string[]; guests: number; note: string };
+async function releaseAbsenceDesks(userId: string, startDate: string, endDate: string) {
+  try {
+    await releaseAwayDays(userId, visitDates(startDate, endDate));
+  } catch (error) {
+    log.warn(`Classifier create_absence: refreshing desk plans failed: ${(error as Error).message}`);
+  }
+}
+
+export type VisitDraft = { startsOn: string; endsOn: string; userIds: string[]; names: string[]; guests: number; note: string };
+
+export const MAX_VISIT_NAMES = 20;
 
 export function visitFromResult(result: Result, authorUserId: string | null, today: string, text: string): VisitDraft | null {
   const valid = (value: unknown) => (typeof value === "string" && isValidIsoDate(value) ? value : null);
@@ -285,12 +309,19 @@ export function visitFromResult(result: Result, authorUserId: string | null, tod
   if (endsOn < startsOn) return null;
   const guests = Number.isInteger(result.guests) ? Math.min(Math.max(result.guests as number, 0), 100) : 0;
   const userIds = result.author_coming === true && authorUserId ? [authorUserId] : [];
-  if (guests === 0 && userIds.length === 0) return null;
+  const names = Array.isArray(result.people)
+    ? [
+        ...new Set(
+          result.people.flatMap((name: unknown) => (typeof name === "string" && name.trim() !== "" ? [name.trim().slice(0, 80)] : [])),
+        ),
+      ].slice(0, MAX_VISIT_NAMES)
+    : [];
+  if (guests === 0 && userIds.length === 0 && names.length === 0) return null;
   const note = typeof result.note === "string" && result.note.trim() !== "" ? result.note.trim().slice(0, 300) : text.slice(0, 300);
-  return { startsOn, endsOn, userIds, guests, note };
+  return { startsOn, endsOn, userIds, names, guests, note };
 }
 
-export const visitAllowed = (channelId: string, writeAccess: string[]) =>
+export const teamChannel = (channelId: string, writeAccess: string[]) =>
   !channelId.startsWith("D") && writeAccess.length > 0 && writeAccess.every((level) => level === "internal");
 
 async function createVisit(result: Result, message: BufferedMessage, batch: Batch, writeAccess: string[]) {
@@ -306,7 +337,7 @@ async function createVisit(result: Result, message: BufferedMessage, batch: Batc
 export type VisitSource = { channelId: string; writeAccess: string[]; authorUserId: string | null; ts: string | null; text: string };
 
 export async function recordAnnouncedVisit(result: Result, source: VisitSource, today = localToday()): Promise<boolean> {
-  if (!visitAllowed(source.channelId, source.writeAccess)) {
+  if (!teamChannel(source.channelId, source.writeAccess)) {
     log.debug(`Classifier create_visit: skipping outside team channels (${source.channelId})`);
     return false;
   }
@@ -315,7 +346,16 @@ export async function recordAnnouncedVisit(result: Result, source: VisitSource, 
     log.debug("Classifier create_visit: no usable dates or people, skipping");
     return false;
   }
-  const recorded = await recordVisit({ ...draft, createdBy: source.authorUserId });
+  const named = await resolveVisitPeople(draft.names);
+  const recorded = await recordVisit({
+    startsOn: draft.startsOn,
+    endsOn: draft.endsOn,
+    userIds: [...new Set([...draft.userIds, ...named.userIds])],
+    guests: draft.guests + named.guestNames.length,
+    guestNames: named.guestNames,
+    note: draft.note,
+    createdBy: source.authorUserId,
+  });
   if (!recorded.ok) {
     log.warn(`Classifier create_visit: not recorded: ${recorded.error}`);
     return false;
@@ -326,6 +366,44 @@ export async function recordAnnouncedVisit(result: Result, source: VisitSource, 
 }
 
 export const VISIT_REACTION = "office";
+
+export const PRESENCE_REACTIONS: Record<StatedStatus, string> = { office: "office", remote: "house", leave: "palm_tree" };
+
+const STATED: ReadonlySet<string> = new Set(["office", "remote", "leave"]);
+
+export type PresenceDraft = { status: StatedStatus; dates: string[] };
+
+const isWeekday = (date: string) => ![0, 6].includes(new Date(`${date}T00:00:00Z`).getUTCDay());
+
+export function presenceFromResult(result: Result, today: string): PresenceDraft | null {
+  const valid = (value: unknown) => (typeof value === "string" && isValidIsoDate(value) ? value : null);
+  if (typeof result.presence !== "string" || !STATED.has(result.presence)) return null;
+  const startsOn = valid(result.start_date);
+  if (!startsOn || startsOn < today) return null;
+  const endsOn = valid(result.end_date) ?? startsOn;
+  if (endsOn < startsOn) return null;
+  const dates = visitDates(startsOn, endsOn).filter(isWeekday);
+  return dates.length > 0 ? { status: result.presence as StatedStatus, dates } : null;
+}
+
+export async function recordStatedPresence(result: Result, source: VisitSource, today = localToday()): Promise<boolean> {
+  if (!teamChannel(source.channelId, source.writeAccess)) {
+    log.debug(`Classifier set_presence: skipping outside team channels (${source.channelId})`);
+    return false;
+  }
+  if (!source.authorUserId) {
+    log.debug("Classifier set_presence: author not in the system, skipping");
+    return false;
+  }
+  const draft = presenceFromResult(result, today);
+  if (!draft) {
+    log.debug("Classifier set_presence: no usable status or dates, skipping");
+    return false;
+  }
+  await recordChatPresence(source.authorUserId, draft.dates, draft.status, today);
+  if (source.ts) await addReaction(source.channelId, source.ts, PRESENCE_REACTIONS[draft.status]);
+  return true;
+}
 
 export function visitDates(from: string, to: string, max = 31): string[] {
   const dates: string[] = [];
