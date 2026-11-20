@@ -78,7 +78,8 @@ export function buildMapState(input: MapStateInput): MapState {
   const byDesk = new Map(input.reservations.map((reservation) => [reservation.deskId, reservation]));
 
   const resolved = active.map((desk) => {
-    const reservation = byDesk.get(desk.id) ?? null;
+    const booked = byDesk.get(desk.id) ?? null;
+    const reservation = booked?.userId && input.awayUserIds.has(booked.userId) ? null : booked;
     const status = deskStatus(desk, reservation, input.awayUserIds);
     const fullName = reservation ? reservationName(reservation) : desk.ownerUserId ? desk.ownerName : null;
     return { desk, reservation, status, fullName };

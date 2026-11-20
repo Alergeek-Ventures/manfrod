@@ -10,13 +10,16 @@ export type RosterInput = {
   visits: (GuestVisit & { userIds: string[] })[];
   manual: ManualSeat[];
   memberIds: ReadonlySet<string>;
+  away: ReadonlySet<string>;
 };
 
 export type Roster = { people: RosterPerson[]; guestList: VisitGuest[] };
 
 export const guestKey = (visitId: string, name: string) => `guest:${visitId}:${name.trim().toLowerCase()}`;
 
-export function dayRoster({ people, visits, manual, memberIds }: RosterInput): Roster {
+export const isDormant = (seat: { userId: string | null }, away: ReadonlySet<string>) => Boolean(seat.userId && away.has(seat.userId));
+
+export function dayRoster({ people, visits, manual, memberIds, away }: RosterInput): Roster {
   const visitGroups = new Map<string, string[]>();
   for (const visit of visits)
     for (const userId of visit.userIds) visitGroups.set(userId, [...(visitGroups.get(userId) ?? []), `visit:${visit.id}`]);
@@ -32,6 +35,7 @@ export function dayRoster({ people, visits, manual, memberIds }: RosterInput): R
     }));
   const keys = new Set(present.map((person) => person.key));
   for (const seat of manual) {
+    if (isDormant(seat, away)) continue;
     const key = personKey(seat);
     if (keys.has(key)) continue;
     keys.add(key);

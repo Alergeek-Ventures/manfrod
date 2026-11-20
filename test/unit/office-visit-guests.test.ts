@@ -93,6 +93,7 @@ describe("dayRoster", () => {
         { userId: null, guestName: "Zenek", name: "Zenek", slackId: null },
       ],
       memberIds: new Set(["ala", "bob", "cyd"]),
+      away: new Set(),
     });
     expect(roster.people.map((person) => person.key)).toEqual([
       "user:ala",
@@ -109,5 +110,22 @@ describe("dayRoster", () => {
       manual: [{ deskId: "a", userId: "cyd", guestName: null, name: "Cyd" }],
     });
     expect(result.assignments.length + result.overflow.length).toBe(roster.people.length);
+  });
+});
+
+describe("dayRoster and confirmed absence", () => {
+  const base = {
+    people: [{ userId: "ala", name: "Ala", slackId: "UALA", status: "remote" }],
+    visits: [],
+    manual: [{ userId: "ala", guestName: null, name: "Ala", slackId: "UALA" }],
+    memberIds: new Set(["ala"]),
+  };
+
+  it("does not count someone confirmed away even with a desk booking", () => {
+    expect(dayRoster({ ...base, away: new Set(["ala"]) }).people).toEqual([]);
+  });
+
+  it("keeps a booking when the absence is only predicted", () => {
+    expect(dayRoster({ ...base, away: new Set() }).people.map((person) => person.key)).toEqual(["user:ala"]);
   });
 });

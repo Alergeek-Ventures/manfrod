@@ -1,5 +1,6 @@
 import type { OfficeVisit } from "../db/schema.ts";
 import { localToday } from "../time.ts";
+import { isConfirmedAway } from "./away.ts";
 import { fetchFirmowidSignals } from "./presence-firmowid.ts";
 import { habitWindowStart, resolvePresence, type PresenceResolution, type StatedStatus } from "./presence-resolve.ts";
 import {
@@ -108,7 +109,8 @@ export async function predictOfficeDay(date: string, opts: { layoutId?: string; 
     (a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || b.confidence - a.confidence || (a.name ?? "").localeCompare(b.name ?? ""),
   );
 
-  const roster = dayRoster({ people: predicted, visits, manual, memberIds });
+  const away = new Set(predicted.filter(isConfirmedAway).map((person) => person.userId));
+  const roster = dayRoster({ people: predicted, visits, manual, memberIds, away });
   return {
     date,
     layoutId,

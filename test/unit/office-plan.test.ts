@@ -198,6 +198,17 @@ describe("summarizeDay", () => {
     expect(result.people.at(-1)?.key).toBe("guest:v1:odul (gość)");
   });
 
+  it("frees the desk of someone who booked it but said they work remotely, and keeps it for a habit", () => {
+    const booked = [{ deskId: "a", userId: "ala", guestName: null, name: "ala", source: "manual" }];
+    const remote = day(prediction([person("ala", "remote"), person("bob", "office")]), booked);
+    expect(remote.people.map((p) => p.name)).toEqual(["bob"]);
+    expect([...remote.dormantDeskIds]).toEqual(["a"]);
+    expect(remote).toMatchObject({ expectedInOffice: 1, demand: 1, supply: 2 });
+    const habit = day(prediction([person("ala", "remote", "firmowid_habit"), person("bob", "office")]), booked);
+    expect(habit.people.map((p) => p.name)).toEqual(["bob", "ala"]);
+    expect(habit.dormantDeskIds.size).toBe(0);
+  });
+
   it("does not seat a guest twice when that person booked a desk by name", () => {
     const result = day(
       prediction([person("ala", "office")], [{ id: "v1", note: "goście", guests: 1, guestNames: ["Odul"], userIds: [] }]),

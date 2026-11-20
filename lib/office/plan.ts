@@ -25,7 +25,7 @@ import {
 import { predictOfficeDay, type OfficeDayPrediction } from "./presence.ts";
 import { loadMembers } from "./presence-sources.ts";
 import { deskMapUrl } from "./url.ts";
-import { dayRoster, type RosterPerson } from "./roster.ts";
+import { dayRoster, isDormant, type RosterPerson } from "./roster.ts";
 import { visitPlace } from "./visit-guests.ts";
 
 const { deskReservations, projectMemberships } = tables;
@@ -44,6 +44,7 @@ export type DayEvaluation = {
   people: PlannedPerson[];
   reservations: ReservationWithDesk[];
   away: Set<string>;
+  dormantDeskIds: Set<string>;
   demand: number;
   supply: number;
   expectedInOffice: number;
@@ -73,8 +74,11 @@ function visitLine(visit: OfficeVisit, names: ReadonlyMap<string, string>): Visi
 
 export function summarizeDay({ date, office, prediction, reservations: all, memberIds }: DayInput): DayEvaluation {
   const activeDesks = new Set(office.desks.filter((desk) => desk.active).map((desk) => desk.id));
+  const away = new Set(prediction.people.filter(isConfirmedAway).map((person) => person.userId));
   const reservations = all.filter((reservation) => activeDesks.has(reservation.deskId));
-  const manual = reservations.filter((reservation) => reservation.source === "manual");
+  const booked = reservations.filter((reservation) => reservation.source === "manual");
+  const dormantDeskIds = new Set(booked.filter((reservation) => isDormant(reservation, away)).map((reservation) => reservation.deskId));
+  const manual = booked.filter((reservation) => !isDormant(reservation, away));
   const roster = dayRoster({
     people: prediction.people,
     visits: prediction.visits,
@@ -85,16 +89,15 @@ export function summarizeDay({ date, office, prediction, reservations: all, memb
       slackId: reservation.user?.slackId ?? null,
     })),
     memberIds,
+    away,
   });
   const people = roster.people;
   const guestList = roster.guestList;
-  const away = new Set(prediction.people.filter(isConfirmedAway).map((person) => person.userId));
-
   const manualKeys = new Set(manual.map(personKey));
   const manualDesks = new Set(manual.map((reservation) => reservation.deskId));
   const owners = new Set(office.desks.flatMap((desk) => (desk.ownerUserId ? [desk.ownerUserId] : [])));
   const demand = people.filter((person) => !manualKeys.has(person.key) && !(person.userId && owners.has(person.userId))).length;
-  const supply = office.desks.filter((desk) => !desk.ownerUserId && !manualDesks.has(desk.id)).length;
+  const supply = office.desks.filter((desk) => !desk.ownerUserId && !manualDesks.has(desk.id) && !dormantDeskIds.has(desk.id)).length;
   const expectedInOffice = people.length;
 
   const names = new Map(prediction.people.map((person) => [person.userId, person.name ?? person.slackId]));
@@ -127,6 +130,7 @@ export function summarizeDay({ date, office, prediction, reservations: all, memb
     people,
     reservations,
     away,
+    dormantDeskIds,
     demand,
     supply,
     expectedInOffice,
@@ -208,11 +212,11 @@ async function prepareLocked(tx: Executor, date: string, opts: { today?: string;
   const rosterKey = (reservation: ReservationWithDesk) =>
     (!reservation.userId && guestKeys.get((reservation.guestName ?? "").toLowerCase())) || personKey(reservation);
   const result = assignDesks({
-    desks: office.desks,
+    desks: office.desks.filter((desk) => !evaluation.dormantDeskIds.has(desk.id)),
     people: people.map((person) => ({ ...person, groups: [...person.groups, ...((person.userId && groups.get(person.userId)) || [])] })),
     awayUserIds: evaluation.away,
     manual: reservations
-      .filter((reservation) => reservation.source === "manual")
+      .filter((reservation) => reservation.source === "manual" && !isDormant(reservation, evaluation.away))
       .map((reservation) => ({
         deskId: reservation.deskId,
         userId: reservation.userId,
