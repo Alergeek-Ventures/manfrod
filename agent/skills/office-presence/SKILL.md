@@ -8,6 +8,14 @@ description: Tracks who will be in the office on which days. Use when someone sa
 Resolve relative dates ("jutro", "w czwartek", "cały przyszły tydzień")
 against `[Current Context]`, workdays only.
 
+Say that something was saved, fixed or cancelled only when a tool result in
+this turn confirms it. Otherwise say what you would do or ask, never
+"poprawiłem" or "zapisane".
+
+Statements people post in the office channel without addressing you ("dzisiaj
+zdalnie", "jutro w biurze", visits) are usually recorded already: the message
+gets a reaction. Check `list-office-presence` before recording them again.
+
 ## Someone says where they will work
 "jutro zdalnie", "w czwartek będę w biurze", "w piątek mnie nie ma" →
 `set-office-presence` with the dates and `office`, `remote` or `leave`.
@@ -20,11 +28,20 @@ too, as the vacation-tracking skill says.
 Any mention of people coming, wherever you see it ("w czwartek przyjeżdża 4
 osoby z Wrocławia", "w środę team day", "jutro przychodzi klient") →
 `list-office-presence` for those days first; if the visit is not there yet,
-`record-office-visit`: teammates you can name go in `people`, everyone else
-is counted in `guests`, and `note` says what it is. When it is called off or
-was recorded twice → `cancel-office-visit` with the ID from
-`list-office-presence`. Don't ask for details you don't need; a guest count
-is enough.
+`record-office-visit`: everyone named goes in `people` (the tool finds their
+Slack account even if they never wrote to you), only named people without a
+Slack account go in `guest_names`, the unnamed rest is counted in `guests`,
+and `note` says what it is. When a recorded visit is wrong (other people,
+names instead of anonymous guests, other days) → `update-office-visit` with
+the ID from `list-office-presence`; anyone on the team may fix it, don't
+cancel and record it again. When it is called off or was recorded twice →
+`cancel-office-visit`. Don't ask for details you don't need; a guest count is
+enough.
+
+Someone joining for weeks (a trial period, a new hire) is still recorded as a
+visit, so they count as in the office on those days. When the tool says it is
+a long stay, suggest that an admin adds them as office members in the office
+editor.
 
 ## Who is in the office
 "kto jutro w biurze?", "ile osób będzie w piątek?" → `list-office-presence`.
