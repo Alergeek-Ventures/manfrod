@@ -18,7 +18,7 @@ export type ResolvedPeople = { ok: true; userIds: string[]; everyone: User[] } |
 
 export async function resolveVisitors(people: string[]): Promise<ResolvedPeople> {
   const everyone = await listUsers();
-  const matches = await Promise.all(people.map((person) => resolvePerson(person, everyone)));
+  const matches = await Promise.all(people.map((person) => resolvePerson(person, { everyone })));
   const problems = matches.flatMap((match) => (match.ok ? [] : [match.message]));
   if (problems.length > 0)
     return {

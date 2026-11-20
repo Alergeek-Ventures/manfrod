@@ -27,12 +27,13 @@ export default defineManfrodTool({
     if (!caller) return "I don't know who you are, nothing saved.";
     let target = caller;
     if (person) {
-      const match = await resolvePerson(person);
+      const admin = isAdmin(caller);
+      const match = await resolvePerson(person, { adopt: admin });
+      if (!admin && (!match.ok || match.user.id !== caller.id))
+        return "Only admins can set office presence for someone else; ask that person to tell me themselves.";
       if (!match.ok) return `Nothing saved: ${match.message}.`;
       target = match.user;
     }
-    if (target.id !== caller.id && !isAdmin(caller))
-      return "Only admins can set office presence for someone else; ask that person to tell me themselves.";
     const days = [...new Set(dates)].sort();
     const who = target.name ?? target.slackId;
     if (status === "clear") {
