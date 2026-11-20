@@ -170,8 +170,10 @@ export const officeVisits = pgTable("office_visits", {
 	createdBy: uuid("created_by"),
 	cancelledAt: timestamp("cancelled_at", { mode: 'date' }),
 	insertedAt: timestamp("inserted_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
+	guestNames: text("guest_names").array().default(sql`ARRAY[]::text[]`).notNull(),
 }, (table) => [
 	index("office_visits_dates_index").using("btree", table.startsOn.asc().nullsLast().op("date_ops"), table.endsOn.asc().nullsLast().op("date_ops")),
+	check("office_visits_guest_names", sql`cardinality(guest_names) <= guests`),
 	check("office_visits_guests", sql`guests >= 0`),
 	check("office_visits_people", sql`(guests > 0) OR (cardinality(user_ids) > 0)`),
 	check("office_visits_range", sql`ends_on >= starts_on`),
@@ -191,6 +193,7 @@ export const deskPlans = pgTable("desk_plans", {
 	seating: text(),
 	claimedAt: timestamp("claimed_at", { mode: 'date' }),
 	message: jsonb(),
+	requestedBy: text("requested_by"),
 }, (table) => [
 	primaryKey({ columns: [table.date, table.layoutId], name: "desk_plans_pkey"}),
 	check("desk_plans_status", sql`status = ANY (ARRAY['heads_up'::text, 'declined'::text, 'requested'::text, 'posting'::text, 'posted'::text])`),

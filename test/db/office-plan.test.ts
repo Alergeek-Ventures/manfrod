@@ -118,7 +118,7 @@ describe.skipIf(!enabled)("preparePlan", () => {
     const prepared = await preparePlan(date);
     const seat = (key: string) => prepared.result.assignments.find((assignment) => assignment.key === key);
     expect(prepared.evaluation.crowded).toBe(true);
-    expect(prepared.evaluation.reasons).toContain("przyjeżdża: zespół z Wrocławia");
+    expect(prepared.evaluation.reasons).toContain("przyjeżdża: 2 osoby z Wrocławia");
     expect(seat(`user:${returning.id}`)).toMatchObject({ deskId: ownedBack.id, reason: "owner" });
     expect(seat(`user:${ala.id}`)).toMatchObject({ deskId: recent.id, reason: "recent" });
     expect(prepared.result.displaced.map((person) => person.key)).toEqual([`user:${cyd.id}`]);
@@ -225,7 +225,9 @@ describe.skipIf(!enabled)("posting and refreshing a plan", () => {
     expect(results.filter((result) => result.ok && result.posted)).toHaveLength(1);
     const plan = await getPlan(layoutId, postDate);
     expect(plan).toMatchObject({ status: "posted", messageTs: `${1000 + slack.posted}.1`, claimedAt: null });
-    expect(plan?.reason).toMatch(/^W .+ \d+\.\d{2} ~/);
+    expect(plan?.reason).toBe("");
+    const seated = (plan?.message as { blocks: { text?: { text: string } }[] }).blocks[0].text!.text;
+    expect(seated).toMatch(/^\*W .+ \d+\.\d{2}: \d+ os(oba|oby|ób) w biurze/);
     expect((await planSeats()).some((row) => row.userId === planner!.id)).toBe(true);
   });
 

@@ -25,6 +25,14 @@ export async function loadPeople(userIds: string[]): Promise<PersonRef[]> {
   return db.select({ userId: users.id, name: users.name, slackId: users.slackId }).from(users).where(inArray(users.id, userIds));
 }
 
+export async function loadStatedOffice(date: string): Promise<PersonRef[]> {
+  return db
+    .select({ userId: users.id, name: users.name, slackId: users.slackId })
+    .from(officePresence)
+    .innerJoin(users, eq(users.id, officePresence.userId))
+    .where(and(eq(officePresence.date, date), eq(officePresence.status, "office")));
+}
+
 export async function loadExplicit(userIds: string[], date: string): Promise<OfficePresence[]> {
   if (userIds.length === 0) return [];
   return db

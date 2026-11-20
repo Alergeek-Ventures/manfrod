@@ -1,13 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  assignDesks,
-  guestBase,
-  guestNames,
-  personKey,
-  seatingSignature,
-  type AssignDesk,
-  type AssignPerson,
-} from "../../lib/office/assign.ts";
+import { assignDesks, personKey, seatingSignature, type AssignDesk, type AssignPerson } from "../../lib/office/assign.ts";
 
 const desk = (id: string, x: number | null, y: number | null, ownerUserId: string | null = null, active = true): AssignDesk => ({
   id,
@@ -146,19 +138,5 @@ describe("assignDesks", () => {
     });
     expect(seats(result)).toEqual({ a: "ala:cluster" });
     expect(result.freeDeskIds).toEqual(["z"]);
-  });
-});
-
-describe("guest names", () => {
-  it("names guests after the place in the visit note", () => {
-    expect(guestBase("zespół z Wrocławia")).toBe("Gość z Wrocławia");
-    expect(guestBase("warsztaty z klientem Acme")).toBe("Gość (warsztaty z klientem)");
-    expect(
-      guestNames([
-        { note: "zespół z Wrocławia", guests: 2 },
-        { note: "ludzie z Wrocławia", guests: 1 },
-        { note: "nikt", guests: 0 },
-      ]),
-    ).toEqual(["Gość z Wrocławia 1", "Gość z Wrocławia 2", "Gość z Wrocławia 3"]);
   });
 });

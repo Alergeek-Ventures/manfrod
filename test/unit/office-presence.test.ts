@@ -9,6 +9,7 @@ const sources = vi.hoisted(() => ({
   loadExplicit: vi.fn(),
   loadAbsences: vi.fn(),
   loadReservationDates: vi.fn(),
+  loadStatedOffice: vi.fn(async () => [] as unknown[]),
 }));
 const store = vi.hoisted(() => ({
   defaultLayoutId: vi.fn(async () => "layout-1"),
@@ -18,6 +19,7 @@ const store = vi.hoisted(() => ({
   recordVisit: vi.fn(),
   cancelVisit: vi.fn(),
   getVisit: vi.fn(),
+  updateVisit: vi.fn(),
 }));
 const firmowid = vi.hoisted(() => ({
   firmowidAccess: vi.fn(),
@@ -183,6 +185,7 @@ describe("predictOfficeDay", () => {
     endsOn: THURSDAY,
     userIds: ["visitor", "dana"],
     guests: 3,
+    guestNames: [],
     note: "zespół z Wrocławia",
     createdBy: "ala",
     cancelledAt: null,
@@ -237,6 +240,7 @@ describe("predictOfficeDay", () => {
     expect(byId.visitor).toMatchObject({ status: "office", sources: ["visit"], name: "Gość z Wrocławia" });
     expect(prediction.people.map((entry) => entry.status)).toEqual(["office", "office", "office", "office", "remote", "leave"]);
     expect(prediction.guests).toBe(3);
+    expect(prediction.guestList.map((guest) => guest.name)).toEqual(["Gość z Wrocławia 1", "Gość z Wrocławia 2", "Gość z Wrocławia 3"]);
     expect(prediction.expectedInOffice).toBe(7);
     expect(prediction.visits).toEqual([visit]);
 
@@ -257,8 +261,26 @@ describe("predictOfficeDay", () => {
       layoutId: null,
       people: [],
       visits: [],
+      guestList: [],
       guests: 0,
       expectedInOffice: 0,
     });
+  });
+
+  it("adds non-members who said they will come and does not count them as guests too", async () => {
+    sources.loadStatedOffice.mockResolvedValueOnce([person("mariusz", "Mariusz Ciastoń"), person("cezary", "Cezary")]);
+    sources.loadExplicit.mockResolvedValueOnce([
+      { id: "p1", userId: "cezary", date: THURSDAY, status: "office", source: "button", note: null, updatedAt: new Date() },
+      { id: "p2", userId: "mariusz", date: THURSDAY, status: "office", source: "chat", note: null, updatedAt: new Date() },
+    ]);
+    store.listVisits.mockResolvedValueOnce([
+      { ...visit, userIds: ["staszek"], createdBy: "staszek", guests: 2, note: "Odul i Mariusz będą w biurze przez dwa tygodnie próbne" },
+    ]);
+    sources.loadPeople.mockImplementationOnce(async (ids: string[]) => ids.map((id) => person(id, "Staszek")));
+    const prediction = await predictOfficeDay(THURSDAY, { today: TODAY });
+    expect(prediction.people.filter((entry) => entry.userId === "cezary")).toHaveLength(1);
+    expect(prediction.people.find((entry) => entry.userId === "mariusz")).toMatchObject({ status: "office", sources: ["explicit_chat"] });
+    expect(prediction.guestList.map((guest) => guest.name)).toEqual(["Gość 1"]);
+    expect(prediction.guests).toBe(1);
   });
 });

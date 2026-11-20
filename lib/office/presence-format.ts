@@ -12,8 +12,10 @@ const GROUPS = [
 export function describeVisit(visit: OfficeVisit, names: Map<string, string>): string {
   const range = visit.startsOn === visit.endsOn ? visit.startsOn : `${visit.startsOn}..${visit.endsOn}`;
   const people = visit.userIds.map((id) => names.get(id) ?? id);
-  const guests = visit.guests > 0 ? [`${visit.guests} guest${visit.guests === 1 ? "" : "s"}`] : [];
-  return `[${visit.id}] ${range}: ${visit.note} — ${[...people, ...guests].join(", ")}`;
+  const named = visit.guestNames.map((name) => `${name} (guest without a Slack account)`);
+  const anonymous = visit.guests - visit.guestNames.length;
+  const guests = anonymous > 0 ? [`${anonymous} unnamed guest${anonymous === 1 ? "" : "s"}`] : [];
+  return `[${visit.id}] ${range}: ${visit.note} — ${[...people, ...named, ...guests].join(", ")}`;
 }
 
 const personLine = (person: PersonPresence) =>
@@ -27,7 +29,7 @@ export function describePrediction(prediction: OfficeDayPrediction): string {
   });
   const visits =
     prediction.visits.length > 0 ? [`Visits:\n${prediction.visits.map((visit) => `- ${describeVisit(visit, names)}`).join("\n")}`] : [];
-  const guests = prediction.guests > 0 ? ` (incl. ${prediction.guests} guests)` : "";
+  const guests = prediction.guests > 0 ? ` (incl. guests: ${prediction.guestList.map((guest) => guest.name).join(", ")})` : "";
   return [`${withWeekday(prediction.date)} — expected in the office: ${prediction.expectedInOffice}${guests}`, ...sections, ...visits].join(
     "\n\n",
   );

@@ -190,27 +190,3 @@ export function seatingSignature(result: Pick<AssignResult, "assignments" | "ove
   const overflow = result.overflow.map((person) => person.key).sort();
   return JSON.stringify([seats, overflow]);
 }
-
-export function guestNames(visits: { note: string; guests: number }[]): string[] {
-  const names: string[] = [];
-  const used = new Map<string, number>();
-  for (const visit of visits) {
-    if (visit.guests <= 0) continue;
-    const base = guestBase(visit.note);
-    for (let index = 0; index < visit.guests; index++) {
-      const next = (used.get(base) ?? 0) + 1;
-      used.set(base, next);
-      names.push(`${base} ${next}`);
-    }
-  }
-  return names;
-}
-
-const PLACE = /\bz\s+(\p{Lu}[\p{L}-]*(?:\s+\p{Lu}[\p{L}-]*)?)/u;
-
-export function guestBase(note: string): string {
-  const place = PLACE.exec(note);
-  if (place) return `Gość z ${place[1]}`;
-  const short = note.trim().split(/\s+/).slice(0, 3).join(" ");
-  return short ? `Gość (${short})` : "Gość";
-}
