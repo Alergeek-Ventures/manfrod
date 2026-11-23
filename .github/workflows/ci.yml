@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: selenge
     env:
       # Same paradedb image as deployment/local/compose.yml — plain postgres
       # lacks the pgvector/pg_search extensions the migrations require.
