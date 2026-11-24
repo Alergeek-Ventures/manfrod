@@ -1,8 +1,12 @@
 import { defineTool } from "eve/tools";
 import { noReply } from "eve/tools/no_reply";
+import { toolCtx } from "../../lib/agent/context.ts";
+import { NO_REPLY_SENT, noReplyResult } from "../lib/no-reply.ts";
 
 export default defineTool({
   ...noReply(),
   description:
-    "End your turn without posting anything. Use it when nothing should be said: a scheduled check or task check finds nothing worth posting, an action you already took is the whole answer, or a thread message is meant for other people and you have nothing to add. Never use it when someone asked you something or is waiting for your answer, and never post that you are staying quiet instead of calling it.",
+    "End your turn without posting anything. Use it when nothing should be said: a scheduled check or task check finds nothing worth posting, an action you already took is the whole answer, or a thread message is meant for other people and you have nothing to add. Never use it when someone asked you something or is waiting for your answer, and never post that you are staying quiet instead of calling it. In a person's direct message it does not end the turn: reply instead.",
+  execute: (_input, ctx) => noReplyResult(toolCtx(ctx)),
+  endsTurn: (output) => output === NO_REPLY_SENT,
 });
