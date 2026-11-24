@@ -6,6 +6,7 @@ export const HEADS_UP_MAX_WORKDAYS = 5;
 
 export const VISIT_MIN_EXTRA_PEOPLE = 2;
 export const LONG_STAY_WORKDAYS = 5;
+export const SPARE_DESKS = 2;
 
 export type Crowding = {
   crowded: boolean;
@@ -42,15 +43,18 @@ export function visitSummary(names: string[], anonymous: number, place: string |
 }
 
 export function crowding(input: CrowdingInput): Crowding {
+  const tight = input.supply - input.demand <= SPARE_DESKS;
   const visitReasons =
-    input.visitExtraPeople >= VISIT_MIN_EXTRA_PEOPLE ? input.visitSummaries.map((summary) => `przyjeżdża: ${summary}`) : [];
+    tight && input.visitExtraPeople >= VISIT_MIN_EXTRA_PEOPLE ? input.visitSummaries.map((summary) => `przyjeżdża: ${summary}`) : [];
   const deskReasons =
     input.demand > input.supply
       ? [`${peopleCount(input.demand)} bez własnego biurka, a wolnych biurek bez właściciela jest ${input.supply}`]
       : [];
   const otherReasons = [
     ...deskReasons,
-    ...(input.expectedInOffice >= input.threshold ? [`~${peopleCount(input.expectedInOffice)} w biurze (próg: ${input.threshold})`] : []),
+    ...(tight && input.expectedInOffice >= input.threshold
+      ? [`~${peopleCount(input.expectedInOffice)} w biurze (próg: ${input.threshold})`]
+      : []),
   ];
   const reasons = [...visitReasons, ...otherReasons];
   return { crowded: reasons.length > 0, crowdedWithoutVisits: otherReasons.length > 0, reasons, visitReasons, deskReasons };

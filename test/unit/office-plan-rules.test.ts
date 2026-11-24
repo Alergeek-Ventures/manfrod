@@ -37,8 +37,8 @@ describe("crowding", () => {
     expect(crowding(base)).toEqual({ crowded: false, crowdedWithoutVisits: false, reasons: [], visitReasons: [], deskReasons: [] });
   });
 
-  it("is crowded when a visit brings at least two extra people", () => {
-    expect(crowding({ ...base, visitSummaries: ["Odul i Mariusz"], visitExtraPeople: 2 })).toEqual({
+  it("is crowded when a visit brings at least two extra people and free desks run low", () => {
+    expect(crowding({ ...base, demand: 3, visitSummaries: ["Odul i Mariusz"], visitExtraPeople: 2 })).toEqual({
       crowded: true,
       crowdedWithoutVisits: false,
       reasons: ["przyjeżdża: Odul i Mariusz"],
@@ -48,12 +48,12 @@ describe("crowding", () => {
   });
 
   it("ignores a visit of one extra person", () => {
-    expect(crowding({ ...base, visitSummaries: ["1 osoba"], visitExtraPeople: 1 })).toMatchObject({
+    expect(crowding({ ...base, demand: 3, visitSummaries: ["1 osoba"], visitExtraPeople: 1 })).toMatchObject({
       crowded: false,
       crowdedWithoutVisits: false,
       reasons: [],
     });
-    expect(crowding({ ...base, visitSummaries: ["1 osoba"], visitExtraPeople: 1, expectedInOffice: 6 }).reasons).toEqual([
+    expect(crowding({ ...base, demand: 3, visitSummaries: ["1 osoba"], visitExtraPeople: 1, expectedInOffice: 6 }).reasons).toEqual([
       "~6 osób w biurze (próg: 6)",
     ]);
   });
@@ -66,9 +66,15 @@ describe("crowding", () => {
     expect(crowding({ ...base, demand: 5, supply: 5 }).crowded).toBe(false);
   });
 
-  it("is crowded at the headcount threshold", () => {
-    expect(crowding({ ...base, expectedInOffice: 6 }).reasons).toEqual(["~6 osób w biurze (próg: 6)"]);
-    expect(crowding({ ...base, expectedInOffice: 5 }).crowded).toBe(false);
+  it("is crowded at the headcount threshold when free desks run low", () => {
+    expect(crowding({ ...base, demand: 3, expectedInOffice: 6 }).reasons).toEqual(["~6 osób w biurze (próg: 6)"]);
+    expect(crowding({ ...base, demand: 3, expectedInOffice: 5 }).crowded).toBe(false);
+  });
+
+  it("reproduces #biuro 23–25.11: no plan for a visit or the threshold while most free desks stay empty", () => {
+    const day = { ...base, demand: 2, supply: 6, expectedInOffice: 6, visitSummaries: ["Odul i Mariusz"], visitExtraPeople: 2 };
+    expect(crowding(day)).toEqual({ crowded: false, crowdedWithoutVisits: false, reasons: [], visitReasons: [], deskReasons: [] });
+    expect(crowding({ ...day, demand: 4 }).crowded).toBe(true);
   });
 
   it("declines Polish plurals", () => {
