@@ -115,15 +115,10 @@ describe("summarizeDay", () => {
       people,
       visits: visits.map((visit) => ({ startsOn: DATE, endsOn: DATE, guestNames: [], createdBy: null, ...visit })),
     }) as unknown as OfficeDayPrediction;
-  const day = (
-    pred: OfficeDayPrediction,
-    reservations: Record<string, unknown>[] = [],
-    threshold = 6,
-    members = ["ala", "bob", "cyd", "dan", "olga"],
-  ) =>
+  const day = (pred: OfficeDayPrediction, reservations: Record<string, unknown>[] = [], members = ["ala", "bob", "cyd", "dan", "olga"]) =>
     summarizeDay({
       date: DATE,
-      office: { layout: { crowdedThreshold: threshold }, desks: [desk("a"), desk("b"), desk("c"), desk("o1", "olga")] } as never,
+      office: { layout: {}, desks: [desk("a"), desk("b"), desk("c"), desk("d"), desk("e"), desk("o1", "olga")] } as never,
       prediction: pred,
       reservations: reservations as never,
       memberIds: new Set(members),
@@ -131,7 +126,7 @@ describe("summarizeDay", () => {
 
   it("is quiet with three people and free desks", () => {
     const result = day(prediction([person("ala", "office"), person("bob", "office"), person("olga", "office"), person("cyd", "remote")]));
-    expect(result).toMatchObject({ demand: 2, supply: 3, expectedInOffice: 3, crowded: false, reasons: [] });
+    expect(result).toMatchObject({ desks: 6, expectedInOffice: 3, crowded: false, reasons: [] });
     expect([...result.away]).toEqual(["cyd"]);
   });
 
@@ -148,9 +143,15 @@ describe("summarizeDay", () => {
     expect([...result.away].sort()).toEqual(["cyd", "dan", "olga"]);
   });
 
-  it("is crowded when owners' desks are needed", () => {
-    const result = day(prediction([person("ala", "office"), person("bob", "office"), person("cyd", "office"), person("dan", "office")]));
-    expect(result).toMatchObject({ demand: 4, supply: 3, crowded: true });
+  it("counts a desk owner by default and is crowded once at most one desk stays free", () => {
+    const four = [person("ala", "office"), person("bob", "office"), person("cyd", "office"), person("dan", "office")];
+    const result = day(prediction([...four, person("olga", "unknown", "none")]));
+    expect(result).toMatchObject({ expectedInOffice: 5, crowded: true, crowdedWithoutVisits: true, reasons: ["5 osób na 6 biurek"] });
+    expect(result.people.map((p) => p.name)).toContain("olga");
+    const away = day(prediction([...four, person("olga", "remote")]));
+    expect(away).toMatchObject({ expectedInOffice: 4, crowded: false, reasons: [] });
+    const habit = day(prediction([...four, person("olga", "remote", "firmowid_habit")]));
+    expect(habit).toMatchObject({ expectedInOffice: 5, crowded: true });
   });
 
   it("counts manual reservations as seated and their desks as taken", () => {
@@ -158,13 +159,16 @@ describe("summarizeDay", () => {
       { deskId: "a", userId: "ala", guestName: null, source: "manual" },
       { deskId: "b", userId: "zed", guestName: null, source: "plan" },
     ]);
-    expect(result).toMatchObject({ demand: 1, supply: 2, crowded: false });
+    expect(result).toMatchObject({ expectedInOffice: 2, crowded: false });
   });
 
-  it("is crowded with a visit of two guests and names them", () => {
-    const result = day(prediction([person("ala", "office")], [{ id: "v1", note: "zespół z Wrocławia", guests: 2, userIds: ["ala"] }]));
-    expect(result).toMatchObject({ crowded: true, visitExtraPeople: 2, crowdedWithoutVisits: false, expectedInOffice: 3 });
-    expect(result.reasons).toContain("przyjeżdża: ala i 2 osoby z Wrocławia");
+  it("names a visit's guests and counts them, but a visit alone never makes the day crowded", () => {
+    const wroclaw = { id: "v1", note: "zespół z Wrocławia", guests: 2, userIds: ["ala"] };
+    const result = day(prediction([person("ala", "office")], [wroclaw]));
+    expect(result).toMatchObject({ crowded: false, visitExtraPeople: 2, expectedInOffice: 3, reasons: [] });
+    expect(result.visits[0].summary).toBe("ala i 2 osoby z Wrocławia");
+    const full = day(prediction([person("ala", "office"), person("bob", "office"), person("cyd", "office")], [wroclaw]));
+    expect(full).toMatchObject({ crowded: true, crowdedWithoutVisits: false, expectedInOffice: 5 });
     expect(result.people.map((p) => [p.name, p.groups])).toEqual([
       ["ala", ["visit:v1"]],
       ["Gość z Wrocławia 1", ["visit:v1"]],
@@ -185,13 +189,13 @@ describe("summarizeDay", () => {
         [{ id: "v3", note: "Wrocław", guests: 0, userIds: ["wro1", "wro2"] }],
       ),
     );
-    expect(wroclaw).toMatchObject({ visitExtraPeople: 2, crowded: true });
+    expect(wroclaw).toMatchObject({ visitExtraPeople: 2, expectedInOffice: 3, crowded: false });
   });
 
   it("seats a named guest who says they are coming once, not as a guest too", () => {
     const trial = { id: "v1", note: "okres próbny", guests: 2, guestNames: ["Odul", "Mariusz"], userIds: ["staszek"] };
     const people = [person("staszek", "office", "visit"), { ...person("mariusz", "office"), name: "Mariusz Ciastoń" }];
-    const result = day(prediction(people, [trial]), [], 6, ["staszek"]);
+    const result = day(prediction(people, [trial]), [], ["staszek"]);
     expect(result.people.map((p) => p.name)).toEqual(["staszek", "Mariusz Ciastoń", "Odul (gość)"]);
     expect(result.expectedInOffice).toBe(3);
     expect(result.visits[0].summary).toBe("staszek, Odul i Mariusz");
@@ -203,7 +207,7 @@ describe("summarizeDay", () => {
     const remote = day(prediction([person("ala", "remote"), person("bob", "office")]), booked);
     expect(remote.people.map((p) => p.name)).toEqual(["bob"]);
     expect([...remote.dormantDeskIds]).toEqual(["a"]);
-    expect(remote).toMatchObject({ expectedInOffice: 1, demand: 1, supply: 2 });
+    expect(remote).toMatchObject({ expectedInOffice: 1, crowded: false });
     const habit = day(prediction([person("ala", "remote", "firmowid_habit"), person("bob", "office")]), booked);
     expect(habit.people.map((p) => p.name)).toEqual(["bob", "ala"]);
     expect(habit.dormantDeskIds.size).toBe(0);
@@ -233,7 +237,10 @@ describe("summarizeDay", () => {
 
   it("puts the seated headcount and a computed reason above the stable intro", () => {
     const evaluation = day(
-      prediction([person("ala", "office"), person("bob", "office")], [{ id: "v1", note: "goście", guests: 2, userIds: [] }]),
+      prediction(
+        [person("ala", "office"), person("bob", "office"), person("cyd", "office")],
+        [{ id: "v1", note: "goście", guests: 2, userIds: [] }],
+      ),
     );
     const seat = (key: string, name: string, userId: string | null) => ({
       deskId: key,
@@ -245,16 +252,14 @@ describe("summarizeDay", () => {
       reason: "cluster",
     });
     const result = {
-      assignments: [seat("A", "ala", "ala"), seat("B", "bob", "bob"), seat("C", "Gość 1", null)],
+      assignments: [seat("A", "ala", "ala"), seat("B", "bob", "bob"), seat("C", "cyd", "cyd"), seat("D", "Gość 1", null)],
       overflow: [{ key: "g2", userId: null, guestName: "Gość 2", name: "Gość 2", groups: [] }],
       displaced: [],
       freeDeskIds: [],
     };
     const plan = { date: DATE, version: 2, requestedBy: "UNAT" };
     const message = renderPlanMessage({ evaluation, result, plan } as never, "Przyjeżdżają goście.");
-    expect(message.blocks[0].text.text).toBe(
-      "*W środę 18.11: 4 osoby w biurze (w tym 2 gości).*\nPrzyjeżdża: 2 osoby; 4 osoby bez własnego biurka, a wolnych biurek bez właściciela jest 3. Przyjeżdżają goście.",
-    );
+    expect(message.blocks[0].text.text).toBe("*W środę 18.11: 5 osób w biurze (w tym 2 gości).*\n5 osób na 6 biurek. Przyjeżdżają goście.");
 
     const calm = day(prediction([person("ala", "office")]));
     const requested = renderPlanMessage(
@@ -262,10 +267,6 @@ describe("summarizeDay", () => {
       "",
     );
     expect(requested.blocks[0].text.text).toBe("*W środę 18.11: 1 osoba w biurze.*\nPlan na prośbę <@UNAT>.");
-  });
-
-  it("is crowded at the threshold", () => {
-    expect(day(prediction([person("ala", "office"), person("olga", "office")]), [], 2).reasons).toEqual(["~2 osoby w biurze (próg: 2)"]);
   });
 });
 

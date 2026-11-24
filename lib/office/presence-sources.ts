@@ -20,6 +20,14 @@ export async function loadMembers(layoutId: string): Promise<PersonRef[]> {
     .where(eq(officeMembers.layoutId, layoutId));
 }
 
+export async function loadDeskOwners(layoutId: string): Promise<PersonRef[]> {
+  return db
+    .selectDistinct({ userId: users.id, name: users.name, slackId: users.slackId })
+    .from(desks)
+    .innerJoin(users, eq(users.id, desks.ownerUserId))
+    .where(and(eq(desks.layoutId, layoutId), eq(desks.active, true)));
+}
+
 export async function loadPeople(userIds: string[]): Promise<PersonRef[]> {
   if (userIds.length === 0) return [];
   return db.select({ userId: users.id, name: users.name, slackId: users.slackId }).from(users).where(inArray(users.id, userIds));

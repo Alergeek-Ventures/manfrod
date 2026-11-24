@@ -15,6 +15,7 @@ import {
   crowding,
   dayLabel,
   daysLabel,
+  deskCount,
   headsUpGroups,
   headsUpText,
   isLongStay,
@@ -30,51 +31,34 @@ import {
 } from "../../lib/office/plan-rules.ts";
 
 const TUESDAY = "2026-11-17";
-const base = { visitSummaries: [], visitExtraPeople: 0, demand: 2, supply: 5, expectedInOffice: 3, threshold: 6 };
+const base = { expectedInOffice: 6, withoutVisits: 6, desks: 12 };
 
 describe("crowding", () => {
-  it("stays quiet with a few people and enough free desks", () => {
-    expect(crowding(base)).toEqual({ crowded: false, crowdedWithoutVisits: false, reasons: [], visitReasons: [], deskReasons: [] });
+  it("reproduces #biuro 23–25.11: no plan for six or seven people at twelve desks, a visit included", () => {
+    expect(crowding(base)).toEqual({ crowded: false, crowdedWithoutVisits: false, reasons: [] });
+    expect(crowding({ ...base, expectedInOffice: 7, withoutVisits: 5 }).crowded).toBe(false);
   });
 
-  it("is crowded when a visit brings at least two extra people and free desks run low", () => {
-    expect(crowding({ ...base, demand: 3, visitSummaries: ["Odul i Mariusz"], visitExtraPeople: 2 })).toEqual({
+  it("is crowded once at most one desk would stay free, owners' desks included", () => {
+    expect(crowding({ ...base, expectedInOffice: 10, withoutVisits: 10 }).crowded).toBe(false);
+    expect(crowding({ ...base, expectedInOffice: 11, withoutVisits: 11 })).toEqual({
       crowded: true,
-      crowdedWithoutVisits: false,
-      reasons: ["przyjeżdża: Odul i Mariusz"],
-      visitReasons: ["przyjeżdża: Odul i Mariusz"],
-      deskReasons: [],
-    });
-  });
-
-  it("ignores a visit of one extra person", () => {
-    expect(crowding({ ...base, demand: 3, visitSummaries: ["1 osoba"], visitExtraPeople: 1 })).toMatchObject({
-      crowded: false,
-      crowdedWithoutVisits: false,
-      reasons: [],
-    });
-    expect(crowding({ ...base, demand: 3, visitSummaries: ["1 osoba"], visitExtraPeople: 1, expectedInOffice: 6 }).reasons).toEqual([
-      "~6 osób w biurze (próg: 6)",
-    ]);
-  });
-
-  it("is crowded when owners' desks are needed", () => {
-    expect(crowding({ ...base, demand: 6, supply: 5 })).toMatchObject({
       crowdedWithoutVisits: true,
-      reasons: ["6 osób bez własnego biurka, a wolnych biurek bez właściciela jest 5"],
+      reasons: ["11 osób na 12 biurek"],
     });
-    expect(crowding({ ...base, demand: 5, supply: 5 }).crowded).toBe(false);
+    expect(crowding({ ...base, expectedInOffice: 14, withoutVisits: 14 }).reasons).toEqual(["14 osób na 12 biurek"]);
   });
 
-  it("is crowded at the headcount threshold when free desks run low", () => {
-    expect(crowding({ ...base, demand: 3, expectedInOffice: 6 }).reasons).toEqual(["~6 osób w biurze (próg: 6)"]);
-    expect(crowding({ ...base, demand: 3, expectedInOffice: 5 }).crowded).toBe(false);
+  it("tells a day crowded only because of a visit apart", () => {
+    expect(crowding({ ...base, expectedInOffice: 11, withoutVisits: 9 })).toMatchObject({ crowded: true, crowdedWithoutVisits: false });
   });
 
-  it("reproduces #biuro 23–25.11: no plan for a visit or the threshold while most free desks stay empty", () => {
-    const day = { ...base, demand: 2, supply: 6, expectedInOffice: 6, visitSummaries: ["Odul i Mariusz"], visitExtraPeople: 2 };
-    expect(crowding(day)).toEqual({ crowded: false, crowdedWithoutVisits: false, reasons: [], visitReasons: [], deskReasons: [] });
-    expect(crowding({ ...day, demand: 4 }).crowded).toBe(true);
+  it("declines Polish desk plurals", () => {
+    expect([1, 2, 4, 5, 12, 22].map(deskCount)).toEqual(["1 biurko", "2 biurka", "4 biurka", "5 biurek", "12 biurek", "22 biurka"]);
+  });
+
+  it("never calls an office without desks crowded", () => {
+    expect(crowding({ expectedInOffice: 3, withoutVisits: 3, desks: 0 }).crowded).toBe(false);
   });
 
   it("declines Polish plurals", () => {
@@ -155,12 +139,11 @@ describe("texts", () => {
   it("puts the seated headcount in the headline and says why the plan exists", () => {
     expect(planHeadline("2026-11-19", 7, 2)).toBe("*W czwartek 19.11: 7 osób w biurze (w tym 2 gości).*");
     expect(planHeadline("2026-11-19", 3, 0)).toBe("*W czwartek 19.11: 3 osoby w biurze.*");
-    const calm = { requestedBy: "UNAT", crowded: false, visitReasons: [], deskReasons: [], seated: 3, threshold: 6 };
+    const calm = { requestedBy: "UNAT", crowded: false, seated: 3, desks: 12 };
     expect(planReasonLine(calm)).toBe("Plan na prośbę <@UNAT>.");
     expect(planReasonLine({ ...calm, requestedBy: null })).toBe("");
-    expect(planReasonLine({ ...calm, crowded: true, visitReasons: ["przyjeżdża: Odul i Mariusz"], seated: 7 })).toBe(
-      "Przyjeżdża: Odul i Mariusz; próg tłoku to 6 osób.",
-    );
+    expect(planReasonLine({ ...calm, crowded: true, seated: 11 })).toBe("11 osób na 12 biurek.");
+    expect(planReasonLine({ ...calm, crowded: true, seated: 9 })).toBe("Plan na prośbę <@UNAT>.");
   });
 
   it("treats a stay of five workdays or more as a long stay", () => {

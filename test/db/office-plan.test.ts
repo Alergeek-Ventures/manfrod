@@ -117,7 +117,7 @@ describe.skipIf(!enabled)("preparePlan", () => {
   it("seats everyone, gives the owner's desk back and stores the away set", async () => {
     const prepared = await preparePlan(date);
     const seat = (key: string) => prepared.result.assignments.find((assignment) => assignment.key === key);
-    expect(prepared.evaluation.supply - prepared.evaluation.demand).toBeGreaterThan(2);
+    expect(prepared.evaluation.expectedInOffice).toBeLessThan(prepared.evaluation.desks - 1);
     expect(prepared.evaluation.crowded).toBe(false);
     expect(prepared.evaluation.reasons).toEqual([]);
     expect(prepared.evaluation.visitExtraPeople).toBe(2);

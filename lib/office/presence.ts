@@ -5,6 +5,7 @@ import { fetchFirmowidSignals } from "./presence-firmowid.ts";
 import { habitWindowStart, resolvePresence, type PresenceResolution, type StatedStatus } from "./presence-resolve.ts";
 import {
   loadAbsences,
+  loadDeskOwners,
   loadExplicit,
   loadManualSeats,
   loadMembers,
@@ -65,18 +66,22 @@ export async function predictOfficeDay(date: string, opts: { layoutId?: string; 
   const layoutId = opts.layoutId ?? (await defaultLayoutId());
   if (!layoutId) return { date, layoutId: null, people: [], visits: [], roster: [], guestList: [], guests: 0, expectedInOffice: 0 };
 
-  const [members, visits, stated, manual] = await Promise.all([
+  const [members, visits, stated, manual, owners] = await Promise.all([
     loadMembers(layoutId),
     listVisits(date, date, { layoutId }),
     loadStatedOffice(date),
     loadManualSeats(layoutId, date),
+    loadDeskOwners(layoutId),
   ]);
   const memberIds = new Set(members.map((member) => member.userId));
   const visitByUser = new Map<string, OfficeVisit>();
   for (const visit of visits) for (const userId of visit.userIds) if (!visitByUser.has(userId)) visitByUser.set(userId, visit);
   const visitors = await loadPeople([...visitByUser.keys()].filter((userId) => !memberIds.has(userId)));
   const known = new Set([...memberIds, ...visitors.map((person) => person.userId)]);
-  const people = [...members, ...visitors, ...stated.filter((person) => !known.has(person.userId))];
+  const others = [...owners, ...stated].filter(
+    (person, index, all) => !known.has(person.userId) && all.findIndex((other) => other.userId === person.userId) === index,
+  );
+  const people = [...members, ...visitors, ...others];
   const ids = people.map((person) => person.userId);
   const from = habitWindowStart(date, today);
 
@@ -110,7 +115,8 @@ export async function predictOfficeDay(date: string, opts: { layoutId?: string; 
   );
 
   const away = new Set(predicted.filter(isConfirmedAway).map((person) => person.userId));
-  const roster = dayRoster({ people: predicted, visits, manual, memberIds, away });
+  const ownerIds = new Set(owners.map((owner) => owner.userId));
+  const roster = dayRoster({ people: predicted, visits, manual, memberIds, away, ownerIds });
   return {
     date,
     layoutId,

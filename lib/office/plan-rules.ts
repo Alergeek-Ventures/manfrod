@@ -4,25 +4,19 @@ import { addDays, compareDates } from "../time.ts";
 export const HEADS_UP_MIN_WORKDAYS = 2;
 export const HEADS_UP_MAX_WORKDAYS = 5;
 
-export const VISIT_MIN_EXTRA_PEOPLE = 2;
 export const LONG_STAY_WORKDAYS = 5;
-export const SPARE_DESKS = 2;
+export const FREE_DESKS_LEFT = 1;
 
 export type Crowding = {
   crowded: boolean;
   crowdedWithoutVisits: boolean;
   reasons: string[];
-  visitReasons: string[];
-  deskReasons: string[];
 };
 
 export type CrowdingInput = {
-  visitSummaries: string[];
-  visitExtraPeople: number;
-  demand: number;
-  supply: number;
   expectedInOffice: number;
-  threshold: number;
+  withoutVisits: number;
+  desks: number;
 };
 
 export function peopleCount(count: number): string {
@@ -42,22 +36,25 @@ export function visitSummary(names: string[], anonymous: number, place: string |
   return listJoin([...names, ...unnamed]);
 }
 
+export const isCrowded = (count: number, desks: number) => desks > 0 && count >= desks - FREE_DESKS_LEFT;
+
+export function deskCount(count: number): string {
+  if (count === 1) return "1 biurko";
+  const tens = count % 100;
+  const ones = count % 10;
+  if (ones >= 2 && ones <= 4 && (tens < 12 || tens > 14)) return `${count} biurka`;
+  return `${count} biurek`;
+}
+
+export const crowdReason = (count: number, desks: number) => `${peopleCount(count)} na ${deskCount(desks)}`;
+
 export function crowding(input: CrowdingInput): Crowding {
-  const tight = input.supply - input.demand <= SPARE_DESKS;
-  const visitReasons =
-    tight && input.visitExtraPeople >= VISIT_MIN_EXTRA_PEOPLE ? input.visitSummaries.map((summary) => `przyjeżdża: ${summary}`) : [];
-  const deskReasons =
-    input.demand > input.supply
-      ? [`${peopleCount(input.demand)} bez własnego biurka, a wolnych biurek bez właściciela jest ${input.supply}`]
-      : [];
-  const otherReasons = [
-    ...deskReasons,
-    ...(tight && input.expectedInOffice >= input.threshold
-      ? [`~${peopleCount(input.expectedInOffice)} w biurze (próg: ${input.threshold})`]
-      : []),
-  ];
-  const reasons = [...visitReasons, ...otherReasons];
-  return { crowded: reasons.length > 0, crowdedWithoutVisits: otherReasons.length > 0, reasons, visitReasons, deskReasons };
+  const crowded = isCrowded(input.expectedInOffice, input.desks);
+  return {
+    crowded,
+    crowdedWithoutVisits: isCrowded(input.withoutVisits, input.desks),
+    reasons: crowded ? [crowdReason(input.expectedInOffice, input.desks)] : [],
+  };
 }
 
 const weekday = (date: string) => new Date(`${date}T00:00:00Z`).getUTCDay();
@@ -150,20 +147,14 @@ export function planHeadline(date: string, seated: number, guests: number): stri
 export type ReasonInput = {
   requestedBy: string | null;
   crowded: boolean;
-  visitReasons: string[];
-  deskReasons: string[];
   seated: number;
-  threshold: number;
+  desks: number;
 };
 
 export function planReasonLine(input: ReasonInput): string {
-  const reasons = [
-    ...input.visitReasons,
-    ...input.deskReasons,
-    ...(input.seated >= input.threshold ? [`próg tłoku to ${peopleCount(input.threshold)}`] : []),
-  ];
-  if (input.requestedBy && (!input.crowded || reasons.length === 0)) return `Plan na prośbę <@${input.requestedBy}>.`;
-  return reasons.length > 0 ? `${capitalize(reasons.join("; "))}.` : "";
+  const full = isCrowded(input.seated, input.desks);
+  if (input.requestedBy && (!input.crowded || !full)) return `Plan na prośbę <@${input.requestedBy}>.`;
+  return full ? `${capitalize(crowdReason(input.seated, input.desks))}.` : "";
 }
 
 export function longStayNote(names: string[], endsOn: string): string {
