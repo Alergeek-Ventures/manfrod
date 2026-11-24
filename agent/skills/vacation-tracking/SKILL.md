@@ -7,7 +7,16 @@ description: Records, cancels and looks up vacations/absences for the user or te
 
 ## Recording an absence
 User says they will be absent/on vacation/off/unavailable on any date → call
-`report-vacation` with the dates and confirm briefly (e.g. "Zanotowane"). Do NOT
+`report-vacation` with the dates and confirm briefly (e.g. "Zanotowane"). Say
+"Zanotowane" (or similar) only when `report-vacation` in this reply returned
+"Zanotowane" or "Zapisałem"; "Zanotowane" means the background memory will
+save it, so don't say it is already saved. When it returns "Nothing saved
+yet" or an error, follow what it says instead of confirming. An absence
+mentioned in passing (e.g. while talking about letting a client or the team
+know) still gets
+`report-vacation` first. You can't email, call or otherwise reach clients
+outside Slack, so don't offer that; telling them there is up to the person (a
+note in a Slack channel they are in is fine). Do NOT
 ask the user about visibility for clients. The background memory records the
 absence and decides on its own whether to propose sharing with all clients
 (external/all), showing standard Accept/Deny buttons. `report-vacation` only
