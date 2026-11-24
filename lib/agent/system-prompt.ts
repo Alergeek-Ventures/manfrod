@@ -31,9 +31,14 @@ Timezone: ${TIMEZONE} (${zoneAbbreviation(now)}, UTC${offset >= 0 ? "+" : "-"}${
 
 export const timeNote = () => `${TIME_NOTE_HEADER}\n${nowLine()}`;
 
-async function currentContext(userId: string, sessionKey: string | null, channel: string | null): Promise<string> {
+export async function currentContext(userId: string, sessionKey: string | null, channel: string | null): Promise<string> {
   let userLine = "";
-  if (!sessionKey && channel && !channel.startsWith("D")) {
+  if (channel?.startsWith("D")) {
+    const user = await getUser(userId);
+    userLine =
+      '\nThis is a private direct message (DM) with this person, not a channel; only they read your reply. Their private notes are readable here, so list or quote them when they ask. A "[The user is currently viewing #…]" line only says which channel is open on their screen, not where this conversation happens.' +
+      (user?.name ? `\nUser: ${user.name}` : "");
+  } else if (!sessionKey && channel) {
     userLine = `\nThis is a shared Slack channel, ${channel}; other people may read your reply.`;
   } else if (sessionKey && !isDmSession(sessionKey)) {
     const [channel, threadTs] = sessionKey.split(":");
