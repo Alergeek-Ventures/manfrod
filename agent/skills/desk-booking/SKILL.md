@@ -44,8 +44,9 @@ pass that channel's ID as `channel_id` — don't tell them you can't, and
 don't ask them to repeat the request in that other channel.
 
 ## Desk plans
-On a crowded day Manfrod posts a desk plan to the office channel the
-afternoon before; `reserve-desk`, `cancel-desk-reservation` and
+On a crowded day (everyone expected, desk owners included unless they are
+away, would leave at most one desk free) Manfrod posts a desk plan to the
+office channel the afternoon before; `reserve-desk`, `cancel-desk-reservation` and
 `set-office-presence` update that message by themselves. Someone asks for a
 plan or seating for a day → `post-desk-plan` (it refreshes the message if one
 is already posted). Someone wants to swap desks with a colleague →

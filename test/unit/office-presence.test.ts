@@ -11,6 +11,7 @@ const sources = vi.hoisted(() => ({
   loadReservationDates: vi.fn(),
   loadStatedOffice: vi.fn(async () => [] as unknown[]),
   loadManualSeats: vi.fn(async () => [] as unknown[]),
+  loadDeskOwners: vi.fn(async () => [] as unknown[]),
 }));
 const store = vi.hoisted(() => ({
   defaultLayoutId: vi.fn(async () => "layout-1"),
@@ -285,5 +286,15 @@ describe("predictOfficeDay", () => {
     expect(prediction.guestList.map((guest) => guest.name)).toEqual(["Odul (gość)"]);
     expect(prediction.guests).toBe(1);
     expect(prediction.expectedInOffice).toBe(prediction.roster.length);
+  });
+
+  it("counts desk owners by default, members or not, unless they are confirmed away", async () => {
+    sources.loadDeskOwners.mockResolvedValueOnce([person("bartek", "Bartek"), person("ewa", "Ewa"), person("franek", "Franek")]);
+    const prediction = await predictOfficeDay(THURSDAY, { today: TODAY });
+    const keys = prediction.roster.map((entry) => entry.key);
+    expect(keys).toEqual(expect.arrayContaining(["user:bartek", "user:franek"]));
+    expect(keys).not.toContain("user:ewa");
+    expect(prediction.people.filter((entry) => entry.userId === "bartek")).toHaveLength(1);
+    expect(prediction.expectedInOffice).toBe(9);
   });
 });

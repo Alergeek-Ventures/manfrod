@@ -145,6 +145,7 @@ describe("record-office-visit", () => {
     );
     expect(reply).toContain("Zenek (guest without a Slack account)");
     expect(reply).toContain("1 unnamed guest");
+    expect(reply).toContain("name them with update-office-visit");
     expect(deskPlan.longStayHint).toHaveBeenCalled();
   });
 

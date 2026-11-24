@@ -11,6 +11,7 @@ export type RosterInput = {
   manual: ManualSeat[];
   memberIds: ReadonlySet<string>;
   away: ReadonlySet<string>;
+  ownerIds?: ReadonlySet<string>;
 };
 
 export type Roster = { people: RosterPerson[]; guestList: VisitGuest[] };
@@ -19,12 +20,12 @@ export const guestKey = (visitId: string, name: string) => `guest:${visitId}:${n
 
 export const isDormant = (seat: { userId: string | null }, away: ReadonlySet<string>) => Boolean(seat.userId && away.has(seat.userId));
 
-export function dayRoster({ people, visits, manual, memberIds, away }: RosterInput): Roster {
+export function dayRoster({ people, visits, manual, memberIds, away, ownerIds = new Set() }: RosterInput): Roster {
   const visitGroups = new Map<string, string[]>();
   for (const visit of visits)
     for (const userId of visit.userIds) visitGroups.set(userId, [...(visitGroups.get(userId) ?? []), `visit:${visit.id}`]);
   const present: RosterPerson[] = people
-    .filter((person) => person.status === "office")
+    .filter((person) => person.status === "office" || (ownerIds.has(person.userId) && !away.has(person.userId)))
     .map((person) => ({
       key: personKey({ userId: person.userId, guestName: null }),
       userId: person.userId,

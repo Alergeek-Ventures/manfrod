@@ -45,8 +45,7 @@ export type DayEvaluation = {
   reservations: ReservationWithDesk[];
   away: Set<string>;
   dormantDeskIds: Set<string>;
-  demand: number;
-  supply: number;
+  desks: number;
   expectedInOffice: number;
   visits: VisitLine[];
   longStays: string[];
@@ -54,8 +53,6 @@ export type DayEvaluation = {
   crowded: boolean;
   crowdedWithoutVisits: boolean;
   reasons: string[];
-  visitReasons: string[];
-  deskReasons: string[];
 };
 
 export type DayInput = {
@@ -74,6 +71,7 @@ function visitLine(visit: OfficeVisit, names: ReadonlyMap<string, string>): Visi
 
 export function summarizeDay({ date, office, prediction, reservations: all, memberIds }: DayInput): DayEvaluation {
   const activeDesks = new Set(office.desks.filter((desk) => desk.active).map((desk) => desk.id));
+  const ownerIds = new Set(office.desks.flatMap((desk) => (desk.active && desk.ownerUserId ? [desk.ownerUserId] : [])));
   const away = new Set(prediction.people.filter(isConfirmedAway).map((person) => person.userId));
   const reservations = all.filter((reservation) => activeDesks.has(reservation.deskId));
   const booked = reservations.filter((reservation) => reservation.source === "manual");
@@ -90,14 +88,11 @@ export function summarizeDay({ date, office, prediction, reservations: all, memb
     })),
     memberIds,
     away,
+    ownerIds,
   });
   const people = roster.people;
   const guestList = roster.guestList;
-  const manualKeys = new Set(manual.map(personKey));
-  const manualDesks = new Set(manual.map((reservation) => reservation.deskId));
-  const owners = new Set(office.desks.flatMap((desk) => (desk.ownerUserId ? [desk.ownerUserId] : [])));
-  const demand = people.filter((person) => !manualKeys.has(person.key) && !(person.userId && owners.has(person.userId))).length;
-  const supply = office.desks.filter((desk) => !desk.ownerUserId && !manualDesks.has(desk.id) && !dormantDeskIds.has(desk.id)).length;
+  const desks = activeDesks.size;
   const expectedInOffice = people.length;
 
   const names = new Map(prediction.people.map((person) => [person.userId, person.name ?? person.slackId]));
@@ -115,13 +110,10 @@ export function summarizeDay({ date, office, prediction, reservations: all, memb
       const newcomers = visit.userIds.filter((userId) => !memberIds.has(userId)).flatMap((userId) => names.get(userId) ?? []);
       return newcomers.length > 0 ? [longStayNote(newcomers, visit.endsOn)] : [];
     });
-  const { crowded, crowdedWithoutVisits, reasons, visitReasons, deskReasons } = crowding({
-    visitSummaries: visits.filter((visit) => !visit.long).map((visit) => visit.summary),
-    visitExtraPeople,
-    demand,
-    supply,
+  const { crowded, crowdedWithoutVisits, reasons } = crowding({
     expectedInOffice,
-    threshold: office.layout.crowdedThreshold,
+    withoutVisits: expectedInOffice - visitExtraPeople,
+    desks,
   });
   return {
     date,
@@ -131,8 +123,7 @@ export function summarizeDay({ date, office, prediction, reservations: all, memb
     reservations,
     away,
     dormantDeskIds,
-    demand,
-    supply,
+    desks,
     expectedInOffice,
     visits,
     longStays,
@@ -140,8 +131,6 @@ export function summarizeDay({ date, office, prediction, reservations: all, memb
     crowded,
     crowdedWithoutVisits,
     reasons,
-    visitReasons,
-    deskReasons,
   };
 }
 
@@ -285,10 +274,8 @@ export function planSummary(prepared: Pick<PreparedPlan, "evaluation" | "result"
     reason: planReasonLine({
       requestedBy: prepared.plan.requestedBy,
       crowded: evaluation.crowded,
-      visitReasons: evaluation.visitReasons,
-      deskReasons: evaluation.deskReasons,
       seated: seated.length,
-      threshold: evaluation.office.layout.crowdedThreshold,
+      desks: evaluation.desks,
     }),
   };
 }
@@ -319,7 +306,7 @@ async function draftIntro(evaluation: DayEvaluation, requested: boolean): Promis
         `Day: ${dayLabel(evaluation.date)}`,
         ...(requested ? ["Someone asked for this plan; the day is not necessarily crowded."] : []),
         ...evaluation.visits.filter((visit) => !visit.long).map((visit) => `Visiting: ${visit.summary}`),
-        ...evaluation.deskReasons.map((reason) => `Reason: ${reason}`),
+        ...evaluation.reasons.map((reason) => `Reason: ${reason}`),
       ].join("\n"),
     });
     return decision?.send ? decision.message : "";

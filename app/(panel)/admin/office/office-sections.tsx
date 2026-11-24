@@ -84,14 +84,13 @@ export function OfficeSettings({ settings }: { settings: Settings }) {
     width: String(settings.width),
     height: String(settings.height),
     planChannelId: settings.planChannelId ?? "",
-    crowdedThreshold: String(settings.crowdedThreshold),
   });
   const set = (key: keyof typeof form) => (event: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, [key]: event.target.value });
   return (
     <Card>
       <CardHeader>
         <CardTitle>Settings</CardTitle>
-        <CardDescription>Map size in grid cells, where the daily desk plan goes and when the office counts as crowded.</CardDescription>
+        <CardDescription>Map size in grid cells and where the daily desk plan goes.</CardDescription>
       </CardHeader>
       <CardContent>
         <form
@@ -103,7 +102,7 @@ export function OfficeSettings({ settings }: { settings: Settings }) {
                 width: Number(form.width),
                 height: Number(form.height),
                 planChannelId: form.planChannelId.trim() === "" ? null : form.planChannelId.trim(),
-                crowdedThreshold: Number(form.crowdedThreshold),
+                crowdedThreshold: settings.crowdedThreshold,
               }),
             );
           }}
@@ -123,11 +122,6 @@ export function OfficeSettings({ settings }: { settings: Settings }) {
               <FieldLabel htmlFor="office-channel">Desk plan channel</FieldLabel>
               <Input id="office-channel" placeholder="C087QF130R3" value={form.planChannelId} onChange={set("planChannelId")} />
               <FieldDescription>Slack channel ID, e.g. of #biuro. Leave empty to not post plans.</FieldDescription>
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="office-threshold">Crowded from</FieldLabel>
-              <Input id="office-threshold" type="number" min={1} value={form.crowdedThreshold} onChange={set("crowdedThreshold")} />
-              <FieldDescription>People expected in the office.</FieldDescription>
             </Field>
           </FieldGroup>
           <div>
