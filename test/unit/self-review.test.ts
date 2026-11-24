@@ -111,9 +111,10 @@ describe("parseMerges", () => {
     });
   });
 
-  it("never merges a finding that is being fixed away, but lets it absorb open ones without rewriting it", () => {
-    expect(parse([{ keep: "a", merge: ["p", "b"], ...text }])).toEqual([{ keepId: "p", mergeIds: ["a", "b"], severity: 3, rewrite: null }]);
-    expect(parse([{ keep: "p", merge: ["w", "c"], ...text }])).toEqual([{ keepId: "p", mergeIds: ["c"], severity: 2, rewrite: null }]);
+  it("merges only open findings with each other, leaving findings that are being fixed out", () => {
+    expect(parse([{ keep: "a", merge: ["p", "b"], ...text }])).toEqual([{ keepId: "a", mergeIds: ["b"], severity: 3, rewrite: text }]);
+    expect(parse([{ keep: "p", merge: ["w", "c", "b"], ...text }])).toEqual([{ keepId: "c", mergeIds: ["b"], severity: 3, rewrite: text }]);
+    expect(parse([{ keep: "p", merge: ["c"] }])).toEqual([]);
     expect(parse([{ keep: "p", merge: ["w"] }])).toEqual([]);
   });
 

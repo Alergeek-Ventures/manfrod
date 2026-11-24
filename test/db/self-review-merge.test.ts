@@ -74,14 +74,16 @@ describe.skipIf(!enabled)("merging duplicate findings", () => {
     expect(await linkedCases([open.id])).toHaveLength(1);
   });
 
-  it("lets a finding that is being fixed absorb duplicates without rewriting it", async () => {
+  it("does not let a finding that is being fixed absorb open ones", async () => {
     const proposed = await finding("Being fixed");
     await db.update(tables.selfReviewFindings).set({ status: "proposed" }).where(eq(tables.selfReviewFindings.id, proposed.id));
     const duplicate = await finding("Duplicate");
     await rated(duplicate.id, "d");
     const rewrite = { title: "New", problem: "p3", expected: "e3", summary: null };
-    expect(await mergeFindings({ keepId: proposed.id, mergeIds: [duplicate.id], severity: 2, rewrite })).toEqual([duplicate.id]);
-    expect(await getFinding(proposed.id)).toMatchObject({ title: "Being fixed", status: "proposed" });
-    expect(await linkedCases([proposed.id])).toHaveLength(1);
+    expect(await mergeFindings({ keepId: proposed.id, mergeIds: [duplicate.id], severity: 3, rewrite })).toEqual([]);
+    expect(await getFinding(proposed.id)).toMatchObject({ title: "Being fixed", status: "proposed", severity: 2 });
+    expect(await getFinding(duplicate.id)).toMatchObject({ status: "open" });
+    expect(await linkedCases([proposed.id])).toHaveLength(0);
+    expect(await linkedCases([duplicate.id])).toHaveLength(1);
   });
 });

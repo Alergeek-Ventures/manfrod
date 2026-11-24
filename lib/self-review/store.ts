@@ -145,9 +145,9 @@ export async function mergeFindings({ keepId, mergeIds, severity, rewrite }: Fin
   if (mergeIds.includes(keepId)) return [];
   return db.transaction(async (tx) => {
     const [keep] = await tx
-      .select({ id: selfReviewFindings.id, status: selfReviewFindings.status })
+      .select({ id: selfReviewFindings.id })
       .from(selfReviewFindings)
-      .where(and(eq(selfReviewFindings.id, keepId), inArray(selfReviewFindings.status, ["open", ...ACTIVE_STATUSES])))
+      .where(and(eq(selfReviewFindings.id, keepId), eq(selfReviewFindings.status, "open")))
       .for("update");
     if (!keep) return [];
     const merged = await tx
@@ -160,7 +160,7 @@ export async function mergeFindings({ keepId, mergeIds, severity, rewrite }: Fin
     await tx.update(selfReviewCases).set({ findingId: keepId }).where(inArray(selfReviewCases.findingId, ids));
     await tx
       .update(selfReviewFindings)
-      .set({ severity, ...(keep.status === "open" && rewrite ? rewrite : {}) })
+      .set({ severity, ...(rewrite ?? {}) })
       .where(eq(selfReviewFindings.id, keepId));
     return ids;
   });
