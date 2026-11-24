@@ -27,6 +27,19 @@ function seatedAs(guest: string, candidates: Candidate[]): Candidate | null {
   return byFirst.length === 1 ? byFirst[0] : null;
 }
 
+function namedInNote(note: string, free: Candidate[], consumed: Set<string>, slots: number): number {
+  const words = new Set(foldName(note).split(/[^\p{L}\p{N}]+/u));
+  const waiting = free.filter((person) => !person.member && !consumed.has(person.key));
+  let taken = 0;
+  for (const person of waiting) {
+    if (taken >= slots) break;
+    if (!words.has(person.first) || waiting.filter((other) => other.first === person.first).length > 1) continue;
+    consumed.add(person.key);
+    taken += 1;
+  }
+  return taken;
+}
+
 export function visitGuests(visits: GuestVisit[], present: PresentPerson[], memberIds: ReadonlySet<string> = new Set()): VisitGuest[] {
   const candidates: Candidate[] = present.flatMap((person) => {
     const full = person.name ? foldName(person.name) : "";
@@ -63,9 +76,11 @@ export function visitGuests(visits: GuestVisit[], present: PresentPerson[], memb
       emitted.add(foldName(label));
       guests.push({ visitId: visit.id, name: label, named: true });
     }
+    const slots = Math.max(visit.guests - named.length, 0);
+    const unnamed = slots - namedInNote(visit.note, free, consumed, slots);
     const place = visitPlace(visit.note);
     const base = place ? `Gość z ${place}` : "Gość";
-    for (let index = 0; index < visit.guests - named.length; index++) {
+    for (let index = 0; index < unnamed; index++) {
       const next = (used.get(base) ?? 0) + 1;
       used.set(base, next);
       guests.push({ visitId: visit.id, name: `${base} ${next}`, named: false });

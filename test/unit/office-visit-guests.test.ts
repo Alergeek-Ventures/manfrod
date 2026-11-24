@@ -58,11 +58,30 @@ describe("visitGuests", () => {
     expect(names(visitGuests([visit({ guests: 1, guestNames: ["Anna"] })], present))).toEqual(["Anna (gość)"]);
   });
 
-  it("never matches an anonymous guest from the note", () => {
-    const guests = visitGuests([visit({ guests: 1, note: "spotkanie z Kasią" })], [user("kasia", "Kasia Zając")]);
+  it("reproduces #biuro 20.11: Mariusz with a Slack account takes his unnamed slot of 'Odul i Mariusz'", () => {
+    const odulAndMariusz = visit({
+      note: "Odul i Mariusz będą w biurze od 2026-11-19 przez dwa tygodnie próbne, pracując przy Firmowidzie.",
+    });
+    expect(names(visitGuests([odulAndMariusz], [user("mariusz", "Mariusz Ciastoń")]))).toEqual(["Gość 1"]);
+    expect(names(visitGuests([odulAndMariusz], []))).toEqual(["Gość 1", "Gość 2"]);
+  });
+
+  it("never lets an office member named in the note take an unnamed slot", () => {
+    const guests = visitGuests([visit({ guests: 1, note: "spotkanie z Kasią" })], [user("kasia", "Kasia Zając")], new Set(["kasia"]));
     expect(guests).toHaveLength(1);
-    const named = visitGuests([visit({ guests: 2, note: "Mariusz i ktoś" })], [user("mariusz", "Mariusz Ciastoń")]);
-    expect(named).toHaveLength(2);
+  });
+
+  it("matches the note only by a whole first name that a single present person has", () => {
+    const twoMariusz = [user("a", "Mariusz Ciastoń"), user("b", "Mariusz Nowak")];
+    expect(visitGuests([visit({ note: "Mariusz i ktoś" })], twoMariusz)).toHaveLength(2);
+    expect(visitGuests([visit({ note: "Mariuszowie z Wrocławia" })], [user("a", "Mariusz Ciastoń")])).toHaveLength(2);
+  });
+
+  it("takes at most the unnamed slots and leaves named guests alone", () => {
+    const present = [user("mariusz", "Mariusz Ciastoń"), user("kasia", "Kasia Zając")];
+    expect(visitGuests([visit({ guests: 1, note: "Mariusz i Kasia" })], present)).toEqual([]);
+    const guests = visitGuests([visit({ guests: 2, guestNames: ["Odul"], note: "Odul i Mariusz" })], present);
+    expect(names(guests)).toEqual(["Odul (gość)"]);
   });
 
   it("lets one person cancel out only one guest and never the visit's own people", () => {
@@ -110,6 +129,22 @@ describe("dayRoster", () => {
       manual: [{ deskId: "a", userId: "cyd", guestName: null, name: "Cyd" }],
     });
     expect(result.assignments.length + result.overflow.length).toBe(roster.people.length);
+  });
+});
+
+describe("dayRoster with an unnamed visit", () => {
+  it("counts Mariusz once when he says he is coming and books a desk on a visit that names him only in the note", () => {
+    const roster = dayRoster({
+      people: [
+        { userId: "ala", name: "Ala", slackId: "UALA", status: "office" },
+        { userId: "mariusz", name: "Mariusz Ciastoń", slackId: "UM", status: "office" },
+      ],
+      visits: [visit({ note: "Odul i Mariusz na okres próbny" })],
+      manual: [{ userId: "mariusz", guestName: null, name: "Mariusz Ciastoń", slackId: "UM" }],
+      memberIds: new Set(["ala"]),
+      away: new Set(),
+    });
+    expect(roster.people.map((person) => person.key)).toEqual(["user:ala", "user:mariusz", "guest:v1:gość 1"]);
   });
 });
 

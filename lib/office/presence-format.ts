@@ -15,7 +15,11 @@ export function describeVisit(visit: OfficeVisit, names: Map<string, string>): s
   const named = visit.guestNames.map((name) => `${name} (guest without a Slack account)`);
   const anonymous = visit.guests - visit.guestNames.length;
   const guests = anonymous > 0 ? [`${anonymous} unnamed guest${anonymous === 1 ? "" : "s"}`] : [];
-  return `[${visit.id}] ${range}: ${visit.note} — ${[...people, ...named, ...guests].join(", ")}`;
+  const hint =
+    anonymous > 0
+      ? ` (shown as "Gość 1…" in the desk plan; once you know who they are, name them with update-office-visit: anyone with Slack in people, the rest in guest_names, never clearing someone's own presence or desk instead)`
+      : "";
+  return `[${visit.id}] ${range}: ${visit.note} — ${[...people, ...named, ...guests].join(", ")}${hint}`;
 }
 
 const personLine = (person: PersonPresence) =>
