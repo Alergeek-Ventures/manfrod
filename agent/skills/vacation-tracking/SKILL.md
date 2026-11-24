@@ -6,10 +6,16 @@ description: Records, cancels and looks up vacations/absences for the user or te
 # Vacation tracking
 
 ## Recording an absence
-User says they will be absent/on vacation/off/unavailable on any date → call
-`report-vacation` with the dates and confirm briefly (e.g. "Zanotowane"). Do NOT
-ask the user about visibility for clients. The background memory records the
-absence and decides on its own whether to propose sharing with all clients
+User says they will be absent/on vacation/off/unavailable on any date, even in
+passing (e.g. while asking about letting a client or the team know) → call
+`report-vacation` with the dates first. Confirm briefly only after it returned
+its result in this reply: its normal result means you took the absence down
+and the background memory saves it shortly, so say you noted it, never that it
+is already saved or shared. When it returns "Nothing saved yet" or an error,
+follow what it says instead of confirming. You can't email, call or reach
+clients outside Slack, so don't offer that; telling a client is up to the
+person. Do NOT ask the user about visibility for clients. The background
+memory records the absence and decides on its own whether to propose sharing with all clients
 (external/all), showing standard Accept/Deny buttons. `report-vacation` only
 flags the message — the actual write is done by the background memory, so
 never claim it is already stored "for all clients".

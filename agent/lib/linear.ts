@@ -21,11 +21,11 @@ export async function linearProjectForPerson(
   if (!projectId || !(await getConnection(projectId)))
     return { ok: false, message: `<#${resolved.id}> has no project connected to Linear.` };
   const person = userId ? await getUser(userId) : null;
-  if (!person?.slackId) return { ok: false, message: "I don't know who you are, so I can't read Linear for you." };
+  if (!person?.slackId) return { ok: false, message: "I don't know who you are, so I can't use Linear for you." };
   if (!(await isChannelMember(resolved.id, person.slackId))) {
     return {
       ok: false,
-      message: `${person.name ?? person.slackId} is not a member of <#${resolved.id}>, so I can't read its Linear team for them.`,
+      message: `${person.name ?? person.slackId} is not a member of <#${resolved.id}>, so I can't use its Linear team for them.`,
     };
   }
   return { ok: true, projectId };

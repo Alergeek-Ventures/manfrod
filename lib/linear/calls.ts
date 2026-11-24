@@ -51,11 +51,12 @@ async function withConnection(
   return run(auth.value, connection.linearTeamId, connection);
 }
 
+export const READ_ONLY_KEY_RESULT =
+  "Nothing written: this project's Linear is connected with a read-only API key. Someone in the project has to run `/linear-status` in the project's Slack channel and connect the Linear app; writing works right after that, no new tool is needed. Tell the person exactly this.";
+
 function withAppConnection(projectId: string, run: (auth: string, teamId: string) => Promise<string>): Promise<string> {
   return withConnection(projectId, (auth, teamId, connection) =>
-    connection.mode === "app"
-      ? run(auth, teamId)
-      : Promise.resolve("Ten projekt jest połączony starym kluczem tylko do odczytu — połącz go ponownie przez `/linear-status`."),
+    connection.mode === "app" ? run(auth, teamId) : Promise.resolve(READ_ONLY_KEY_RESULT),
   );
 }
 
