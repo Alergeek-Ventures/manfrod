@@ -32,6 +32,9 @@ new message. Choose exactly one:
     ("to odpowiedz", "halo?", "zghostowałeś mnie", "?")
   - a follow-up question right after Manfrod's own reply that only makes
     sense as a question to Manfrod
+  - a reply under Manfrod's own post that starts the thread (a reminder,
+    summary or question it posted) that asks or tells it something, e.g.
+    "przestaw to na Done" under its reminder about tasks in Merged
   Talking about Manfrod is not addressing it. A message that @mentions
   someone else (written as "<@ID> (Name)") and does not speak to Manfrod
   is for that person, and so are the messages right after it from the same
@@ -101,7 +104,7 @@ export function parseDecision(response: unknown): GateDecision {
 
 const ACTION_CRITERIA = {
   respond:
-    "Reply with a full text message: the message is directed at the assistant (addressed as Manfrod even without an @mention, corrects or adds to what Manfrod just said, complains Manfrod did not answer, or is a follow-up only Manfrod can answer), asks it something it can answer, or asks it to stop replying in or leave this thread. Not when it @mentions someone else and only talks about Manfrod.",
+    "Reply with a full text message: the message is directed at the assistant (addressed as Manfrod even without an @mention, corrects or adds to what Manfrod just said, complains Manfrod did not answer, is a follow-up only Manfrod can answer, or replies to Manfrod's own thread-starting post with a request), asks it something it can answer, or asks it to stop replying in or leave this thread. Not when it @mentions someone else and only talks about Manfrod.",
   react:
     "Add only an emoji reaction, no text: a lightweight nod fits better than a reply or silence, e.g. the message is funny, impressive, a clear success or completion, or otherwise worth a small acknowledgement.",
   react_and_respond:

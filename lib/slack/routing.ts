@@ -393,7 +393,10 @@ const NO_CATCH_UP: CatchUp = { text: "", files: [] };
 
 const withheld = (message: SlackBody) => present(message.text) && containsSecret(message.text);
 
-async function threadCatchUp(inbound: Inbound, threadTs: string, sessionKey: string): Promise<CatchUp> {
+const MENTIONED_HEADER = "[Thread history — you were just mentioned in an ongoing thread. These messages were sent before you joined:]";
+const REPLIED_HEADER = "[Thread history — this is the first reply you see in this thread. These messages were sent before it:]";
+
+async function threadCatchUp(inbound: Inbound, threadTs: string, sessionKey: string, joinedHeader = MENTIONED_HEADER): Promise<CatchUp> {
   if (!inbound.threadTs) {
     threadSeen.mark(sessionKey, [inbound.ts]);
     return NO_CATCH_UP;
@@ -459,9 +462,7 @@ async function threadCatchUp(inbound: Inbound, threadTs: string, sessionKey: str
     .flatMap((message) => fileParts(parseSlackFiles(message.files)))
     .slice(-MAX_FILES_PER_TURN);
   const header =
-    kind === "joined"
-      ? "[Thread history — you were just mentioned in an ongoing thread. These messages were sent before you joined:]"
-      : "[Thread messages you have not seen yet, posted since you were last in this conversation:]";
+    kind === "joined" ? joinedHeader : "[Thread messages you have not seen yet, posted since you were last in this conversation:]";
   return { text: `${header}\n${lines.join("\n")}\n[End of thread history]\n`, files };
 }
 
@@ -533,7 +534,7 @@ async function handleThreadReply(inbound: Inbound, dispatcher: Dispatcher): Prom
   const user = await getUserBySlackId(inbound.user);
   const cleaned = stripBotMention(inbound.text, bot.userId);
   const hasContent = present(cleaned) || inbound.files.length > 0;
-  if (!user || !hasContent || !(await isAllowed(bot.userId, inbound.channel, inbound.threadTs))) {
+  if (!user || !hasContent || !(await isAllowed(bot, inbound.channel, inbound.threadTs))) {
     log.debug(
       `Slack EventHandler not forwarding channel message ${inbound.channel}/${inbound.ts} (top-level, unknown author, or thread the bot was not invited into)`,
     );
@@ -542,9 +543,11 @@ async function handleThreadReply(inbound: Inbound, dispatcher: Dispatcher): Prom
   const sessionKey = `${inbound.channel}:${inbound.threadTs}`;
   const info = await channelInfo(inbound.channel);
   const accessChannel = await agentChannel(inbound, info);
+  const firstReply = threadSeen.seen(sessionKey).size === 0 && !(await lastSessionMessageAt(sessionKey, CHANNEL_RESTORE_WINDOW_HOURS));
+  const catchUp = firstReply ? await threadCatchUp(inbound, inbound.threadTs, sessionKey, REPLIED_HEADER) : NO_CATCH_UP;
   threadSeen.mark(sessionKey, [inbound.ts]);
-  const content = `[from: ${formatAuthor(user.name, inbound.user)}]\n${withFilesNote(await withMentionNames(cleaned), inbound.files)}`;
-  const files = fileParts(inbound.files);
+  const content = `${catchUp.text}[from: ${formatAuthor(user.name, inbound.user)}]\n${withFilesNote(await withMentionNames(cleaned), inbound.files)}`;
+  const files = [...catchUp.files, ...fileParts(inbound.files)];
 
   if (activeAuthor(sessionKey) === user.id) {
     await deliverImmediate(dispatcher, user, inbound, inbound.threadTs, content, files, accessChannel);

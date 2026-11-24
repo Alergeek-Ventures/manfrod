@@ -63,22 +63,30 @@ export async function isKicked(channel: string, threadTs: string): Promise<boole
   return kickRow(channel, threadTs);
 }
 
-async function mentionedInThread(botUserId: string, channel: string, threadTs: string): Promise<boolean> {
+export interface BotIdentity {
+  userId: string;
+  botId: string;
+}
+
+async function invitedToThread(bot: BotIdentity, channel: string, threadTs: string): Promise<boolean> {
   const messages = await listFullThread(channel, threadTs, 1000);
   if (!messages) {
     log.warn(`ThreadPermission: failed to read thread ${channel}/${threadTs}, assuming not invited`);
     return false;
   }
-  return messages.some((message) => typeof message.text === "string" && message.text.includes(`<@${botUserId}>`));
+  const startedByBot = messages.some(
+    (message) => message.ts === threadTs && (message.user === bot.userId || (message.bot_id !== undefined && message.bot_id === bot.botId)),
+  );
+  return startedByBot || messages.some((message) => typeof message.text === "string" && message.text.includes(`<@${bot.userId}>`));
 }
 
-export async function isAllowed(botUserId: string, channel: string, threadTs: string): Promise<boolean> {
+export async function isAllowed(bot: BotIdentity, channel: string, threadTs: string): Promise<boolean> {
   const cached = verdicts.get(key(channel, threadTs));
   if (cached !== undefined) return cached === "allowed";
 
   let verdict: Verdict;
   if (await kickRow(channel, threadTs)) verdict = "kicked";
-  else if (await mentionedInThread(botUserId, channel, threadTs)) verdict = "allowed";
+  else if (await invitedToThread(bot, channel, threadTs)) verdict = "allowed";
   else verdict = "denied";
 
   verdicts.set(key(channel, threadTs), verdict);
