@@ -117,8 +117,11 @@ describe.skipIf(!enabled)("preparePlan", () => {
   it("seats everyone, gives the owner's desk back and stores the away set", async () => {
     const prepared = await preparePlan(date);
     const seat = (key: string) => prepared.result.assignments.find((assignment) => assignment.key === key);
-    expect(prepared.evaluation.crowded).toBe(true);
-    expect(prepared.evaluation.reasons).toContain("przyjeżdża: 2 osoby z Wrocławia");
+    expect(prepared.evaluation.supply - prepared.evaluation.demand).toBeGreaterThan(2);
+    expect(prepared.evaluation.crowded).toBe(false);
+    expect(prepared.evaluation.reasons).toEqual([]);
+    expect(prepared.evaluation.visitExtraPeople).toBe(2);
+    expect(prepared.evaluation.visits.map((visit) => visit.summary)).toContain("2 osoby z Wrocławia");
     expect(seat(`user:${returning.id}`)).toMatchObject({ deskId: ownedBack.id, reason: "owner" });
     expect(seat(`user:${ala.id}`)).toMatchObject({ deskId: recent.id, reason: "recent" });
     expect(prepared.result.displaced.map((person) => person.key)).toEqual([`user:${cyd.id}`]);
