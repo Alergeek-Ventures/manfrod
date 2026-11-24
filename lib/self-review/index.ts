@@ -29,6 +29,7 @@ import {
   linkedCases,
   markNotified,
   markStarted,
+  mergeFindings,
   mergedUnnotified,
   ratersOf,
   resolveFinding,
@@ -40,7 +41,7 @@ import {
 } from "./store.ts";
 import { memoryShown } from "./memory.ts";
 import { reviewSatisfaction } from "./satisfaction.ts";
-import { alreadyFixed, describeCommits, formatTranscript, rank, slackTsToDate, triage, type Triage } from "./triage.ts";
+import { alreadyFixed, consolidate, describeCommits, formatTranscript, rank, slackTsToDate, triage, type Triage } from "./triage.ts";
 
 const log = logger("SelfReview");
 const CASES_PER_RUN = 40;
@@ -151,6 +152,30 @@ async function reviewAnswered(findings: SelfReviewFinding[]): Promise<number> {
     }
   }
   return reviewed;
+}
+
+async function mergeDuplicates(): Promise<number> {
+  try {
+    const findings = await findingsWithStatus(["open", "in_progress", "proposed"]);
+    const titleOf = new Map(findings.map((finding) => [finding.id, finding.title]));
+    let merged = 0;
+    for (const merge of await consolidate(findings)) {
+      const ids = await mergeFindings(merge);
+      if (ids.length === 0) continue;
+      merged += ids.length;
+      log.info(`SelfReview: merged finding(s) ${ids.join(", ")} into ${merge.keepId}`);
+      const channelId = config.selfReviewChannelId;
+      if (!channelId) continue;
+      const title = merge.rewrite?.title ?? titleOf.get(merge.keepId);
+      const lines = [`:link: *${title}*`, ...ids.map((id) => `• ${titleOf.get(id)}`)];
+      const result = await post("chat.postMessage", { channel: channelId, text: lines.join("\n") });
+      if (!result.ok) log.error(`SelfReview: failed to report merged findings: ${result.error}`);
+    }
+    return merged;
+  } catch (error) {
+    log.error(`SelfReview: could not merge duplicate findings: ${(error as Error).message}`);
+    return 0;
+  }
 }
 
 async function syncPulls(): Promise<void> {
@@ -314,14 +339,15 @@ async function startWork(): Promise<number> {
   return started;
 }
 
-export async function runCycle(): Promise<{ judged: number; unsatisfied: number; reviewed: number; started: number }> {
+export async function runCycle(): Promise<{ judged: number; unsatisfied: number; reviewed: number; merged: number; started: number }> {
   await syncPulls();
   const { judged, unsatisfied } = await reviewSatisfaction(config.selfReviewChannelId ?? null);
   const findings = await findingsWithStatus(["open", "in_progress", "proposed"]);
   const reviewed = (await reviewNew(findings)) + (await reviewAnswered(findings));
+  const merged = await mergeDuplicates();
   const started = await startWork();
-  log.info(`SelfReview: reviewed ${reviewed} rating(s), started work on ${started} finding(s)`);
-  return { judged, unsatisfied, reviewed, started };
+  log.info(`SelfReview: reviewed ${reviewed} rating(s), merged ${merged} duplicate finding(s), started work on ${started} finding(s)`);
+  return { judged, unsatisfied, reviewed, merged, started };
 }
 
 function followUpPrompt(finding: SelfReviewFinding, mentions: string): string {

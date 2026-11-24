@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Message } from "../../lib/db/schema.ts";
 import { CYCLE_CRONS, feedbackSince, freeSlots, hasEnoughEvidence, MAX_OPEN_PULLS, NEW_SYSTEM_SINCE } from "../../lib/self-review/rules.ts";
 import { humanReplied, judgeInput } from "../../lib/self-review/satisfaction.ts";
-import { formatTranscript, parseFixed, parseRanking, parseTriage } from "../../lib/self-review/triage.ts";
+import { formatTranscript, parseFixed, parseMerges, parseRanking, parseTriage } from "../../lib/self-review/triage.ts";
 
 const message = (role: "user" | "assistant", content: string, at: number, userId = "rater"): Message =>
   ({ role, content, userId, receivedAt: new Date(at * 1000) }) as Message;
@@ -82,6 +82,62 @@ describe("parseRanking", () => {
   it("keeps only candidate ids, up to the limit", () => {
     expect(parseRanking('["b", "x", "a", "b"]', ["a", "b", "c"], 2)).toEqual(["b", "a"]);
     expect(parseRanking("nonsense", ["a", "b", "c"], 2)).toEqual(["a", "b"]);
+  });
+});
+
+describe("parseMerges", () => {
+  const findings = [
+    { id: "a", status: "open", severity: 1 },
+    { id: "b", status: "open", severity: 3 },
+    { id: "c", status: "open", severity: 2 },
+    { id: "p", status: "proposed", severity: 2 },
+    { id: "w", status: "in_progress", severity: 1 },
+    { id: "d", status: "dismissed", severity: 3 },
+  ];
+  const text = { title: "Claims without checking", problem: "p", expected: "e", summary: "s" };
+  const parse = (groups: unknown) => parseMerges(JSON.stringify({ groups }), findings);
+
+  it("merges duplicates into the kept finding with the highest severity and the rewritten text", () => {
+    expect(parse([{ keep: "a", merge: ["b", "c"], ...text }])).toEqual([{ keepId: "a", mergeIds: ["b", "c"], severity: 3, rewrite: text }]);
+  });
+
+  it("keeps the text when the rewrite is incomplete and drops a missing summary", () => {
+    expect(parse([{ keep: "a", merge: ["b"], title: "t" }])[0].rewrite).toBeNull();
+    expect(parse([{ keep: "a", merge: ["b"], title: "t", problem: "p", expected: "e" }])[0].rewrite).toEqual({
+      title: "t",
+      problem: "p",
+      expected: "e",
+      summary: null,
+    });
+  });
+
+  it("never merges a finding that is being fixed away, but lets it absorb open ones without rewriting it", () => {
+    expect(parse([{ keep: "a", merge: ["p", "b"], ...text }])).toEqual([{ keepId: "p", mergeIds: ["a", "b"], severity: 3, rewrite: null }]);
+    expect(parse([{ keep: "p", merge: ["w", "c"], ...text }])).toEqual([{ keepId: "p", mergeIds: ["c"], severity: 2, rewrite: null }]);
+    expect(parse([{ keep: "p", merge: ["w"] }])).toEqual([]);
+  });
+
+  it("ignores unknown, resolved, repeated and self-referencing ids", () => {
+    expect(parse([{ keep: "zzz", merge: ["d", "a", "a", "b"] }])).toEqual([{ keepId: "a", mergeIds: ["b"], severity: 3, rewrite: null }]);
+    expect(parse([{ keep: "a", merge: ["a"] }])).toEqual([]);
+    expect(parse([{ keep: "d", merge: ["zzz"] }])).toEqual([]);
+  });
+
+  it("uses each finding in one group only", () => {
+    expect(
+      parse([
+        { keep: "a", merge: ["b"] },
+        { keep: "b", merge: ["c"] },
+        { keep: "c", merge: ["a"] },
+      ]),
+    ).toEqual([{ keepId: "a", mergeIds: ["b"], severity: 3, rewrite: null }]);
+  });
+
+  it("returns nothing for malformed output", () => {
+    expect(parseMerges("not json", findings)).toEqual([]);
+    expect(parseMerges(JSON.stringify({ groups: "a,b" }), findings)).toEqual([]);
+    expect(parseMerges(JSON.stringify({ groups: [{ merge: ["a", "b"] }] }), findings)).toEqual([]);
+    expect(parseMerges(JSON.stringify({ groups: [] }), findings)).toEqual([]);
   });
 });
 

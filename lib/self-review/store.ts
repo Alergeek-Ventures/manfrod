@@ -3,6 +3,7 @@ import { isAdmin, systemUserId } from "../accounts.ts";
 import { db, tables } from "../db/index.ts";
 import type { MessageFeedback, SelfReviewCase, SelfReviewFinding, User } from "../db/schema.ts";
 import { ACTIVE_STATUSES, BAD_RATING, INFERRED_RATING, SELF_REVIEW_SLACK_ID, type Category, type Rater } from "./rules.ts";
+import type { FindingMerge } from "./triage.ts";
 
 const { messageFeedback, selfReviewCases, selfReviewFindings, users } = tables;
 
@@ -138,6 +139,31 @@ export async function attachPull(id: string, pullNumber: number, pullUrl: string
 
 export async function resolveFinding(id: string, status: Extract<FindingStatus, "merged" | "closed" | "unresolved" | "dismissed">) {
   await db.update(selfReviewFindings).set({ status, resolvedAt: new Date() }).where(eq(selfReviewFindings.id, id));
+}
+
+export async function mergeFindings({ keepId, mergeIds, severity, rewrite }: FindingMerge): Promise<string[]> {
+  if (mergeIds.includes(keepId)) return [];
+  return db.transaction(async (tx) => {
+    const [keep] = await tx
+      .select({ id: selfReviewFindings.id, status: selfReviewFindings.status })
+      .from(selfReviewFindings)
+      .where(and(eq(selfReviewFindings.id, keepId), inArray(selfReviewFindings.status, ["open", ...ACTIVE_STATUSES])))
+      .for("update");
+    if (!keep) return [];
+    const merged = await tx
+      .update(selfReviewFindings)
+      .set({ status: "dismissed", resolvedAt: new Date() })
+      .where(and(inArray(selfReviewFindings.id, mergeIds), eq(selfReviewFindings.status, "open")))
+      .returning({ id: selfReviewFindings.id });
+    const ids = merged.map((row) => row.id);
+    if (ids.length === 0) return [];
+    await tx.update(selfReviewCases).set({ findingId: keepId }).where(inArray(selfReviewCases.findingId, ids));
+    await tx
+      .update(selfReviewFindings)
+      .set({ severity, ...(keep.status === "open" && rewrite ? rewrite : {}) })
+      .where(eq(selfReviewFindings.id, keepId));
+    return ids;
+  });
 }
 
 export async function reopenFinding(id: string): Promise<void> {
