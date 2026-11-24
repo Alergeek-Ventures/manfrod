@@ -95,8 +95,8 @@ export const userContext = {
     const name = (await resolveChannelName(channelId)) ?? channelId;
     const thread = appContext?.thread_ts;
     if (thread) {
-      return `The user is currently viewing a thread in #${name} (channel ${channelId}, thread_ts ${thread}). If they say "this", "tu" or "tego wątku" without naming anything, they most likely mean it.`;
+      return `The user is currently viewing a thread in #${name} (channel ${channelId}, thread_ts ${thread}) while writing to you here; this conversation is not in that thread. If they say "this", "tu" or "tego wątku" without naming anything, they most likely mean it.`;
     }
-    return `The user is currently viewing #${name} (channel ${channelId}). If they say "this", "tu" or "tego kanału" without naming anything, they most likely mean it.`;
+    return `The user is currently viewing #${name} (channel ${channelId}) while writing to you here; this conversation is not in that channel. If they say "this", "tu" or "tego kanału" without naming anything, they most likely mean it.`;
   },
 };

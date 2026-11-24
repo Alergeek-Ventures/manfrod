@@ -480,7 +480,7 @@ async function handleDm(inbound: Inbound, dispatcher: Dispatcher) {
   const info = await fetchUserInfo(inbound.user!);
   const user = await findOrCreateBySlackId(inbound.user!, inbound.channel, info?.name ?? null, info?.email ?? null);
   const content = await withViewingContext(withFilesNote(inbound.text, inbound.files), inbound.user!);
-  await deliverImmediate(dispatcher, user, inbound, threadTs, content, fileParts(inbound.files), null);
+  await deliverImmediate(dispatcher, user, inbound, threadTs, content, fileParts(inbound.files), inbound.channel);
 }
 
 export async function handleMention(inbound: Inbound, dispatcher: Dispatcher) {
