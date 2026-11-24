@@ -22,7 +22,9 @@ Verdicts:
 
 Judge what Manfrod actually posted, not only the decision behind it. To people, saying something and staying quiet are different things: a message that only announces that Manfrod will not reply, will not step in or has nothing to do is noise, even when the decision itself was right. If the right move was to post nothing, posting such a message is "actionable".
 
-Note what produced the rated reply: an answer to a person's message, a scheduled run with no person's message right before it (a long-running task check, a reminder or a routine), or a message Manfrod's code posts on its own (such as a follow-up about a merged fix). If the problem is the same as one of the existing findings, set "match" to that finding's id and leave "finding" null. It is the same only when the same thing produced the reply and the same change would fix it; a similar symptom from a different source is a new finding.
+Note what produced the rated reply: an answer to a person's message, a scheduled run with no person's message right before it (a long-running task check, a reminder or a routine), or a message Manfrod's code posts on its own (such as a follow-up about a merged fix).
+
+Before writing a new finding, compare the problem with every existing finding. If one of them describes the same underlying behavior, set "match" to its id and leave "finding" null. It is the same behavior when one change to a prompt, skill, routine or tool would fix both, even if the request, topic, tool or source that triggered them differs: for example, stating what Manfrod can do, did or has scheduled without checking its own tools first is one behavior, whether it was about reminders, tasks, office plans or missing tools. Write a new finding only when no existing finding's fix would also prevent this reply; sharing a topic or an area of the code alone does not make two problems the same.
 
 Write "title", "problem" and "expected" in English as a generic description of Manfrod's behavior; "problem" also says what produced the reply. They end up in a GitHub pull request, so never include names, quotes, Slack IDs, client or business details or anything personal. Write "summary" in {{LANGUAGE}}: one or two sentences on the problem for the admins' Slack channel, also without quotes or personal details. Write "question" in the language the person used, addressed to them directly, in one or two sentences.
 
@@ -86,7 +88,7 @@ export async function alreadyFixed(finding: SelfReviewFinding, cases: RatedCase[
   if (commits.length === 0 || cases.length === 0) return null;
   const prompt = FIXED_PROMPT.replace("{{LANGUAGE}}", await internalLanguage());
   const rated = cases.map((entry) => `<case id="${entry.id}">\n${entry.excerpt}\n</case>`).join("\n");
-  const content = `Finding:\n${describe(finding)}\n  expected: ${finding.expected}\n\nRated cases:\n${rated}\n\nCommits since the last rating:\n${describeCommits(commits)}`;
+  const content = `Finding:\n${describeFull(finding)}\n\nRated cases:\n${rated}\n\nCommits since the last rating:\n${describeCommits(commits)}`;
   const result = await generateText([system(prompt), user(content)], { purpose: "self_review_fixed", chain: CHAIN });
   return parseFixed(
     result.text,
@@ -210,13 +212,15 @@ export function parseRanking(raw: string, candidateIds: string[], limit: number)
 const describe = (finding: SelfReviewFinding) =>
   `- id: ${finding.id}\n  title: ${finding.title}\n  problem: ${finding.problem}\n  category: ${finding.category}`;
 
+const describeFull = (finding: SelfReviewFinding) => `${describe(finding)}\n  expected: ${finding.expected}`;
+
 export async function triage(input: {
   transcript: string;
   clarification: string | null;
   memory: string | null;
   findings: SelfReviewFinding[];
 }): Promise<Triage | null> {
-  const existing = input.findings.length > 0 ? input.findings.map(describe).join("\n") : "(none)";
+  const existing = input.findings.length > 0 ? input.findings.map(describeFull).join("\n") : "(none)";
   const parts = [`Existing findings:\n${existing}`, `<conversation>\n${input.transcript}\n</conversation>`];
   if (input.memory) parts.push(`<memory>\n${input.memory}\n</memory>`);
   if (input.clarification) parts.push(`<clarification>\n${input.clarification}\n</clarification>`);
