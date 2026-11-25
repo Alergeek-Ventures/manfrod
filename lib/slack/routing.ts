@@ -12,6 +12,7 @@ import { push as bufferPush } from "../memory/buffer.ts";
 import { ensureMapping } from "../memory/channel-detector.ts";
 import { createMessage, getRecentSessionMessages, lastSessionMessageAt } from "../memory/messages.ts";
 import { userAuth } from "../proactive.ts";
+import { noticeOfficeMessage } from "../welcome/index.ts";
 import { containsSecret, secretWarning } from "../security/secrets.ts";
 import {
   addReaction,
@@ -69,6 +70,7 @@ export interface Inbound {
   user: string | null;
   channelType: string | null;
   files: SlackFile[];
+  subtype?: string | null;
 }
 
 export function inboundFromRaw(raw: Record<string, any>, fallbackChannel: string): Inbound {
@@ -80,6 +82,7 @@ export function inboundFromRaw(raw: Record<string, any>, fallbackChannel: string
     user: typeof raw.user === "string" ? raw.user : null,
     channelType: raw.channel_type ?? null,
     files: parseSlackFiles(raw.files),
+    subtype: typeof raw.subtype === "string" ? raw.subtype : null,
   };
 }
 
@@ -577,6 +580,9 @@ export async function handleMessage(inbound: Inbound, dispatcher: Dispatcher, is
   if (containsSecret(inbound.text)) {
     await warnAboutSecret(inbound);
     return;
+  }
+  if (!isDm(inbound.channel)) {
+    void noticeOfficeMessage(inbound).catch((error) => log.error(`Welcome check failed for ${inbound.user}: ${(error as Error).message}`));
   }
   if (isMentionEvent) {
     await handleMention(inbound, dispatcher);
