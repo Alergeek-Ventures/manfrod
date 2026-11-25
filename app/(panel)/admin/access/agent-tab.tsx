@@ -9,7 +9,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import type { AccessData } from "@/lib/web/access-data.ts";
 import type { Run } from "./access-client.tsx";
-import { saveAutoMerge, saveLanguages } from "./actions.ts";
+import { saveAutoMerge, saveLanguages, saveWelcome } from "./actions.ts";
 
 function LanguageSelect({
   id,
@@ -59,6 +59,26 @@ function AutoMergeCard({ data, run, pending }: { data: AccessData; run: Run; pen
             onCheckedChange={(checked) => run(() => saveAutoMerge(checked))}
           />
           <FieldLabel htmlFor="auto-merge">Merge skill and routine changes automatically</FieldLabel>
+        </Field>
+      </CardContent>
+    </Card>
+  );
+}
+
+function WelcomeCard({ data, run, pending }: { data: AccessData; run: Run; pending: boolean }) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Welcome new people</CardTitle>
+        <CardDescription>
+          When someone new writes in the office channel for the first time, Manfrod DMs them 10 to 20 minutes later, says what it does and
+          asks them to introduce themselves. Only once per person, never to guests or people it already knows.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <Field orientation="horizontal">
+          <Switch id="welcome" checked={data.welcome} disabled={pending} onCheckedChange={(checked) => run(() => saveWelcome(checked))} />
+          <FieldLabel htmlFor="welcome">Welcome new people in a DM</FieldLabel>
         </Field>
       </CardContent>
     </Card>
@@ -117,6 +137,7 @@ export function AgentTab({ data, run, pending }: { data: AccessData; run: Run; p
         </CardContent>
       </Card>
       <AutoMergeCard data={data} run={run} pending={pending} />
+      <WelcomeCard data={data} run={run} pending={pending} />
     </div>
   );
 }

@@ -2,6 +2,7 @@ import { and, asc, countDistinct, desc, eq, isNull, like, sql } from "drizzle-or
 import { isAdmin, isSystemUser, listUsers } from "../accounts.ts";
 import { LANGUAGES, languageSettings } from "../agent-settings.ts";
 import { autoMergeEnabled } from "../self-modify-merge/settings.ts";
+import { welcomeEnabled } from "../welcome/store.ts";
 import { db, tables } from "../db/index.ts";
 import { listPendingJobs } from "../jobs/index.ts";
 import { listConnections } from "../linear/index.ts";
@@ -164,6 +165,7 @@ export async function loadAccessData() {
     languages: await languageSettings(),
     languageOptions: Object.entries(LANGUAGES).map(([value, label]) => ({ value, label })),
     autoMerge: await autoMergeEnabled(),
+    welcome: await welcomeEnabled(),
   };
 }
 
