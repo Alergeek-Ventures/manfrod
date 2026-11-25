@@ -86,6 +86,27 @@ describe("self-modify webhook routing", () => {
     expect(state.events).toEqual([]);
   });
 
+  it("routes a finished GitHub Actions workflow run, but not one from a fork or another branch", async () => {
+    const workflowRun = (action: string, branch = BRANCH, headRepo = "org/repo", pulls = [{ number: 42 }]) => ({
+      action,
+      repository,
+      workflow_run: { head_branch: branch, head_sha: "h", head_repository: { full_name: headRepo }, pull_requests: pulls },
+    });
+    await handleWebhook("workflow_run", workflowRun("completed"));
+    expect(state.events.map((event) => event.data)).toEqual([{ pullNumber: 42, source: "webhook" }]);
+    state.events = [];
+    await handleWebhook("workflow_run", workflowRun("requested"));
+    await handleWebhook("workflow_run", workflowRun("in_progress"));
+    await handleWebhook("workflow_run", workflowRun("completed", "feature/x"));
+    await handleWebhook("workflow_run", workflowRun("completed", BRANCH, "someone/fork"));
+    await handleWebhook("workflow_run", { ...workflowRun("completed"), repository: { full_name: "other/repo" } });
+    expect(state.events).toEqual([]);
+    state.onBranch = [43];
+    await handleWebhook("workflow_run", workflowRun("completed", BRANCH, "org/repo", []));
+    expect(state.branchLookups).toEqual([BRANCH]);
+    expect(state.events.map((event) => event.data)).toEqual([{ pullNumber: 43, source: "webhook" }]);
+  });
+
   it("reads the branch and pull requests from each payload shape", () => {
     expect(selfModifyTrigger("check_run", checkRun(BRANCH, [{ number: 5 }, { number: 6 }]), "org/repo")).toEqual({
       branch: BRANCH,

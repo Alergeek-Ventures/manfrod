@@ -58,7 +58,7 @@ export function isTruncatedPush(payload: PushPayload): boolean {
 }
 
 const PULL_ACTIONS = new Set(["opened", "reopened", "ready_for_review", "synchronize", "closed"]);
-const CHECK_EVENTS = new Set(["check_suite", "check_run"]);
+const CHECK_EVENTS = new Set(["check_suite", "check_run", "workflow_run"]);
 
 export interface SelfModifyTrigger {
   branch: string;
@@ -78,8 +78,9 @@ export function selfModifyTrigger(event: string, payload: any, repository: strin
     return { branch, pullNumbers: [pull.number] };
   }
   if (!CHECK_EVENTS.has(event) || payload.action !== "completed") return null;
-  const check = event === "check_suite" ? payload.check_suite : payload.check_run;
-  const branch: unknown = event === "check_suite" ? check?.head_branch : check?.check_suite?.head_branch;
+  if (event === "workflow_run" && payload.workflow_run?.head_repository?.full_name !== repository) return null;
+  const check = event === "check_suite" ? payload.check_suite : event === "check_run" ? payload.check_run : payload.workflow_run;
+  const branch: unknown = event === "check_run" ? check?.check_suite?.head_branch : check?.head_branch;
   if (typeof branch !== "string" || !branch.startsWith(SELF_MODIFY_BRANCH_PREFIX)) return null;
   return { branch, pullNumbers: numbers(check.pull_requests) };
 }
@@ -152,6 +153,7 @@ export async function handleWebhook(event: string, payload: any): Promise<void> 
     case "pull_request":
     case "check_suite":
     case "check_run":
+    case "workflow_run":
       if (await routeSelfModify(event, payload)) return;
       log.debug(`Github.Webhook: ignoring ${event}.${payload?.action ?? ""}`);
       return;
