@@ -46,6 +46,7 @@ const INTENT_TOOLS = new Set([
   "report-vacation",
   "request-secret",
   "reserve-desk",
+  "self-modify-status",
   "send-dm",
   "set-channel-summaries",
   "set-office-presence",
