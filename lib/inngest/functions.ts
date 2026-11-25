@@ -18,7 +18,8 @@ import { runDeskPlan, runDeskPlanHeadsUp } from "../office/plan-cron.ts";
 import { deleteSandboxFilesOlderThan } from "../sandbox-files.ts";
 import { runRehearsals } from "../rehearsal/index.ts";
 import { clearTranscriptsOlderThan } from "../rehearsal/store.ts";
-import { runAutoMerge } from "../self-modify-merge/index.ts";
+import { detectLive, runPull, sweepAutoMerge } from "../self-modify-merge/index.ts";
+import { MAX_ATTEMPTS } from "../self-modify-merge/store.ts";
 import { cleanUpClosedPulls } from "../self-modify-pulls.ts";
 import { deliverProactive } from "../proactive.ts";
 import { runCycle as selfReviewCycle, runMorning as selfReviewMorning } from "../self-review/index.ts";
@@ -42,6 +43,7 @@ import {
   type GithubPushTruncatedData,
   type JobScheduledData,
   type McpTokenUnavailableData,
+  type SelfModifyPullChangedData,
   type SessionActivityData,
   type WelcomeRequestedData,
 } from "./client.ts";
@@ -146,6 +148,26 @@ const capabilityBuild = inngest.createFunction(
       return { requestId, started: await startCapabilityBuild(requestId) };
     }),
 );
+
+const selfModifyAutoMerge = inngest.createFunction(
+  {
+    id: "self-modify-auto-merge",
+    triggers: [{ event: EVENTS.selfModifyPullChanged }],
+    debounce: { key: "event.data.pullNumber", period: "15s" },
+    concurrency: 1,
+    retries: 2,
+  },
+  async ({ event, step }) => {
+    const { pullNumber, source } = event.data as SelfModifyPullChangedData;
+    let run = await step.run("evaluate", () => runPull(pullNumber, source));
+    for (let round = 1; run.next && round <= MAX_ATTEMPTS + 1; round += 1) {
+      await step.sleepUntil(`wait-${round}`, run.next);
+      run = await step.run(`evaluate-${round}`, () => runPull(pullNumber, source));
+    }
+    return run;
+  },
+);
+cronFunctions.add(selfModifyAutoMerge);
 
 const extractSessionFn = inngest.createFunction(
   {
@@ -295,9 +317,9 @@ const allFunctions = [
   cronFunction("nudges-weekly", "*/30 12-17 * * 5", async () => ({ sent: await runWeeklyWrapUps() })),
   cronFunction("nudges-hours", "0 19 * * 1-5", async () => ({ sent: await runEveningHours() })),
   cronFunction("nudges-project-summaries", "0 15 * * 5", async () => ({ posted: await runProjectSummaries() })),
-  cronFunction("self-modify-cleanup", "20 * * * *", () => cleanUpClosedPulls()),
-  cronFunction("self-modify-auto-merge", "*/10 * * * *", () => runAutoMerge()),
-  cronFunction("self-modify-rehearsals", "*/5 * * * *", () => runRehearsals()),
+  cronFunction("self-modify-cleanup", "20 * * * *", async () => ({ ...(await cleanUpClosedPulls()), ...(await sweepAutoMerge()) })),
+  selfModifyAutoMerge,
+  cronFunction("self-modify-rehearsals", "*/5 * * * *", async () => ({ live: await detectLive(), ...(await runRehearsals()) })),
   cronFunction("capability-sync", "*/10 * * * *", () => syncCapabilityRequests()),
   cronFunction("gitleaks-refresh", "0 3 * * *", () => refreshGitleaks()),
   cronFunction("self-review", SELF_REVIEW_CRONS, () => selfReviewCycle()),

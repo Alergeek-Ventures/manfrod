@@ -1,4 +1,5 @@
 import { config } from "../config.ts";
+import { EVENTS, sendEvent, type SelfModifyPullSource } from "../inngest/client.ts";
 import {
   branchSha,
   checkRuns,
@@ -12,7 +13,7 @@ import {
 } from "../github.ts";
 import { logger } from "../log.ts";
 import { getRecentSessionMessages } from "../memory/messages.ts";
-import { isProposal, publishedHead, recordedOpenPulls } from "../self-modify-pulls.ts";
+import { isProposal, publishedHead, pullOrigin, recordedOpenPulls, type PullOrigin } from "../self-modify-pulls.ts";
 import { planRehearsals, targetFor } from "../rehearsal/scenarios.ts";
 import { insertPlanned } from "../rehearsal/store.ts";
 import { findingForPull, linkedCases } from "../self-review/store.ts";
@@ -20,7 +21,6 @@ import { post } from "../slack/api.ts";
 import {
   ciState,
   containsMerge,
-  eligibility,
   fileListProblems,
   formatTarget,
   isCandidate,
@@ -28,6 +28,7 @@ import {
   underDailyLimit,
   type FileVersions,
 } from "./eligibility.ts";
+import { mergeTarget, preCheck, TARGET_BRANCH } from "./outlook.ts";
 import { JUDGES, securityReview, type Evidence, type ReviewedFile } from "./review.ts";
 import { autoMergeEnabled } from "./settings.ts";
 import {
@@ -49,7 +50,6 @@ import {
 } from "./store.ts";
 
 const log = logger("SelfModify.Merge");
-const TARGET_BRANCH = "main";
 const MERGE_TIMEOUT_MINUTES = 15;
 const EVIDENCE_CONVERSATIONS = 4;
 const EVIDENCE_MESSAGES = 20;
@@ -58,21 +58,42 @@ const FINAL_MERGE_REFUSALS = new Set([405, 409, 422]);
 
 export type Outcome = "merged" | "blocked" | "skipped" | "waiting" | "retrying" | "ignored";
 
+export type EvaluationMode = "sweep" | "event";
+
+export interface ReportThread {
+  channelId: string;
+  threadTs: string | null;
+}
+
 type FoundPull = NonNullable<Awaited<ReturnType<typeof getPull>>>;
 
 const clip = (text: string) => (text.length > MESSAGE_CHARS ? `${text.slice(0, MESSAGE_CHARS)}…` : text);
 export const escapeSlack = (text: string) => text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 const link = (pull: Pick<FoundPull, "number" | "url" | "title">) => `<${pull.url}|#${pull.number} ${escapeSlack(pull.title)}>`;
 
-async function thread(pullNumber: number): Promise<{ channelId: string; threadTs: string | null }> {
-  const finding = await findingForPull(pullNumber);
+export function pickThread(input: {
+  finding: { sessionChannelId: string | null; sessionThreadTs: string | null } | null;
+  origin: PullOrigin | null;
+  earlier: { channelId: string; threadTs: string } | null;
+  fallbackChannelId: string;
+}): ReportThread {
+  const { finding, origin, earlier } = input;
   if (finding?.sessionChannelId && finding.sessionThreadTs)
     return { channelId: finding.sessionChannelId, threadTs: finding.sessionThreadTs };
-  const earlier = await lastThread(pullNumber);
-  return earlier ?? { channelId: config.selfReviewChannelId!, threadTs: null };
+  if (origin) return origin;
+  return earlier ?? { channelId: input.fallbackChannelId, threadTs: null };
 }
 
-async function report(pullNumber: number, text: string): Promise<{ channelId: string; threadTs: string | null }> {
+async function thread(pullNumber: number): Promise<ReportThread> {
+  return pickThread({
+    finding: await findingForPull(pullNumber),
+    origin: await pullOrigin(pullNumber),
+    earlier: await lastThread(pullNumber),
+    fallbackChannelId: config.selfReviewChannelId!,
+  });
+}
+
+async function report(pullNumber: number, text: string): Promise<ReportThread> {
   const target = await thread(pullNumber);
   const result = await post("chat.postMessage", {
     channel: target.channelId,
@@ -124,7 +145,7 @@ async function retry(pull: FoundPull, targets: string[], reason: string, replace
   return block(pull, targets, [`Gave up after ${attempts} attempts that failed for a passing reason; the last one: ${reason}`]);
 }
 
-async function versionsOf(files: ComparedFile[], mergeBase: string, main: string, head: string): Promise<Map<string, FileVersions>> {
+export async function versionsOf(files: ComparedFile[], mergeBase: string, main: string, head: string): Promise<Map<string, FileVersions>> {
   const versions = new Map<string, FileVersions>();
   for (const file of files) {
     if (!targetOf(file.path) || file.status === "removed") continue;
@@ -150,37 +171,28 @@ async function evidence(pullNumber: number): Promise<Evidence> {
   return { finding: { title: finding.title, problem: finding.problem, expected: finding.expected }, conversations };
 }
 
-export function mergeTarget(pull: FoundPull, published: { headSha: string | null; reviewVerdict: string | null } | null): string[] {
-  const problems: string[] = [];
-  if (!published?.headSha || published.headSha !== pull.headSha) problems.push("the head commit is not the one self-modify published");
-  else if (published.reviewVerdict !== "approve") problems.push("self-modify's reviewer did not approve this commit");
-  if (pull.baseRef !== TARGET_BRANCH) problems.push(`the pull request targets ${pull.baseRef}, not ${TARGET_BRANCH}`);
-  if (!isProposal(pull)) problems.push("the branch is not a self-modify branch");
-  if (pull.headRepository !== config.githubRepository) problems.push("the branch comes from another repository");
-  return problems;
-}
-
-async function evaluate(pull: FoundPull): Promise<Outcome> {
+async function evaluate(pull: FoundPull, mode: EvaluationMode): Promise<Outcome> {
   const files = await pullFiles(pull.number);
   if (!isCandidate(files)) {
     await recordDecision({ pullNumber: pull.number, headSha: pull.headSha, decision: "skipped", reason: "changes code", targets: [] });
     return "skipped";
   }
-  const origin = mergeTarget(pull, await publishedHead(pull.number));
+  const published = await publishedHead(pull.number);
+  if (mode === "event" && published?.headSha !== pull.headSha) return "waiting";
+  const origin = mergeTarget(pull, published);
   if (origin.length > 0) return block(pull, [], origin);
   const comparison = await compareCommits(TARGET_BRANCH, pull.headSha);
   const main = await branchSha(TARGET_BRANCH);
   if (!comparison || !main) throw new Error("GitHub could not compare the branch with main");
   const listed = fileListProblems(files, pull.changedFiles, comparison.files);
-  if (listed.length > 0) return block(pull, [], listed);
   const versions = await versionsOf(files, comparison.mergeBaseSha, main, pull.headSha);
-  const gate = eligibility(files, versions);
-  if (!gate.ok) return block(pull, [], gate.reasons);
-  const targets = gate.targets.map(formatTarget);
+  const check = preCheck({ pull, published, files, versions, listed });
+  if (check.verdict !== "eligible") return block(pull, [], check.verdict === "blocked" ? check.reasons : ["changes code"]);
+  const targets = check.targets.map(formatTarget);
 
   const ci = ciState(await checkRuns(pull.headSha));
   if (ci === "pending") return "waiting";
-  if (ci === "failed") return block(pull, targets, ["CI did not pass on this commit"]);
+  if (ci === "failed") return mode === "event" ? "waiting" : block(pull, targets, ["CI did not pass on this commit"]);
   const now = new Date();
   if (!underDailyLimit(await mergedSince(new Date(now.getTime() - 86_400_000)), now)) {
     log.info(`SelfModify.Merge: #${pull.number} waits, the daily limit of auto-merges is reached`);
@@ -256,20 +268,21 @@ async function announceMerged(pull: FoundPull, targets: string[], mergeSha: stri
   }
 }
 
-export async function processPull(pullNumber: number): Promise<Outcome> {
+export async function processPull(pullNumber: number, mode: EvaluationMode = "sweep"): Promise<Outcome> {
   const found = await getPull(pullNumber);
   if (!found || found.state !== "open" || found.merged || !isProposal(found)) return "ignored";
   if (settled(await decisionFor(found.number, found.headSha))) return "ignored";
   try {
-    return await evaluate(found);
+    return await evaluate(found, mode);
   } catch (error) {
     return retry(found, [], (error as Error).message);
   }
 }
 
-export async function settleMerging(now = new Date()): Promise<number> {
+export async function settleMerging(now = new Date(), pullNumber?: number): Promise<number> {
   let settledCount = 0;
-  for (const row of await mergingRows()) {
+  const rows = (await mergingRows()).filter((row) => pullNumber === undefined || row.pullNumber === pullNumber);
+  for (const row of rows) {
     try {
       const pull = await getPull(row.pullNumber);
       if (!pull) continue;
@@ -314,18 +327,40 @@ export async function detectLive(): Promise<number> {
   return live;
 }
 
-export async function runAutoMerge(): Promise<{ live: number; settled: number; outcomes: Record<number, Outcome> }> {
-  const live = await detectLive();
-  const outcomes: Record<number, Outcome> = {};
-  if (!config.selfReviewChannelId) return { live, settled: 0, outcomes };
-  const settledCount = await settleMerging();
-  if (!(await autoMergeEnabled())) return { live, settled: settledCount, outcomes };
-  for (const pullNumber of await recordedOpenPulls()) {
-    try {
-      outcomes[pullNumber] = await processPull(pullNumber);
-    } catch (error) {
-      log.error(`SelfModify.Merge: failed for #${pullNumber}: ${(error as Error).message}`);
-    }
+export interface PullRun {
+  outcome: Outcome;
+  settled: number;
+  next: string | null;
+}
+
+async function nextRun(pullNumber: number, outcome: Outcome): Promise<string | null> {
+  if (outcome !== "retrying" && outcome !== "waiting") return null;
+  const pull = await getPull(pullNumber);
+  const row = pull ? await decisionFor(pullNumber, pull.headSha) : null;
+  if (outcome === "retrying" && row?.decision === "retry" && row.retryAt) return row.retryAt.toISOString();
+  if (row?.decision === "merging" && row.mergedAt)
+    return new Date(row.mergedAt.getTime() + (MERGE_TIMEOUT_MINUTES + 1) * 60_000).toISOString();
+  return null;
+}
+
+export async function runPull(pullNumber: number, source: SelfModifyPullSource): Promise<PullRun> {
+  if (!config.selfReviewChannelId) return { outcome: "ignored", settled: 0, next: null };
+  const settledCount = await settleMerging(new Date(), pullNumber);
+  if (!(await autoMergeEnabled())) return { outcome: "waiting", settled: settledCount, next: null };
+  const outcome = await processPull(pullNumber, source === "sweep" ? "sweep" : "event");
+  return { outcome, settled: settledCount, next: await nextRun(pullNumber, outcome) };
+}
+
+export async function requestEvaluation(pullNumbers: number[], source: SelfModifyPullSource): Promise<number> {
+  let sent = 0;
+  for (const pullNumber of new Set(pullNumbers)) {
+    if (await sendEvent(EVENTS.selfModifyPullChanged, { pullNumber, source })) sent += 1;
   }
-  return { live, settled: settledCount, outcomes };
+  return sent;
+}
+
+export async function sweepAutoMerge(): Promise<{ requested: number }> {
+  if (!config.selfReviewChannelId) return { requested: 0 };
+  const merging = (await mergingRows()).map((row) => row.pullNumber);
+  return { requested: await requestEvaluation([...merging, ...(await recordedOpenPulls())], "sweep") };
 }

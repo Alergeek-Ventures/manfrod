@@ -16,6 +16,7 @@ export const EVENTS = {
   githubInstallationChanged: "manfrod/github.installation.changed",
   githubPushTruncated: "manfrod/github.push.truncated",
   welcomeRequested: "manfrod/welcome.requested",
+  selfModifyPullChanged: "manfrod/self-modify.pull.changed",
 } as const;
 
 export interface JobScheduledData {
@@ -61,6 +62,13 @@ export interface GithubPushTruncatedData {
   branch: string;
   before: string;
   after: string;
+}
+
+export type SelfModifyPullSource = "webhook" | "published" | "sweep";
+
+export interface SelfModifyPullChangedData {
+  pullNumber: number;
+  source: SelfModifyPullSource;
 }
 
 export const ROOT_THREAD_KEY = "root";

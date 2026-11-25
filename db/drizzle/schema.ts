@@ -795,6 +795,8 @@ export const selfModifyPulls = pgTable("self_modify_pulls", {
 	description: text(),
 	requestedByUserId: uuid("requested_by_user_id"),
 	reviewVerdict: text("review_verdict"),
+	originChannelId: text("origin_channel_id"),
+	originThreadTs: text("origin_thread_ts"),
 }, (table) => [
 	index().using("btree", table.status.asc().nullsLast().op("text_ops")),
 	check("self_modify_pulls_status", sql`status = ANY (ARRAY['open'::text, 'closed'::text])`),

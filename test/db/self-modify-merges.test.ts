@@ -8,7 +8,7 @@ const store = await import("../../lib/self-modify-merge/store.ts");
 const rehearsals = await import("../../lib/rehearsal/store.ts");
 const { targetFor } = await import("../../lib/rehearsal/scenarios.ts");
 const { reopenFinding } = await import("../../lib/self-review/store.ts");
-const { recordPull } = await import("../../lib/self-modify-pulls.ts");
+const { openPullsOnBranch, pullOrigin, recordPublished, recordPull } = await import("../../lib/self-modify-pulls.ts");
 const { findOrCreateBySlackId } = await import("../../lib/accounts.ts");
 const { eq, inArray } = await import("drizzle-orm");
 
@@ -17,6 +17,7 @@ const tag = `t${pullNumber}`;
 const findingPull = pullNumber + 100_000;
 const requestPull = pullNumber + 200_000;
 const describedPull = pullNumber + 300_000;
+const originPull = pullNumber + 500_000;
 const created: { findings: string[]; requests: string[]; merges: string[]; users: string[] } = {
   findings: [],
   requests: [],
@@ -34,7 +35,7 @@ describe.skipIf(!enabled)("self-modify auto-merge store", () => {
       );
     if (created.findings.length) await db.delete(tables.selfReviewFindings).where(inArray(tables.selfReviewFindings.id, created.findings));
     if (created.requests.length) await db.delete(tables.capabilityRequests).where(inArray(tables.capabilityRequests.id, created.requests));
-    await db.delete(tables.selfModifyPulls).where(eq(tables.selfModifyPulls.pullNumber, describedPull));
+    await db.delete(tables.selfModifyPulls).where(inArray(tables.selfModifyPulls.pullNumber, [describedPull, originPull]));
   });
 
   it("records one decision per head SHA and counts recent and pending merges", async () => {
@@ -189,5 +190,28 @@ describe.skipIf(!enabled)("self-modify auto-merge store", () => {
     await reopenFinding(finding.id);
     const [reopened] = await db.select().from(tables.selfReviewFindings).where(eq(tables.selfReviewFindings.id, finding.id));
     expect(reopened).toMatchObject({ status: "open", resolvedAt: null, notifiedAt: null });
+  });
+
+  it("keeps the thread a pull request was requested in until another request takes it over", async () => {
+    const branch = `manfrod/self-modify/${tag}`;
+    expect(await pullOrigin(originPull)).toBeNull();
+    await recordPull(originPull, branch, "session-a", {
+      headSha: "c1",
+      reviewVerdict: "approve",
+      origin: { channelId: "D_ADMIN", threadTs: "5.0" },
+    });
+    expect(await pullOrigin(originPull)).toEqual({ channelId: "D_ADMIN", threadTs: "5.0" });
+    expect(await openPullsOnBranch(branch)).toEqual([originPull]);
+    await recordPublished(originPull, { headSha: "c2", reviewVerdict: "approve", origin: null });
+    await recordPull(originPull, branch, "session-a", { headSha: "c2", reviewVerdict: "approve" });
+    expect(await pullOrigin(originPull)).toEqual({ channelId: "D_ADMIN", threadTs: "5.0" });
+    await recordPull(originPull, branch, "session-a", {
+      headSha: "c3",
+      reviewVerdict: "approve",
+      origin: { channelId: "C_TEAM", threadTs: "7.0" },
+    });
+    expect(await pullOrigin(originPull)).toEqual({ channelId: "C_TEAM", threadTs: "7.0" });
+    await db.update(tables.selfModifyPulls).set({ status: "closed" }).where(eq(tables.selfModifyPulls.pullNumber, originPull));
+    expect(await openPullsOnBranch(branch)).toEqual([]);
   });
 });

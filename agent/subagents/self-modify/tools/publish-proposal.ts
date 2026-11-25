@@ -13,8 +13,19 @@ import {
   updatePull,
   type TreeEntry,
 } from "../../../../lib/github.ts";
+import { EVENTS, sendEvent } from "../../../../lib/inngest/client.ts";
+import { logger } from "../../../../lib/log.ts";
 import { matches as secretRule } from "../../../../lib/security/gitleaks.ts";
-import { latestReview, PROPOSAL_FOOTER, recordPublished, recordPull, reviewRounds } from "../../../../lib/self-modify-pulls.ts";
+import { outlookText } from "../../../../lib/self-modify-merge/outlook.ts";
+import { publishOutlook } from "../../../../lib/self-modify-merge/status.ts";
+import {
+  latestReview,
+  PROPOSAL_FOOTER,
+  recordPublished,
+  recordPull,
+  requestOrigin,
+  reviewRounds,
+} from "../../../../lib/self-modify-pulls.ts";
 import { MAX_OPEN_PULLS } from "../../../../lib/self-review/rules.ts";
 import { attachCapabilityPull } from "../../../../lib/tasks/capabilities.ts";
 import { attachPull, countActive } from "../../../../lib/self-review/store.ts";
@@ -37,6 +48,16 @@ import { environment } from "../sandbox.ts";
 
 const MODES = new Set(["100644", "100755"]);
 const MIN_ROUNDS_BEFORE_OVERRIDE = 3;
+const log = logger("SelfModify.Publish");
+
+async function autoMergeLine(pullNumber: number, headSha: string): Promise<string> {
+  try {
+    return outlookText(await publishOutlook(pullNumber, headSha));
+  } catch (error) {
+    log.warn(`SelfModify.Publish: could not check auto-merge for #${pullNumber}: ${(error as Error).message}`);
+    return "Could not check whether it merges on its own; that is decided once CI finishes.";
+  }
+}
 
 export default defineManfrodTool({
   keepSecretPlaceholders: true,
@@ -145,6 +166,7 @@ export default defineManfrodTool({
       reviewVerdict: openFindings ? ("overridden" as const) : ("approve" as const),
       description,
       requestedByUserId: requester.kind === "admin" ? ctx.userId : null,
+      origin: requester.kind === "admin" ? requestOrigin(ctx.msgCtx) : null,
     };
     if (branch) {
       if (pullNumber) await recordPublished(pullNumber, published);
@@ -170,8 +192,10 @@ export default defineManfrodTool({
     await recordPull(pullNumber, branch, runtime.session.id, published);
     if (ctx.capabilityRequestId) await attachCapabilityPull(ctx.capabilityRequestId, pullNumber, pullUrl);
     proposal.update((current) => ({ ...current, branch, headSha: commit, pullNumber, pullUrl }));
+    await sendEvent(EVENTS.selfModifyPullChanged, { pullNumber, source: "published" });
 
     const listed = changes.map((change) => `- ${change.status} ${change.path}`).join("\n");
-    return `Published commit ${commit.slice(0, 7)} to pull request ${pullUrl}\nChanged files:\n${listed}`;
+    const autoMerge = await autoMergeLine(pullNumber, commit);
+    return `Published commit ${commit.slice(0, 7)} to pull request ${pullUrl}\nAuto-merge: ${autoMerge}\nChanged files:\n${listed}`;
   },
 });
