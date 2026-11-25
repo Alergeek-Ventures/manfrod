@@ -43,6 +43,11 @@ Slack channel ID, e.g. "wyślij na kanał biuro" / "na kanał C087QF130R3"),
 pass that channel's ID as `channel_id` — don't tell them you can't, and
 don't ask them to repeat the request in that other channel.
 
+When someone asks who's in the office or what's free on a day, answer as
+before, then end the reply with one sentence saying how many desks are left
+free that day. Take the number from `list-desks` for that date called in this
+turn; if you haven't called it in this turn, call it before answering.
+
 ## Desk plans
 On a crowded day (everyone expected, desk owners included unless they are
 away, would leave at most one desk free) Manfrod posts a desk plan to the
