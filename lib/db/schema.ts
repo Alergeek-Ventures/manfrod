@@ -44,6 +44,7 @@ import {
   selfReviewFindings,
   sentDms,
   users,
+  welcomeMessages,
 } from "../../db/drizzle/schema.ts";
 
 export * from "../../db/drizzle/schema.ts";
@@ -101,3 +102,4 @@ export type GithubInstallation = typeof githubInstallations.$inferSelect;
 export type GithubRepository = typeof githubRepositories.$inferSelect;
 export type GithubAccount = typeof githubAccounts.$inferSelect;
 export type GithubCommit = typeof githubCommits.$inferSelect;
+export type WelcomeMessage = typeof welcomeMessages.$inferSelect;

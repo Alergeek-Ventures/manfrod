@@ -992,3 +992,18 @@ export const projectGithubBoards = pgTable("project_github_boards", {
 }, (table) => [
 	primaryKey({ columns: [table.projectId, table.boardNodeId], name: "project_github_boards_pkey"}),
 ]);
+
+export const welcomeMessages = pgTable("welcome_messages", {
+	slackId: text("slack_id").primaryKey().notNull(),
+	status: text().notNull(),
+	reason: text(),
+	userId: uuid("user_id"),
+	channelId: text("channel_id"),
+	messageTs: text("message_ts"),
+	scheduledFor: timestamp("scheduled_for", { mode: 'date' }),
+	sentAt: timestamp("sent_at", { mode: 'date' }),
+	insertedAt: timestamp("inserted_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
+	updatedAt: timestamp("updated_at", { mode: 'date' }).default(sql`timezone('UTC'::text, now())`).notNull(),
+}, (table) => [
+	check("welcome_messages_status", sql`status = ANY (ARRAY['scheduled'::text, 'sent'::text, 'skipped'::text])`),
+]);
