@@ -8,6 +8,7 @@ import { auth } from "@/lib/auth.ts";
 import { db, tables } from "@/lib/db/index.ts";
 import { isLanguageCode, setLanguages } from "@/lib/agent-settings.ts";
 import { setFact } from "@/lib/facts.ts";
+import { sweepAutoMerge } from "@/lib/self-modify-merge/index.ts";
 import { setAutoMerge } from "@/lib/self-modify-merge/settings.ts";
 import { setWelcomeEnabled } from "@/lib/welcome/store.ts";
 import { availableBoards, boardLabel } from "@/lib/github/boards.ts";
@@ -195,6 +196,7 @@ export async function saveLanguages(internal: string, external: string): Promise
 export async function saveAutoMerge(enabled: boolean): Promise<Result> {
   const admin = await requireAdmin();
   await setAutoMerge(enabled, admin.id);
+  if (enabled) await sweepAutoMerge();
   return done(enabled ? "Auto-merge turned on" : "Auto-merge turned off");
 }
 

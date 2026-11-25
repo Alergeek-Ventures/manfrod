@@ -1,5 +1,7 @@
+import { config } from "../config.ts";
 import { EVENTS, sendEvent } from "../inngest/client.ts";
 import { logger } from "../log.ts";
+import { openPullsOnBranch, SELF_MODIFY_BRANCH_PREFIX } from "../self-modify-pulls.ts";
 import {
   type CommitInput,
   deleteInstallation,
@@ -53,6 +55,43 @@ export function pushCommits(payload: PushPayload, receivedAt = new Date()): Comm
 
 export function isTruncatedPush(payload: PushPayload): boolean {
   return (payload.commits?.length ?? 0) >= PUSH_COMMIT_LIMIT && !ZERO_SHA.test(payload.before);
+}
+
+const PULL_ACTIONS = new Set(["opened", "reopened", "ready_for_review", "synchronize", "closed"]);
+const CHECK_EVENTS = new Set(["check_suite", "check_run"]);
+
+export interface SelfModifyTrigger {
+  branch: string;
+  pullNumbers: number[];
+}
+
+const numbers = (pulls: unknown): number[] =>
+  Array.isArray(pulls) ? pulls.flatMap((pull) => (typeof pull?.number === "number" ? [pull.number] : [])) : [];
+
+export function selfModifyTrigger(event: string, payload: any, repository: string | undefined): SelfModifyTrigger | null {
+  if (!repository || payload?.repository?.full_name !== repository) return null;
+  if (event === "pull_request") {
+    const pull = payload.pull_request;
+    const branch: unknown = pull?.head?.ref;
+    if (!PULL_ACTIONS.has(payload.action) || typeof branch !== "string" || !branch.startsWith(SELF_MODIFY_BRANCH_PREFIX)) return null;
+    if (pull.head.repo?.full_name !== repository || typeof pull.number !== "number") return null;
+    return { branch, pullNumbers: [pull.number] };
+  }
+  if (!CHECK_EVENTS.has(event) || payload.action !== "completed") return null;
+  const check = event === "check_suite" ? payload.check_suite : payload.check_run;
+  const branch: unknown = event === "check_suite" ? check?.head_branch : check?.check_suite?.head_branch;
+  if (typeof branch !== "string" || !branch.startsWith(SELF_MODIFY_BRANCH_PREFIX)) return null;
+  return { branch, pullNumbers: numbers(check.pull_requests) };
+}
+
+async function routeSelfModify(event: string, payload: unknown): Promise<boolean> {
+  const trigger = selfModifyTrigger(event, payload, config.githubRepository);
+  if (!trigger) return false;
+  const pullNumbers = trigger.pullNumbers.length > 0 ? trigger.pullNumbers : await openPullsOnBranch(trigger.branch);
+  for (const pullNumber of new Set(pullNumbers)) {
+    await sendEvent(EVENTS.selfModifyPullChanged, { pullNumber, source: "webhook" });
+  }
+  return true;
 }
 
 async function ensureInstallation(installationId: number): Promise<void> {
@@ -110,6 +149,12 @@ export async function handleWebhook(event: string, payload: any): Promise<void> 
     }
     case "push":
       return handlePush(payload as PushPayload);
+    case "pull_request":
+    case "check_suite":
+    case "check_run":
+      if (await routeSelfModify(event, payload)) return;
+      log.debug(`Github.Webhook: ignoring ${event}.${payload?.action ?? ""}`);
+      return;
     default:
       log.debug(`Github.Webhook: ignoring ${event}${payload?.action ? `.${payload.action}` : ""}`);
   }

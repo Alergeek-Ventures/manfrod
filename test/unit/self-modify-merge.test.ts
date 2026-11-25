@@ -16,6 +16,7 @@ import {
   type FileVersions,
 } from "../../lib/self-modify-merge/eligibility.ts";
 import { parseVerdict, securityReview, type ReviewInput } from "../../lib/self-modify-merge/review.ts";
+import { outlook, outlookText, statusText } from "../../lib/self-modify-merge/outlook.ts";
 import { isEnabledValue } from "../../lib/self-modify-merge/settings.ts";
 import { pathViolation } from "../../agent/lib/self-modify.ts";
 
@@ -330,5 +331,33 @@ describe("deployed commit", () => {
     expect(readAppCommit(join(dir, "ok"))).toBe(sha);
     expect(readAppCommit(join(dir, "empty"))).toBeUndefined();
     expect(readAppCommit(join(dir, "missing"))).toBeUndefined();
+  });
+});
+
+describe("auto-merge outlook text", () => {
+  const eligible = { verdict: "eligible" as const, targets: [{ kind: "skill" as const, name: "desk-booking", path: "p" }] };
+
+  it("puts the kill switch before the daily limit and both after the gate", () => {
+    expect(outlook(eligible, { enabled: false, underLimit: false })).toEqual({ status: "switched_off", targets: ["skill:desk-booking"] });
+    expect(outlook(eligible, { enabled: true, underLimit: false }).status).toBe("daily_limit");
+    expect(outlook(eligible, { enabled: true, underLimit: true }).status).toBe("qualifies");
+    expect(outlook({ verdict: "blocked", reasons: ["x"] }, { enabled: false, underLimit: false })).toEqual({
+      status: "blocked",
+      reasons: ["x"],
+    });
+    expect(outlookText({ status: "daily_limit", targets: ["skill:a"] })).toContain(`${DAILY_LIMIT} auto-merges a day`);
+  });
+
+  it("describes decisions and CI for the status check", () => {
+    const base = { merged: false, open: true, decision: null, mergedAutomatically: false, outlook: null, ci: null };
+    const qualifies = { status: "qualifies" as const, targets: ["skill:a"] };
+    expect(statusText({ ...base, merged: true })).toBe("merged by a person");
+    expect(statusText({ ...base, open: false })).toBe("closed without merging");
+    expect(statusText({ ...base, outlook: qualifies, ci: "failed" })).toContain("CI did not pass");
+    expect(statusText({ ...base, outlook: qualifies, ci: "green" })).toContain("security review runs next");
+    const retry = { decision: "retry", reason: "Jev failed", mergeSha: null, attempts: 2 };
+    expect(statusText({ ...base, decision: retry })).toContain("attempt 2 failed (Jev failed)");
+    const skipped = { decision: "skipped", reason: "changes code", mergeSha: null, attempts: 0 };
+    expect(statusText({ ...base, decision: skipped })).toContain("Won't auto-merge");
   });
 });

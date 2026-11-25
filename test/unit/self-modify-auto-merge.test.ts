@@ -6,7 +6,15 @@ process.env.GITHUB_REPOSITORY = "org/repo";
 const SKILL_PATH = "agent/skills/desk-booking/SKILL.md";
 const SKILL = "---\nname: desk-booking\ndescription: Book desks\n---\n\n# Desk booking\n";
 
-type Row = { decision: string; headSha: string; reason: string | null; mergeSha?: string | null; attempts?: number; retryAt?: Date | null };
+type Row = {
+  decision: string;
+  headSha: string;
+  reason: string | null;
+  mergeSha?: string | null;
+  attempts?: number;
+  retryAt?: Date | null;
+  mergedAt?: Date | null;
+};
 
 const state = vi.hoisted(() => ({
   heads: [] as string[],
@@ -47,6 +55,18 @@ const state = vi.hoisted(() => ({
   ] as unknown[],
   inserted: [] as { mergeId: string; planned: unknown[] }[],
   targets: [] as { id: string; target: Record<string, unknown> }[],
+  origin: null as { channelId: string; threadTs: string } | null,
+  finding: null as { sessionChannelId: string | null; sessionThreadTs: string | null } | null,
+  events: [] as { name: string; data: unknown }[],
+  open: [42] as number[],
+}));
+
+vi.mock("../../lib/inngest/client.ts", () => ({
+  EVENTS: { selfModifyPullChanged: "manfrod/self-modify.pull.changed" },
+  sendEvent: async (name: string, data: unknown) => {
+    state.events.push({ name, data });
+    return true;
+  },
 }));
 
 vi.mock("../../lib/config.ts", async (importOriginal) => {
@@ -117,7 +137,7 @@ vi.mock("../../lib/self-modify-merge/store.ts", async (importOriginal) => {
       state.rows.set(key(input.pullNumber, input.headSha), { ...state.rows.get(key(input.pullNumber, input.headSha)), ...input });
     },
     startMerging: async (pullNumber: number, headSha: string) => {
-      state.rows.set(key(pullNumber, headSha), { decision: "merging", headSha, reason: null });
+      state.rows.set(key(pullNumber, headSha), { decision: "merging", headSha, reason: null, mergedAt: new Date() });
     },
     recordRetry: async (pullNumber: number, headSha: string, reason: string, _targets: string[], replaceMerging = false) => {
       if (state.rows.get(key(pullNumber, headSha))?.decision === "merging" && !replaceMerging) return null;
@@ -126,6 +146,8 @@ vi.mock("../../lib/self-modify-merge/store.ts", async (importOriginal) => {
       return attempts;
     },
     mergingRows: async () => state.merging,
+    mergedPull: async (pullNumber: number) =>
+      [...state.rows.values()].find((entry) => entry.decision === "merged") ? { pullNumber } : null,
     mergedSince: async () => [],
     lastThread: async () => null,
     awaitingDeploy: async () => state.deploys.filter((row) => !state.live.has(row.id)),
@@ -148,11 +170,12 @@ vi.mock("../../lib/self-modify-merge/review.ts", () => ({ JUDGES: {}, securityRe
 vi.mock("../../lib/self-modify-merge/settings.ts", () => ({ autoMergeEnabled: async () => state.enabled.shift() ?? true }));
 vi.mock("../../lib/self-modify-pulls.ts", () => ({
   isProposal: (pull: { branch: string }) => pull.branch.startsWith("manfrod/self-modify/"),
-  recordedOpenPulls: async () => [42],
+  recordedOpenPulls: async () => state.open,
   publishedHead: async () => state.published,
+  pullOrigin: async () => state.origin,
 }));
 vi.mock("../../lib/self-review/store.ts", () => ({
-  findingForPull: async () => null,
+  findingForPull: async () => state.finding,
   linkedCases: async () => [],
   selfReviewUserId: async () => "self-review",
 }));
@@ -164,7 +187,10 @@ vi.mock("../../lib/slack/api.ts", () => ({
   },
 }));
 
-const { detectLive, processPull, runAutoMerge, settleMerging } = await import("../../lib/self-modify-merge/index.ts");
+const { detectLive, pickThread, processPull, runPull, settleMerging, sweepAutoMerge } =
+  await import("../../lib/self-modify-merge/index.ts");
+const { autoMergeStatus, publishOutlook } = await import("../../lib/self-modify-merge/status.ts");
+const { outlookText, preCheck } = await import("../../lib/self-modify-merge/outlook.ts");
 
 const row = () => state.rows.get("42:head1");
 
@@ -191,6 +217,10 @@ beforeEach(() => {
   state.inserted = [];
   state.targets = [];
   state.target = { source: "finding", title: null, problem: "Booked without asking", expected: "Asks first", findingId: "f1" };
+  state.origin = null;
+  state.finding = null;
+  state.events = [];
+  state.open = [42];
 });
 
 describe("auto-merge", () => {
@@ -309,9 +339,63 @@ describe("auto-merge", () => {
 
   it("does nothing while the kill switch is off", async () => {
     state.enabled = [false];
-    expect((await runAutoMerge()).outcomes).toEqual({});
+    expect(await runPull(42, "webhook")).toEqual({ outcome: "waiting", settled: 0, next: null });
     expect(state.merges).toEqual([]);
-    expect((await runAutoMerge()).outcomes).toEqual({ 42: "merged" });
+    expect((await runPull(42, "webhook")).outcome).toBe("merged");
+  });
+
+  it("waits instead of blocking a head self-modify has not recorded yet when a webhook triggers it", async () => {
+    state.published = null;
+    expect((await runPull(42, "webhook")).outcome).toBe("waiting");
+    expect(row()).toBeUndefined();
+    expect(state.posts).toEqual([]);
+    state.published = { headSha: "other", reviewVerdict: "approve" };
+    expect((await runPull(42, "published")).outcome).toBe("waiting");
+    expect(row()).toBeUndefined();
+    expect((await runPull(42, "sweep")).outcome).toBe("blocked");
+    expect(state.merges).toEqual([]);
+  });
+
+  it("leaves failed CI to the sweep so a fix in progress is not reported as blocked", async () => {
+    state.runs = [{ id: 1, name: "test", status: "completed", conclusion: "failure", url: "", app: "github-actions" }];
+    expect((await runPull(42, "webhook")).outcome).toBe("waiting");
+    expect(state.posts).toEqual([]);
+    expect(row()).toBeUndefined();
+    expect((await runPull(42, "sweep")).outcome).toBe("blocked");
+    expect(state.posts[0].text).toContain("CI did not pass on this commit");
+    expect(state.merges).toEqual([]);
+  });
+
+  it("asks to run again at the retry time after a failed judge call", async () => {
+    state.review = { pass: false, transient: true, reasons: ["Jev failed: timeout"] };
+    const run = await runPull(42, "webhook");
+    expect(run.outcome).toBe("retrying");
+    expect(run.next).toBe(row()!.retryAt!.toISOString());
+  });
+
+  it("asks to settle an unanswered merge after the merge timeout", async () => {
+    state.mergeResult = new Error("timeout");
+    const run = await runPull(42, "webhook");
+    expect(run.outcome).toBe("waiting");
+    expect(new Date(run.next!).getTime()).toBeGreaterThan(Date.now() + 15 * 60_000);
+  });
+
+  it("settles only the pull request it runs for", async () => {
+    state.merging = [{ pullNumber: 7, headSha: "head1", targets: [], mergedAt: new Date() }];
+    state.pull = { state: "closed", merged: true, mergeCommitSha: "squash" };
+    expect((await runPull(42, "webhook")).settled).toBe(0);
+    expect(state.posts).toEqual([]);
+  });
+
+  it("sweeps open pull requests and merges in flight through events", async () => {
+    state.open = [42, 43];
+    state.merging = [{ pullNumber: 7, headSha: "head1", targets: [], mergedAt: new Date() }];
+    expect(await sweepAutoMerge()).toEqual({ requested: 3 });
+    expect(state.events.map((event) => event.data)).toEqual([
+      { pullNumber: 7, source: "sweep" },
+      { pullNumber: 42, source: "sweep" },
+      { pullNumber: 43, source: "sweep" },
+    ]);
   });
 
   it("records and reports a merge that went through although the call did not answer", async () => {
@@ -389,5 +473,103 @@ describe("auto-merge", () => {
     };
     expect(await processPull(42)).toBe("merged");
     expect(state.targets[0].target).toMatchObject({ source: "request", expected: "Answers in Polish", findingId: null });
+  });
+});
+
+describe("where the outcome is posted", () => {
+  it("prefers the finding's thread, then the request's thread, then an earlier post, then the eval channel", () => {
+    const origin = { channelId: "D_ADMIN", threadTs: "5.0" };
+    const earlier = { channelId: "C_SELF_REVIEW", threadTs: "1.0" };
+    const finding = { sessionChannelId: "C_TEAM", sessionThreadTs: "2.0" };
+    expect(pickThread({ finding, origin, earlier, fallbackChannelId: "C" })).toEqual({ channelId: "C_TEAM", threadTs: "2.0" });
+    const unthreaded = { sessionChannelId: null, sessionThreadTs: null };
+    expect(pickThread({ finding: unthreaded, origin, earlier, fallbackChannelId: "C" })).toEqual(origin);
+    expect(pickThread({ finding: null, origin: null, earlier, fallbackChannelId: "C" })).toEqual(earlier);
+    expect(pickThread({ finding: null, origin: null, earlier: null, fallbackChannelId: "C" })).toEqual({ channelId: "C", threadTs: null });
+  });
+
+  it("posts the decision in the thread the admin asked in, and the deploy check follows it", async () => {
+    state.origin = { channelId: "D_ADMIN", threadTs: "5.0" };
+    expect(await processPull(42)).toBe("merged");
+    expect(state.posts[0]).toMatchObject({ channel: "D_ADMIN", thread_ts: "5.0" });
+    expect(row()).toMatchObject({ channelId: "D_ADMIN", threadTs: "5.0" });
+  });
+
+  it("keeps self-review pull requests in the finding's thread", async () => {
+    state.origin = { channelId: "D_ADMIN", threadTs: "5.0" };
+    state.finding = { sessionChannelId: "C_TEAM", sessionThreadTs: "2.0" };
+    state.review = { pass: false, transient: false, reasons: ["Jev: unsafe"] };
+    expect(await processPull(42)).toBe("blocked");
+    expect(state.posts[0]).toMatchObject({ channel: "C_TEAM", thread_ts: "2.0" });
+  });
+
+  it("falls back to the eval channel when the origin is unknown", async () => {
+    expect(await processPull(42)).toBe("merged");
+    expect(state.posts[0].channel).toBe("C_SELF_REVIEW");
+    expect(state.posts[0]).not.toHaveProperty("thread_ts");
+  });
+});
+
+describe("auto-merge outlook", () => {
+  it("tells at publish time that an approved skill edit merges on its own", async () => {
+    const view = await publishOutlook(42, "head1");
+    expect(view).toEqual({ status: "qualifies", targets: ["skill:desk-booking"] });
+    expect(outlookText(view)).toContain("Will merge on its own once CI is green and the security review passes");
+  });
+
+  it("gives the same reasons as the evaluation that blocks it", async () => {
+    state.files = [
+      { path: SKILL_PATH, status: "modified", changes: 2, patch: "@@", previousPath: null },
+      { path: "agent/routines/proactive-style/ROUTINE.md", status: "modified", changes: 2, patch: "@@", previousPath: null },
+    ];
+    state.changedFiles = 2;
+    const view = await publishOutlook(42, "head1");
+    expect(view.status).toBe("blocked");
+    expect(outlookText(view)).toContain("never merges on its own");
+    expect(await processPull(42)).toBe("blocked");
+    expect(row()!.reason).toBe(view.status === "blocked" ? view.reasons.join("\n") : null);
+  });
+
+  it("says a code change or an unapproved commit needs a person", async () => {
+    state.files = [{ path: "lib/desks.ts", status: "modified", changes: 2, patch: "@@", previousPath: null }];
+    expect(outlookText(await publishOutlook(42, "head1"))).toContain("Won't auto-merge");
+    state.files = [{ path: SKILL_PATH, status: "modified", changes: 2, patch: "@@", previousPath: null }];
+    state.published = { headSha: "head1", reviewVerdict: "overridden" };
+    expect(outlookText(await publishOutlook(42, "head1"))).toContain("did not approve");
+  });
+
+  it("names the kill switch", async () => {
+    state.enabled = [false];
+    expect(outlookText(await publishOutlook(42, "head1"))).toContain("switched off");
+  });
+
+  it("checks the published commit even before GitHub moves the pull request's head", async () => {
+    state.heads = ["old"];
+    expect((await publishOutlook(42, "head1")).status).toBe("qualifies");
+  });
+
+  it("shares its gate with the evaluation", () => {
+    const pull = { headSha: "h", baseRef: "main", branch: "manfrod/self-modify/x", headRepository: "org/repo" };
+    expect(preCheck({ pull, published: null, files: [], versions: new Map() })).toEqual({ verdict: "code" });
+    const files = [{ path: SKILL_PATH, status: "modified", changes: 1, patch: "@@", previousPath: null }];
+    const published = { headSha: "h", reviewVerdict: "approve" };
+    expect(preCheck({ pull, published, files, versions: new Map(), listed: ["mismatch"] })).toEqual({
+      verdict: "blocked",
+      reasons: ["mismatch"],
+    });
+  });
+});
+
+describe("auto-merge status", () => {
+  it("reports waiting for CI, blocked, merged and refuses other branches", async () => {
+    state.runs = [{ id: 1, name: "test", status: "in_progress", conclusion: "", url: "", app: "github-actions" }];
+    expect(await autoMergeStatus(42)).toContain("qualifies, waiting for CI");
+    state.rows.set("42:head1", { decision: "blocked", headSha: "head1", reason: "CI did not pass on this commit" });
+    expect(await autoMergeStatus(42)).toContain("Won't auto-merge, a person has to review and merge it:\n- CI did not pass");
+    state.rows.set("42:head1", { decision: "merged", headSha: "head1", reason: null });
+    state.pull = { state: "closed", merged: true };
+    expect(await autoMergeStatus(42)).toContain("merged automatically");
+    state.pull = { branch: "feature/x" };
+    expect(await autoMergeStatus(42)).toBe("#42 is not a self-modify pull request.");
   });
 });
