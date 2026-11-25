@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { OpenPull } from "../../lib/github.ts";
-import { capabilityGate, describeProposals, isProposal, PROPOSAL_FOOTER } from "../../lib/self-modify-pulls.ts";
+import { capabilityGate, describeProposals, isProposal, PROPOSAL_FOOTER, requestOrigin } from "../../lib/self-modify-pulls.ts";
 
 const pull = (number: number, title: string, branch = `manfrod/self-modify/${number}`): OpenPull => ({
   number,
@@ -20,6 +20,13 @@ describe("open self-modify proposals", () => {
   it("describes each pull request without the footer", () => {
     const text = describeProposals([pull(207, "Create Slack canvases")]);
     expect(text).toBe("- #207 Create Slack canvases (ready for review, https://github.com/org/repo/pull/207): Adds create slack canvases.");
+  });
+
+  it("remembers the thread a change was requested in, or the message that started it", () => {
+    expect(requestOrigin({ channel: "C1", threadTs: "1.0", ts: "2.0" })).toEqual({ channelId: "C1", threadTs: "1.0" });
+    expect(requestOrigin({ channel: "D1", threadTs: null, ts: "2.0" })).toEqual({ channelId: "D1", threadTs: "2.0" });
+    expect(requestOrigin({ channel: null, threadTs: "1.0", ts: "2.0" })).toBeNull();
+    expect(requestOrigin({ channel: "C1", threadTs: null, ts: null })).toBeNull();
   });
 });
 

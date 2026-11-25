@@ -79,6 +79,17 @@ export interface Published {
   reviewVerdict: PublishedVerdict;
   description?: string | null;
   requestedByUserId?: string | null;
+  origin?: PullOrigin | null;
+}
+
+export interface PullOrigin {
+  channelId: string;
+  threadTs: string;
+}
+
+export function requestOrigin(msgCtx: { channel: string | null; threadTs: string | null; ts: string | null }): PullOrigin | null {
+  const threadTs = msgCtx.threadTs ?? msgCtx.ts;
+  return msgCtx.channel && threadTs ? { channelId: msgCtx.channel, threadTs } : null;
 }
 
 const publishedColumns = (published: Published | null) => ({
@@ -86,6 +97,7 @@ const publishedColumns = (published: Published | null) => ({
   reviewVerdict: published?.reviewVerdict ?? null,
   description: published?.description ?? null,
   requestedByUserId: published?.requestedByUserId ?? null,
+  ...(published?.origin ? { originChannelId: published.origin.channelId, originThreadTs: published.origin.threadTs } : {}),
 });
 
 export async function recordPublished(pullNumber: number, published: Published): Promise<void> {
@@ -99,6 +111,23 @@ export async function publishedHead(pullNumber: number): Promise<{ headSha: stri
     .where(eq(selfModifyPulls.pullNumber, pullNumber))
     .limit(1);
   return row ?? null;
+}
+
+export async function pullOrigin(pullNumber: number): Promise<PullOrigin | null> {
+  const [row] = await db
+    .select({ channelId: selfModifyPulls.originChannelId, threadTs: selfModifyPulls.originThreadTs })
+    .from(selfModifyPulls)
+    .where(eq(selfModifyPulls.pullNumber, pullNumber))
+    .limit(1);
+  return row?.channelId && row.threadTs ? { channelId: row.channelId, threadTs: row.threadTs } : null;
+}
+
+export async function openPullsOnBranch(branch: string): Promise<number[]> {
+  const rows = await db
+    .select({ pullNumber: selfModifyPulls.pullNumber })
+    .from(selfModifyPulls)
+    .where(and(eq(selfModifyPulls.branch, branch), eq(selfModifyPulls.status, "open")));
+  return rows.map((row) => row.pullNumber);
 }
 
 export async function recordPull(pullNumber: number, branch: string, sessionId: string, published: Published | null = null): Promise<void> {
