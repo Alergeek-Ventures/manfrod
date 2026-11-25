@@ -31,6 +31,7 @@ import { runProjectSummaries } from "../nudges/projects.ts";
 import { runWorkStartNudges } from "../nudges/waiting.ts";
 import { runWeeklyWrapUps } from "../nudges/weekly.ts";
 import { startCapabilityBuild, syncCapabilityRequests } from "../tasks/capabilities.ts";
+import { deliverWelcome } from "../welcome/index.ts";
 import {
   EVENTS,
   inngest,
@@ -42,6 +43,7 @@ import {
   type JobScheduledData,
   type McpTokenUnavailableData,
   type SessionActivityData,
+  type WelcomeRequestedData,
 } from "./client.ts";
 
 const tz = (cron: string) => `TZ=Europe/Warsaw ${cron}`;
@@ -124,6 +126,15 @@ const absenceUnansweredFollowUp = inngest.createFunction(
   async ({ event, step }) => {
     await step.sleep("wait-for-sharing-choice", "30m");
     return step.run("follow-up", () => absenceFollowUpStep(event.data as AbsenceRecordedData));
+  },
+);
+
+const welcomeNewMember = inngest.createFunction(
+  { id: "welcome-new-member", triggers: [{ event: EVENTS.welcomeRequested }], retries: 1, idempotency: "event.data.claimKey" },
+  async ({ event, step }) => {
+    const data = event.data as WelcomeRequestedData;
+    await step.sleep("wait-before-welcome", `${data.delayMinutes}m`);
+    return step.run("welcome", () => deliverWelcome(data));
   },
 );
 
@@ -253,6 +264,7 @@ const allFunctions = [
   absenceFollowUp,
   absenceSharedFollowUp,
   absenceUnansweredFollowUp,
+  welcomeNewMember,
   capabilityBuild,
   mcpTokenRetry,
   githubInstallationSync,

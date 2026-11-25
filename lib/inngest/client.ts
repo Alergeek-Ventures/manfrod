@@ -15,6 +15,7 @@ export const EVENTS = {
   mcpTokenUnavailable: "manfrod/mcp.token.unavailable",
   githubInstallationChanged: "manfrod/github.installation.changed",
   githubPushTruncated: "manfrod/github.push.truncated",
+  welcomeRequested: "manfrod/welcome.requested",
 } as const;
 
 export interface JobScheduledData {
@@ -64,9 +65,18 @@ export interface GithubPushTruncatedData {
 
 export const ROOT_THREAD_KEY = "root";
 
-export async function sendEvent(name: string, data: object): Promise<boolean> {
+export interface WelcomeRequestedData {
+  claimKey: string;
+  slackId: string;
+  channelId: string;
+  messageTs: string;
+  text: string;
+  delayMinutes: number;
+}
+
+export async function sendEvent(name: string, data: object, id?: string): Promise<boolean> {
   try {
-    await inngest.send({ name, data: data as Record<string, unknown> });
+    await inngest.send({ name, data: data as Record<string, unknown>, ...(id ? { id } : {}) });
     return true;
   } catch (error) {
     console.warn(`[warning] inngest: failed to send ${name}: ${(error as Error).message}`);

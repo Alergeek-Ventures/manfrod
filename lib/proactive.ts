@@ -33,8 +33,9 @@ export function userAuth(userId: string, slackUserId: string, attributes: Record
   };
 }
 
-export async function proactiveTitle(source: string): Promise<string> {
-  return threadTitle(source.replace(/^\[[^\]\n]*\]\s*/, ""), await internalLanguage());
+export async function proactiveTitle(source: string, inOwnLanguage = false): Promise<string> {
+  const text = source.replace(/^\[[^\]\n]*\]\s*/, "");
+  return inOwnLanguage ? threadTitle(text) : threadTitle(text, await internalLanguage());
 }
 
 export async function startThread(channel: string, title: string): Promise<{ ok: true; threadTs: string } | { ok: false; error: string }> {
@@ -45,11 +46,17 @@ export async function startThread(channel: string, title: string): Promise<{ ok:
   return { ok: true, threadTs };
 }
 
-export async function deliverProactive(userId: string, prompt: string, kind = "proactive", titleSource = prompt): Promise<ProactiveResult> {
+export async function deliverProactive(
+  userId: string,
+  prompt: string,
+  kind = "proactive",
+  titleSource = prompt,
+  titleInOwnLanguage = false,
+): Promise<ProactiveResult> {
   const user = await getUser(userId);
   if (!user?.slackDmChannelId) return { ok: false, error: "no_dm_channel" };
   const channel = user.slackDmChannelId;
-  const thread = await startThread(channel, await proactiveTitle(titleSource));
+  const thread = await startThread(channel, await proactiveTitle(titleSource, titleInOwnLanguage));
   if (!thread.ok) {
     log.error(`Proactive: failed to start thread for user ${userId}: ${thread.error}`);
     return thread;

@@ -295,6 +295,18 @@ export async function channelHistory(channel: string, oldest: string, limit = 20
   return result.ok ? (result.body.messages as SlackBody[]) : null;
 }
 
+export async function historyPageBefore(
+  channel: string,
+  latest: string,
+  cursor: string | null,
+  limit = 200,
+): Promise<{ messages: SlackBody[]; nextCursor: string | null } | null> {
+  const result = await get("conversations.history", { channel, latest, cursor, limit });
+  if (!result.ok) return null;
+  const nextCursor = result.body.response_metadata?.next_cursor;
+  return { messages: (result.body.messages as SlackBody[]) ?? [], nextCursor: nextCursor ? String(nextCursor) : null };
+}
+
 export async function channelMembers(channel: string): Promise<string[] | null> {
   const result = await get("conversations.members", { channel, limit: 1000 });
   return result.ok ? (result.body.members as string[]) : null;

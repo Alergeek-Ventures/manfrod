@@ -17,6 +17,10 @@ const USED_SECTIONS: [string, string | undefined][] = [
   ["holiday-check", "Bridge days"],
   ["holiday-check", "Reminder"],
   ["holiday-check", "When they reply"],
+  ["welcome", "Language"],
+  ["welcome", "Message"],
+  ["welcome", "Send"],
+  ["welcome", "When they reply"],
 ];
 
 describe("routines", () => {

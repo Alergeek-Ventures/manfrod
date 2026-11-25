@@ -9,6 +9,7 @@ import { db, tables } from "@/lib/db/index.ts";
 import { isLanguageCode, setLanguages } from "@/lib/agent-settings.ts";
 import { setFact } from "@/lib/facts.ts";
 import { setAutoMerge } from "@/lib/self-modify-merge/settings.ts";
+import { setWelcomeEnabled } from "@/lib/welcome/store.ts";
 import { availableBoards, boardLabel } from "@/lib/github/boards.ts";
 import {
   crossOwnerWarning,
@@ -195,6 +196,12 @@ export async function saveAutoMerge(enabled: boolean): Promise<Result> {
   const admin = await requireAdmin();
   await setAutoMerge(enabled, admin.id);
   return done(enabled ? "Auto-merge turned on" : "Auto-merge turned off");
+}
+
+export async function saveWelcome(enabled: boolean): Promise<Result> {
+  const admin = await requireAdmin();
+  await setWelcomeEnabled(enabled, admin.id);
+  return done(enabled ? "Welcome messages turned on" : "Welcome messages turned off");
 }
 
 export async function linkGithubRepository(projectId: string, repositoryId: number): Promise<Result> {
