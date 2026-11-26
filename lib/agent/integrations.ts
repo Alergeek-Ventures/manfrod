@@ -81,10 +81,8 @@ async function mcpStates(userId: string, channel: string | null): Promise<McpPro
 
 export async function integrationsPrompt(userId: string | null, channel: string | null): Promise<string> {
   try {
-    const [linear, mcp] = await Promise.all([
-      channel ? channelLinearScope(channel) : null,
-      userId && isUuid(userId) ? mcpStates(userId, channel) : null,
-    ]);
+    const person = userId && isUuid(userId) ? userId : null;
+    const [linear, mcp] = await Promise.all([channel ? channelLinearScope(channel) : null, person ? mcpStates(person, channel) : null]);
     return integrationsSection({ linear, mcp }, config.appUrl);
   } catch (error) {
     log.warn(`Integrations section skipped: ${error instanceof Error ? error.message : String(error)}`);
