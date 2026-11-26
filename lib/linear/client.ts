@@ -155,7 +155,7 @@ export async function getIssue(authorization: string, teamId: string, identifier
   if (Number.isNaN(number)) return { ok: true, value: null };
   const result = await query(
     authorization,
-    `query($teamId: ID!, $identifier: Float!) { issues(filter: { team: { id: { eq: $teamId } }, number: { eq: $identifier } }, first: 1) { nodes { id identifier title description state { name } assignee { name } url updatedAt ${HISTORY_FIELDS} attachments { nodes { url } } } } }`,
+    `query($teamId: ID!, $identifier: Float!) { issues(filter: { team: { id: { eq: $teamId } }, number: { eq: $identifier } }, first: 1) { nodes { id identifier title description priority dueDate estimate state { id name } assignee { id name } project { id } cycle { id } parent { id } labels { nodes { id } } url updatedAt ${HISTORY_FIELDS} attachments { nodes { url } } } } }`,
     { teamId, identifier: number },
   );
   return result.ok ? { ok: true, value: result.value.issues.nodes[0] ?? null } : result;
