@@ -342,6 +342,18 @@ export const isTokenRejected = (error: string) => REJECTED_TOKEN_ERRORS.has(erro
 export const awaitsReconnect = (connection: Pick<McpConnection, "status" | "notifiedExpiredAt">) =>
   connection.status === "disconnected" || (connection.status === "expired" && connection.notifiedExpiredAt !== null);
 
+export type McpAvailability = "usable" | "reconnect" | "elsewhere" | "none";
+
+export function mcpAvailability(
+  provider: Pick<Provider, "mock" | "availability">,
+  connection: Pick<McpConnection, "status" | "notifiedExpiredAt"> | null | undefined,
+  audience: ChannelAudience,
+): McpAvailability {
+  if (provider.mock || !connection) return "none";
+  if (!provider.availability.includes(audience)) return "elsewhere";
+  return awaitsReconnect(connection) ? "reconnect" : "usable";
+}
+
 export async function ensureValidToken(connection: McpConnection): Promise<McpResult<string>> {
   if (connection.status === "disconnected") return { ok: false, error: "disconnected" };
   if (!connection.accessToken) return { ok: false, error: "no_token" };

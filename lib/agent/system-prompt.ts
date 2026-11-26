@@ -2,6 +2,7 @@ import { getUser } from "../accounts.ts";
 import { languageInstructions } from "../agent-settings.ts";
 import { healthy } from "../db/index.ts";
 import { githubPrompt } from "../github/prompt.ts";
+import { integrationsPrompt } from "./integrations.ts";
 import { getSoulAnchor, type SoulAnchor } from "../memory/nodes.ts";
 import { secretsPrompt } from "../secrets.ts";
 import { tasksPrompt } from "../tasks/index.ts";
@@ -67,19 +68,25 @@ export async function buildSystemPrompt(
   if (!(await healthy())) return sections(CONVERSATION_PROMPT, SOUL_BASE_PROMPT);
   const channel = sessionKey?.split(":")[0] ?? channelWithoutSession;
   const dm = channel?.startsWith("D") ?? false;
-  const anchor = dm ? await getSoulAnchor(userId, readableLevels) : null;
+  const [anchor, context, language, secrets, tasks, github, integrations] = await Promise.all([
+    dm ? getSoulAnchor(userId, readableLevels) : null,
+    currentContext(userId, sessionKey, channel),
+    languageInstructions(channel),
+    secretsPrompt(userId),
+    tasksPrompt(sessionKey),
+    githubPrompt(channel),
+    integrationsPrompt(userId, channel),
+  ]);
   const identity = anchor ? soulContext(anchor) : `${SOUL_BASE_PROMPT}${dm ? SOUL_ONBOARDING_PROMPT : ""}`;
-  const context = await currentContext(userId, sessionKey, channel);
-  const language = await languageInstructions(channel);
-  const secrets = await secretsPrompt(userId);
-  const tasks = await tasksPrompt(sessionKey);
-  const github = await githubPrompt(channel);
-  return sections(CONVERSATION_PROMPT, identity, context, language, github, secrets, tasks);
+  return sections(CONVERSATION_PROMPT, identity, context, language, github, integrations, secrets, tasks);
 }
 
 export async function skillRunnerPrompt(channelId: string | null, userId: string | null): Promise<string> {
-  const secrets = await secretsPrompt(userId);
-  const language = await languageInstructions(channelId);
+  const [secrets, language, integrations] = await Promise.all([
+    secretsPrompt(userId),
+    languageInstructions(channelId),
+    integrationsPrompt(userId, channelId),
+  ]);
   return `You're running autonomously on a schedule — no one is watching this
 conversation live, so don't narrate or ask questions, just act. Follow
 the instructions in the latest message using your tools. When you're
@@ -93,6 +100,6 @@ instructions actually call for staying silent; otherwise reply
 normally.
 
 ${language}
-${secrets ? `\n${secrets}\n` : ""}
+${integrations ? `\n${integrations}\n` : ""}${secrets ? `\n${secrets}\n` : ""}
 `;
 }

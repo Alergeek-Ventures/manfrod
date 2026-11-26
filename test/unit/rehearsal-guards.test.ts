@@ -61,7 +61,10 @@ vi.mock("../../lib/mcp/tools.ts", () => ({
     return "sent";
   },
 }));
-vi.mock("../../lib/memory/access.ts", () => ({ channelAudience: async () => "internal" }));
+vi.mock("../../lib/memory/access.ts", () => ({
+  channelAudience: async () => "internal",
+  getActiveMapping: async () => ({ projectId: "project-1", project: null }),
+}));
 vi.mock("../../lib/linear/index.ts", () => ({ getConnection: async () => ({ mode: "app" }) }));
 vi.mock("../../lib/linear/calls.ts", () => ({
   commentIssue: async () => "commented",
@@ -80,7 +83,6 @@ vi.mock("../../lib/linear/calls.ts", () => ({
   updateIssue: async () => "updated",
 }));
 vi.mock("../../agent/lib/linear.ts", () => ({
-  linearProjectForChannel: async () => "project-1",
   linearProjectForPerson: async () => ({ ok: true, projectId: "project-1" }),
   linearRequester: async () => null,
 }));
