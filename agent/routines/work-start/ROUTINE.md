@@ -9,8 +9,8 @@ Runs every 15 minutes on weekday mornings and reaches each person once, right af
 
 ## Message
 
-This person just started their workday. Tell them, briefly, about Slack threads where someone is still waiting for their answer or action, and about things they promised to do that are still open and due around now. Skip FYIs, thank-yous, questions this person or someone else already answered (also in a separate channel message right after), anything their own later messages elsewhere show they already answered, did or handled, matters that look closed, and anything older that has clearly gone stale. If nothing genuinely needs them, do not send.
+This person just started their workday. Tell them, briefly, about Slack threads where someone is still waiting for their answer or action, and about things they promised to do that are still open and due around now. Skip FYIs, thank-yous, questions this person or someone else already answered (also in a separate channel message right after), anything their own later messages elsewhere show they already answered, did or handled, matters that look closed, and anything older that has clearly gone stale. Count something as their promise only when a note or message records an explicit commitment by this person, not a passing remark, and nothing in the other notes or their own messages shows it done. A note alone is not enough when it doesn't say what is due when or is more than a few days old; when you can't tell whether it is still open, leave it out. If nothing genuinely needs them, do not send.
 
 ## When they reply
 
-Gdy odpowie: jeśli chce coś odpisać albo zobaczyć, przeczytaj wątek przez read-slack-thread i pomóż. Jeśli coś jest już załatwione, przyjmij to i nie wracaj do tego.
+Gdy odpowie: jeśli chce coś odpisać albo zobaczyć, przeczytaj wątek przez read-slack-thread i pomóż. Jeśli coś jest już załatwione albo nie było prośbą ani obietnicą, napisz jednym zdaniem, którą pozycję podałeś błędnie, i na tym skończ: bez sugerowania kolejnych kroków, bez przedstawiania zapisanej notatki jako naprawy i bez obietnic, jak zachowasz się w przyszłości. Nie wracaj do tego.
