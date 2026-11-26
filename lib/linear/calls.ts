@@ -142,6 +142,41 @@ export const createIssue = (projectId: string, fields: IssueInput & { title: str
     return result.ok ? `Utworzono ${formatIssue(result.value)}` : `Nie udało się utworzyć issue w Linear: ${result.error}`;
   });
 
+const CURRENT_VALUES: Record<string, (issue: any) => unknown> = {
+  title: (issue) => issue.title,
+  description: (issue) => issue.description,
+  priority: (issue) => issue.priority,
+  dueDate: (issue) => issue.dueDate,
+  estimate: (issue) => issue.estimate,
+  assigneeId: (issue) => issue.assignee?.id,
+  stateId: (issue) => issue.state?.id,
+  projectId: (issue) => issue.project?.id,
+  cycleId: (issue) => issue.cycle?.id,
+  parentId: (issue) => issue.parent?.id,
+};
+
+export function issueChanges(issue: any, input: Record<string, unknown>): { changes: Record<string, unknown>; unchanged: string[] } {
+  const changes: Record<string, unknown> = {};
+  const unchanged: string[] = [];
+  for (const [field, value] of Object.entries(input)) {
+    if (field === "labelIds") {
+      const present = new Set(((issue.labels?.nodes ?? []) as { id: string }[]).map((label) => label.id));
+      const added = (value as string[]).filter((id) => !present.has(id));
+      if (added.length > 0) changes.labelIds = added;
+      else unchanged.push(field);
+    } else if (field in CURRENT_VALUES && CURRENT_VALUES[field](issue) === value) unchanged.push(field);
+    else changes[field] = value;
+  }
+  return { changes, unchanged };
+}
+
+function alreadyNote(issue: any, unchanged: string[]): string {
+  const fields = unchanged.filter((field) => field !== "stateId").map((field) => field.replace(/Ids?$/, ""));
+  const state = unchanged.includes("stateId") ? `in ${stateLabel(issue)}` : "";
+  const rest = fields.length > 0 ? `set to the requested ${fields.join(", ")}` : "";
+  return [state, rest].filter(Boolean).join(" and ");
+}
+
 export const updateIssue = (projectId: string, identifier: string, fields: IssueInput, requester: Requester | null) =>
   withAppConnection(projectId, async (auth, teamId) => {
     const found = await client.getIssue(auth, teamId, identifier);
@@ -150,9 +185,13 @@ export const updateIssue = (projectId: string, identifier: string, fields: Issue
     const resolved = await resolveFields(auth, teamId, fields, requester);
     if (!resolved.ok) return resolved.error;
     if (Object.keys(resolved.value).length === 0) return "Nie podano żadnych zmian.";
-    const { labelIds, ...input } = resolved.value;
+    const { changes, unchanged } = issueChanges(found.value, resolved.value);
+    const already = unchanged.length > 0 ? `${found.value.identifier} was already ${alreadyNote(found.value, unchanged)}` : "";
+    if (Object.keys(changes).length === 0) return `${already}; nothing changed.`;
+    const { labelIds, ...input } = changes;
     const result = await client.updateIssue(auth, found.value.id, { ...input, ...(labelIds ? { addedLabelIds: labelIds } : {}) });
-    return result.ok ? `Zaktualizowano ${formatIssue(result.value)}` : `Nie udało się zaktualizować issue w Linear: ${result.error}`;
+    if (!result.ok) return `Nie udało się zaktualizować issue w Linear: ${result.error}`;
+    return `Zaktualizowano ${formatIssue(result.value)}${already ? ` (${already}, left as it was)` : ""}`;
   });
 
 export const commentIssue = (projectId: string, identifier: string, body: string, requester: Requester | null) =>

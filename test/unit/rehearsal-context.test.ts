@@ -38,8 +38,8 @@ vi.mock("../../lib/secrets.ts", () => ({
   runWithSecrets: (_use: unknown, input: unknown, run: (resolved: unknown) => Promise<unknown>) => run(input),
 }));
 vi.mock("../../lib/tasks/index.ts", () => ({ tasksPrompt: async () => "" }));
-vi.mock("../../lib/accounts.ts", () => ({ getUser: async () => ({ id: "person", name: "Ala" }) }));
-vi.mock("../../lib/memory/access.ts", () => ({ projectIdForChannel: async () => null }));
+vi.mock("../../lib/accounts.ts", () => ({ getUser: async () => ({ id: "person", name: "Ala" }), isUuid: () => false }));
+vi.mock("../../lib/memory/access.ts", () => ({ projectIdForChannel: async () => null, getActiveMapping: async () => null }));
 vi.mock("../../lib/memory/search.ts", () => ({
   getNoteContext: async (...args: unknown[]) => {
     seen.noteContext.push(args);
@@ -89,6 +89,7 @@ describe("rehearsal system prompt", () => {
     expect(seen.githubChannels).toEqual(["CCLIENT"]);
     expect(prompt).toContain("shared with a client");
     expect(prompt).toContain("This is a shared Slack channel, CCLIENT");
+    expect(prompt).toContain("this channel belongs to no project, so there are no linear-* tools here");
     expect(seen.souls).toBe(0);
   });
 
