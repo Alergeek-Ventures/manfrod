@@ -16,6 +16,7 @@ import {
 import { linearProjectForChannel, linearProjectForPerson, linearRequester } from "../lib/linear.ts";
 import { toolCtx } from "../../lib/agent/context.ts";
 import { runGuarded } from "../../lib/rehearsal/guard.ts";
+import { dynamicToolSet } from "../lib/dynamic-tools.ts";
 
 const issueFields = {
   description: z.string().optional().describe("Markdown description"),
@@ -47,110 +48,115 @@ const commentIssueFields = { identifier: identifierField, body: z.string().descr
 
 const READ_ONLY_KEY_NOTE =
   "This project's Linear is connected with a read-only API key, so creating, updating and commenting don't work yet. Someone in the project has to run /linear-status in the project's channel and connect the Linear app; writing works right after that.";
+const DM_READ_NOTE = "In a direct message, name the project's channel.";
 const DM_WRITE_NOTE =
   "Name the project's channel. Works when that project's Linear is connected through the Linear app; with a read-only API key it returns the setup step (/linear-status) instead.";
 
-interface LinearScope {
-  dm: boolean;
-  mode: LinearMode | null;
-  inProject: <T>(channel: string | undefined, run: (projectId: string) => Promise<T>) => Promise<T | string>;
+type LinearInput = Record<string, any>;
+
+interface LinearSpec {
+  summary: (where: string) => string;
+  fields: z.ZodRawShape;
+  write?: true;
+  projectOnly?: true;
+  run: (projectId: string, input: LinearInput, userId: string) => Promise<string>;
 }
 
-interface GuardCtx {
+const LINEAR_TOOLS: Record<string, LinearSpec> = {
+  "linear-list-issues": {
+    summary: (where) =>
+      `Lists issues of ${where}, most recently updated first, each with its state and when it entered that state. Pass state to get only issues in one state, e.g. everything in Merged.`,
+    fields: listIssuesFields,
+    run: (projectId, { limit, state }) => listIssues(projectId, limit, state),
+  },
+  "linear-get-issue": {
+    summary: (where) => `Gets a single Linear issue of ${where} by its identifier (e.g. "ENG-123").`,
+    fields: { identifier: identifierField },
+    run: (projectId, { identifier }) => getIssue(projectId, identifier),
+  },
+  "linear-search-issues": {
+    summary: (where) => `Full-text searches the issues of ${where}.`,
+    fields: { term: z.string().describe("Search term"), limit: z.number().int().optional().describe("Max results to return (default 25)") },
+    run: (projectId, { term, limit }) => searchIssues(projectId, term, limit),
+  },
+  "linear-list-projects": {
+    summary: () => "Lists Linear projects owned by this project's connected team.",
+    fields: {},
+    projectOnly: true,
+    run: (projectId) => listProjects(projectId),
+  },
+  "linear-list-cycles": {
+    summary: () => "Lists recent cycles for this project's connected Linear team.",
+    fields: { limit: z.number().int().optional().describe("Max cycles to return (default 10)") },
+    projectOnly: true,
+    run: (projectId, { limit }) => getCycles(projectId, limit),
+  },
+  "linear-create-issue": {
+    summary: (where) =>
+      `Creates an issue in ${where}. Confirm the title and details with the user first unless they were explicit. Returns the new issue's identifier and URL.`,
+    fields: createIssueFields,
+    write: true,
+    run: async (projectId, { channel: _channel, ...fields }, userId) =>
+      createIssue(projectId, fields as z.infer<z.ZodObject<typeof createIssueFields>>, await linearRequester(userId)),
+  },
+  "linear-update-issue": {
+    summary: (where) =>
+      `Updates an issue in ${where}: title, description, priority, assignee, state, project, parent, due date, estimate or cycle. Labels are added, not replaced.`,
+    fields: updateIssueFields,
+    write: true,
+    run: async (projectId, { channel: _channel, identifier, ...fields }, userId) =>
+      updateIssue(projectId, identifier, fields, await linearRequester(userId)),
+  },
+  "linear-comment-issue": {
+    summary: (where) => `Adds a comment to an issue in ${where}.`,
+    fields: commentIssueFields,
+    write: true,
+    run: async (projectId, { identifier, body }, userId) => commentIssue(projectId, identifier, body, await linearRequester(userId)),
+  },
+};
+
+function linearDescription(name: string, dm: boolean, mode: LinearMode | null): string {
+  const spec = LINEAR_TOOLS[name];
+  const where = dm ? "the Linear team of the project whose channel you name" : "this project's connected Linear team";
+  const writeNote = dm ? DM_WRITE_NOTE : mode === "key" ? `${READ_ONLY_KEY_NOTE} Until then this returns that setup step.` : "";
+  const readNote = [dm ? DM_READ_NOTE : "", mode === "key" ? READ_ONLY_KEY_NOTE : ""].filter(Boolean).join(" ");
+  const note = spec.write ? writeNote : readNote;
+  const summary = spec.summary(where);
+  return note ? `${summary} ${note}` : summary;
+}
+
+function linearInputSchema(name: string, dm: boolean) {
+  const { fields } = LINEAR_TOOLS[name];
+  return dm ? z.object({ channel: projectChannel, ...fields }) : z.object(fields);
+}
+
+interface LinearCall {
   kind: string;
   userId: string;
   sessionKey: string | null;
+  projectId: string | null;
 }
 
-function linearTools(scope: LinearScope, { kind, userId, sessionKey }: GuardCtx): Record<string, any> {
-  const where = scope.dm ? "the Linear team of the project whose channel you name" : "this project's connected Linear team";
-  const readNote = [scope.dm ? "In a direct message, name the project's channel." : "", scope.mode === "key" ? READ_ONLY_KEY_NOTE : ""]
-    .filter(Boolean)
-    .join(" ");
-  const writeNote = scope.dm ? DM_WRITE_NOTE : scope.mode === "key" ? `${READ_ONLY_KEY_NOTE} Until then this returns that setup step.` : "";
-  const describe = (text: string, note: string) => (note ? `${text} ${note}` : text);
-  const schema = <S extends z.ZodRawShape>(fields: S) => (scope.dm ? z.object({ channel: projectChannel, ...fields }) : z.object(fields));
+function runLinearTool(name: string, input: LinearInput, { kind, userId, sessionKey, projectId }: LinearCall) {
+  const spec = LINEAR_TOOLS[name];
+  const use = { toolName: name, userId, sessionKey, ...(spec.write ? { keepPlaceholders: true } : {}) };
+  return runGuarded(kind, use, input, async (resolved) => {
+    if (projectId) return spec.run(projectId, resolved, userId);
+    const found = await linearProjectForPerson(resolved.channel ?? "", userId);
+    return found.ok ? spec.run(found.projectId, resolved, userId) : found.message;
+  });
+}
 
-  const tool = <I extends { channel?: string }>(
-    name: string,
-    description: string,
-    fields: z.ZodRawShape,
-    run: (projectId: string, input: I) => Promise<string>,
-    keepPlaceholders = false,
-  ) =>
-    defineTool({
-      description,
-      inputSchema: schema(fields),
-      execute: (input: I) =>
-        runGuarded(kind, { toolName: name, userId, sessionKey, ...(keepPlaceholders ? { keepPlaceholders } : {}) }, input, (resolved) =>
-          scope.inProject(resolved.channel, (projectId) => run(projectId, resolved)),
-        ),
+function linearTools(projectId: string | null, mode: LinearMode | null, kind: string, userId: string, sessionKey: string | null) {
+  const dm = projectId === null;
+  const tools: Record<string, any> = {};
+  for (const name of Object.keys(LINEAR_TOOLS)) {
+    if (dm && LINEAR_TOOLS[name].projectOnly) continue;
+    tools[name] = defineTool({
+      description: linearDescription(name, dm, mode),
+      inputSchema: linearInputSchema(name, dm),
+      execute: (input: LinearInput) => runLinearTool(name, input, { kind, userId, sessionKey, projectId }),
     });
-
-  const tools: Record<string, any> = {
-    "linear-list-issues": tool<{ channel?: string; limit?: number; state?: string }>(
-      "linear-list-issues",
-      describe(
-        `Lists issues of ${where}, most recently updated first, each with its state and when it entered that state. Pass state to get only issues in one state, e.g. everything in Merged.`,
-        readNote,
-      ),
-      listIssuesFields,
-      (projectId, { limit, state }) => listIssues(projectId, limit, state),
-    ),
-    "linear-get-issue": tool<{ channel?: string; identifier: string }>(
-      "linear-get-issue",
-      describe(`Gets a single Linear issue of ${where} by its identifier (e.g. "ENG-123").`, readNote),
-      { identifier: identifierField },
-      (projectId, { identifier }) => getIssue(projectId, identifier),
-    ),
-    "linear-search-issues": tool<{ channel?: string; term: string; limit?: number }>(
-      "linear-search-issues",
-      describe(`Full-text searches the issues of ${where}.`, readNote),
-      { term: z.string().describe("Search term"), limit: z.number().int().optional().describe("Max results to return (default 25)") },
-      (projectId, { term, limit }) => searchIssues(projectId, term, limit),
-    ),
-    "linear-create-issue": tool<z.infer<z.ZodObject<typeof createIssueFields>> & { channel?: string }>(
-      "linear-create-issue",
-      describe(
-        `Creates an issue in ${where}. Confirm the title and details with the user first unless they were explicit. Returns the new issue's identifier and URL.`,
-        writeNote,
-      ),
-      createIssueFields,
-      async (projectId, { channel: _channel, ...fields }) => createIssue(projectId, fields, await linearRequester(userId)),
-      true,
-    ),
-    "linear-update-issue": tool<z.infer<z.ZodObject<typeof updateIssueFields>> & { channel?: string }>(
-      "linear-update-issue",
-      describe(
-        `Updates an issue in ${where}: title, description, priority, assignee, state, project, parent, due date, estimate or cycle. Labels are added, not replaced.`,
-        writeNote,
-      ),
-      updateIssueFields,
-      async (projectId, { channel: _channel, identifier, ...fields }) =>
-        updateIssue(projectId, identifier, fields, await linearRequester(userId)),
-      true,
-    ),
-    "linear-comment-issue": tool<{ channel?: string; identifier: string; body: string }>(
-      "linear-comment-issue",
-      describe(`Adds a comment to an issue in ${where}.`, writeNote),
-      commentIssueFields,
-      async (projectId, { identifier, body }) => commentIssue(projectId, identifier, body, await linearRequester(userId)),
-      true,
-    ),
-  };
-  if (!scope.dm) {
-    tools["linear-list-projects"] = tool(
-      "linear-list-projects",
-      describe("Lists Linear projects owned by this project's connected team.", readNote),
-      {},
-      (projectId) => listProjects(projectId),
-    );
-    tools["linear-list-cycles"] = tool<{ channel?: string; limit?: number }>(
-      "linear-list-cycles",
-      describe("Lists recent cycles for this project's connected Linear team.", readNote),
-      { limit: z.number().int().optional().describe("Max cycles to return (default 10)") },
-      (projectId, { limit }) => getCycles(projectId, limit),
-    );
   }
   return tools;
 }
@@ -159,15 +165,16 @@ export default defineDynamic({
   events: {
     "turn.started": async (_event, ctx) => {
       const { userId, msgCtx, sessionKey, kind } = toolCtx(ctx);
-      const entries: Record<string, any> = {};
 
-      if (userId) {
+      const mcp = await dynamicToolSet("MCP", async () => {
+        const tools: Record<string, any> = {};
+        if (!userId) return tools;
         for (const remote of await listUserMcpTools(userId, await channelAudience(msgCtx.channel))) {
           const toolName = remote.name;
           const providerId = remote.providerId;
           const remoteName = remote.remoteName;
           const destinationHost = remote.host;
-          entries[toolName] = defineTool({
+          tools[toolName] = defineTool({
             description: remote.description,
             inputSchema: remote.inputSchema as any,
             execute: (input: unknown) =>
@@ -176,21 +183,18 @@ export default defineDynamic({
               ),
           });
         }
-      }
+        return tools;
+      });
 
-      const projectId = await linearProjectForChannel(msgCtx.channel);
-      const linear = projectId ? await getConnection(projectId) : null;
-      const guard = { kind, userId, sessionKey };
-      if (projectId && linear) {
-        Object.assign(entries, linearTools({ dm: false, mode: linear.mode, inProject: (_channel, run) => run(projectId) }, guard));
-      } else if (!projectId && msgCtx.channel?.startsWith("D")) {
-        const inProject = async <T>(channel: string | undefined, run: (id: string) => Promise<T>): Promise<T | string> => {
-          const found = await linearProjectForPerson(channel ?? "", userId);
-          return found.ok ? run(found.projectId) : found.message;
-        };
-        Object.assign(entries, linearTools({ dm: true, mode: null, inProject }, guard));
-      }
+      const linear = await dynamicToolSet("Linear", async () => {
+        const projectId = await linearProjectForChannel(msgCtx.channel);
+        const connection = projectId ? await getConnection(projectId) : null;
+        if (projectId && connection) return linearTools(projectId, connection.mode, kind, userId, sessionKey);
+        if (!projectId && msgCtx.channel?.startsWith("D")) return linearTools(null, null, kind, userId, sessionKey);
+        return {};
+      });
 
+      const entries = { ...mcp, ...linear };
       return Object.keys(entries).length > 0 ? entries : null;
     },
   },
